@@ -1,0 +1,76 @@
+/* frontend/src/pages/Conexoes.css */
+.conexoes-page { padding: 32px; }
+.conexoes-page header p { color: var(--gray-500); margin-top: 4px; max-width: 640px; }
+
+.conexoes-new-form { display: flex; gap: 10px; margin: 20px 0; }
+.conexoes-new-form input { flex: 1; padding: 11px 14px; border: 1.5px solid var(--gray-200); border-radius: var(--radius-sm); }
+
+.connections-list { display: flex; flex-direction: column; gap: 10px; }
+
+.connection-item {
+  background: white;
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.connection-item strong { display: block; font-size: 15px; }
+.connection-item .phone { display: block; font-size: 13px; color: var(--gray-500); margin-top: 2px; }
+
+.status-badge { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+.status-badge.connected { background: var(--success-bg); color: var(--success); }
+.status-badge.disconnected { background: var(--danger-bg); color: var(--danger); }
+
+.connection-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.qr-image { width: 100%; max-width: 280px; display: block; margin: 16px auto; border-radius: var(--radius-sm); border: 1px solid var(--gray-200); }
+.qr-loading { text-align: center; color: var(--gray-500); padding: 40px 0; }
+.qr-error { text-align: center; padding: 24px 0; }
+.qr-error p { color: var(--danger, #d9534f); margin-bottom: 16px; }
+/* adicione ao final de frontend/src/pages/Conexoes.css */
+.conexoes-next-step {
+  background: var(--success-bg);
+  border-radius: var(--radius-lg);
+  padding: 18px 22px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 16px 0 24px;
+}
+
+.conexoes-next-step strong { color: var(--success); font-size: 15px; }
+.conexoes-next-step p { font-size: 13px; color: var(--gray-700); margin-top: 4px; }
+
+.conexoes-next-step-actions { display: flex; gap: 10px; }
+/* ===== API Oficial da Meta ===== */
+.conexoes-mode-switch { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.conexoes-mode-switch button {
+  flex: 1; min-width: 220px; text-align: left; background: #fff;
+  border: 2px solid var(--gray-200, #e2e8f0); border-radius: 12px;
+  padding: 12px 16px; font-size: 14px; font-weight: 600; cursor: pointer; color: var(--gray-700, #334155);
+}
+.conexoes-mode-switch button small { display: block; font-weight: 400; font-size: 12px; color: var(--gray-500, #64748b); margin-top: 2px; }
+.conexoes-mode-switch button.active { border-color: var(--primary, #00b4d8); background: var(--primary-bg, #ecfbff); color: var(--primary, #00b4d8); }
+
+.conexoes-cloud-panel { background: #fff; border: 1px solid var(--gray-200, #e2e8f0); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
+.conexoes-cloud-howto { margin-bottom: 16px; font-size: 13px; color: var(--gray-600, #475569); }
+.conexoes-cloud-howto summary { cursor: pointer; font-weight: 600; color: var(--primary, #00b4d8); }
+.conexoes-cloud-howto ol { margin: 10px 0 0; padding-left: 20px; line-height: 1.7; }
+.conexoes-cloud-form { display: flex; flex-direction: column; gap: 10px; max-width: 440px; }
+.conexoes-cloud-result { margin-top: 16px; background: var(--success-bg); border-radius: 10px; padding: 14px; font-size: 13px; }
+.conexoes-cloud-copy-row { margin: 10px 0; }
+.conexoes-cloud-copy-row label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 12px; }
+.conexoes-cloud-copy-row > div { display: flex; align-items: center; gap: 8px; background: #fff; border-radius: 8px; padding: 8px 10px; }
+.conexoes-cloud-copy-row code { flex: 1; word-break: break-all; font-size: 12px; }
+.conexoes-cloud-copy-row button { border: none; background: var(--primary, #00b4d8); color: #fff; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+
+.connection-tag { font-size: 11px; font-weight: 600; background: var(--gray-100, #f1f5f9); color: var(--gray-600, #475569); padding: 2px 8px; border-radius: 999px; margin-left: 6px; }
+.connection-token-input { padding: 6px 8px; font-size: 13px; border-radius: 6px; border: 1px solid var(--gray-200, #e2e8f0); }

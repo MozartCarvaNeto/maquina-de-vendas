@@ -1,0 +1,35 @@
+/* frontend/src/pages/Equipe.css */
+.equipe-page { padding: 32px; }
+.equipe-page header p { color: var(--gray-500); margin-top: 4px; max-width: 700px; font-size: 13px; }
+.equipe-toolbar { margin: 20px 0; }
+
+.equipe-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.role-tag {
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.role-owner { background: var(--primary-50); color: var(--primary-700); }
+
+.status-tag.active { background: var(--success-bg); color: var(--success); padding: 4px 10px; border-radius: 12px; font-size: 12px; }
+.status-tag.inactive { background: var(--gray-100); color: var(--gray-500); padding: 4px 10px; border-radius: 12px; font-size: 12px; }
+
+.temp-password-box {
+  background: var(--gray-50);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  margin: 12px 0;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.table-container select {
+  padding: 6px 8px;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}

@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/dev-dist
+backend/sessions
+backend/.wwebjs_auth
+backend/.wwebjs_cache
+backend/uploads
+**/.env
+.git
+*.zip
+*.bat
+docs

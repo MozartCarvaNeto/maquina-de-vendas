@@ -1,0 +1,7 @@
+ATUALIZACAO: MODULOS POR PLANO
+
+1) Copie as pastas deste pacote (backend, frontend, docs) por cima do projeto, aceitando substituir arquivos.
+2) Supabase > SQL Editor > cole docs/atualizar_banco_modulos_por_plano.sql > Run.
+3) No backend:  npx prisma generate
+   No frontend: npm run build
+4) Reinicie o sistema. Passo a passo completo: docs/GUIA_PUBLICAR_ONLINE.md, PARTE G.

@@ -1,0 +1,75 @@
+/* frontend/src/components/calls/CallPopup.css */
+.call-popup {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  width: 320px;
+  background: white;
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  border-top: 4px solid #22c55e;
+  z-index: 2000;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.call-popup-header {
+  background: #22c55e;
+  color: white;
+  padding: 12px 16px;
+  border-radius: 10px 10px 0 0;
+  font-weight: 700;
+}
+
+.call-popup-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.call-popup-body strong {
+  font-size: 18px;
+}
+
+.call-popup-body span {
+  color: #6b7280;
+}
+
+.call-popup-body p {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.call-popup-actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 16px 16px;
+}
+
+.call-popup-actions .btn-outline,
+.call-popup-actions .btn-primary {
+  flex: 1;
+  text-align: center;
+  padding: 8px;
+  border-radius: 8px;
+  text-decoration: none;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.call-popup-actions .btn-outline {
+  border: 1px solid #e5e7eb;
+  color: #111827;
+}
+
+.call-popup-actions .btn-primary {
+  background: #00b4d8;
+  color: white;
+  border: none;
+}

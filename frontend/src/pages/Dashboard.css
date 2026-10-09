@@ -1,0 +1,25 @@
+/* frontend/src/pages/Dashboard.css */
+.dashboard-page { padding: 32px; max-width: 1200px; }
+
+.dashboard-page header h1 { font-size: 28px; }
+.dashboard-page header p { color: var(--gray-500); margin-top: 4px; font-size: 14px; }
+
+.dashboard-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+  margin-top: 28px;
+}
+
+.metric-card {
+  background: white;
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius-lg);
+  padding: 22px;
+  box-shadow: var(--shadow-sm);
+}
+
+.metric-card h3 { font-size: 12px; color: var(--gray-500); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+.metric-card .value { font-size: 34px; font-weight: 800; display: block; margin-top: 10px; }
+.metric-card .value.primary { color: var(--primary-600); }
+.metric-card .value.success { color: var(--success); }

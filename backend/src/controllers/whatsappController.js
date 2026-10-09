@@ -1,0 +1,216 @@
+// backend/src/controllers/whatsappController.js
+const prisma = require('../config/db');
+const nativeWhatsappService = require('../services/whatsapp/nativeWhatsappService');
+const whatsappDispatcher = require('../services/whatsapp/whatsappDispatcher');
+const { checkLimit } = require('../services/planService');
+
+// ==================== CONEXÕES (SESSÕES NATIVAS) ====================
+
+exports.listConnections = async (req, res, next) => {
+  try {
+    const connections = await prisma.whatsappConnection.findMany({
+      where: { userId: req.userId },
+      orderBy: { createdAt: 'desc' }
+    });
+    // Nunca manda os segredos de verdade (token/app secret, mesmo
+    // criptografados) para o navegador. O webhookVerifyToken não é um
+    // segredo de acesso — é só o valor que o usuário cola no painel da
+    // Meta — então esse pode continuar na resposta.
+    const safeConnections = connections.map(({ accessTokenEnc, appSecretEnc, ...safe }) => safe);
+    const limitInfo = await checkLimit(req.userId, 'connections');
+    res.json({ connections: safeConnections, limit: limitInfo.limit });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Cria a conexão e já inicia a sessão do WhatsApp em segundo plano.
+ * O QR Code NÃO vem na resposta HTTP (ele demora alguns segundos para
+ * ser gerado) — o frontend recebe em tempo real via Socket.IO, evento
+ * "whatsapp:qr".
+ */
+exports.createConnection = async (req, res, next) => {
+  try {
+    const { instanceName } = req.body;
+    if (!instanceName) {
+      return res.status(400).json({ error: 'instanceName é obrigatório' });
+    }
+
+    // Limite do plano (sem plano: teto técnico de 10 conexões, como sempre foi).
+    const limit = await checkLimit(req.userId, 'connections');
+    if (!limit.ok) {
+      return res.status(403).json({ error: limit.message, code: 'PLAN_LIMIT' });
+    }
+
+    const connection = await prisma.whatsappConnection.create({
+      data: { userId: req.userId, instanceName, status: 'pendente' }
+    });
+
+    nativeWhatsappService
+      .initSession({ id: connection.id, userId: req.userId, forceNew: true })
+      .catch((err) => console.error(`Erro ao iniciar sessão ${connection.id}:`, err.message));
+
+    res.status(201).json({ connection });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Força a recriação da sessão (limpa arquivos em disco e gera novo QR).
+ * Útil quando o QR não aparece.
+ */
+exports.reconnectConnection = async (req, res, next) => {
+  try {
+    const connection = await prisma.whatsappConnection.findFirst({
+      where: { id: req.params.id, userId: req.userId }
+    });
+    if (!connection) {
+      return res.status(404).json({ error: 'Conexão não encontrada' });
+    }
+
+    if (connection.provider === 'cloud_api') {
+      return res.status(400).json({
+        error: 'Esta conexão usa a API Oficial da Meta — não existe QR Code pra escanear de novo. Se o envio parou de funcionar, atualize o token de acesso.'
+      });
+    }
+
+    // Encerra a sessão atual e limpa arquivos
+    await nativeWhatsappService.destroySession(connection.id);
+
+    await prisma.whatsappConnection.update({
+      where: { id: connection.id },
+      data: { status: 'pendente' }
+    });
+
+    // Inicia uma nova sessão, forçando novo QR
+    nativeWhatsappService
+      .initSession({ id: connection.id, userId: req.userId, forceNew: true })
+      .catch((err) => console.error(`Erro ao reconectar sessão ${connection.id}:`, err.message));
+
+    res.json({ success: true, connection: { ...connection, status: 'pendente' } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.checkStatus = async (req, res, next) => {
+  try {
+    const connection = await prisma.whatsappConnection.findFirst({
+      where: { id: req.params.id, userId: req.userId }
+    });
+    if (!connection) {
+      return res.status(404).json({ error: 'Conexão não encontrada' });
+    }
+
+    // Conexão Cloud API não tem sessão viva pra consultar — o status salvo
+    // no banco já é a verdade (muda só quando o token é cadastrado/trocado).
+    if (connection.provider === 'cloud_api') {
+      return res.json({ connection });
+    }
+
+    const liveStatus = await nativeWhatsappService.getStatus(connection.id);
+    if (liveStatus !== connection.status) {
+      await prisma.whatsappConnection.update({ where: { id: connection.id }, data: { status: liveStatus } });
+    }
+
+    res.json({ connection: { ...connection, status: liveStatus } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.deleteConnection = async (req, res, next) => {
+  try {
+    const connection = await prisma.whatsappConnection.findFirst({
+      where: { id: req.params.id, userId: req.userId }
+    });
+    if (!connection) {
+      return res.status(404).json({ error: 'Conexão não encontrada' });
+    }
+
+    if (connection.provider !== 'cloud_api') {
+      await nativeWhatsappService.destroySession(connection.id);
+    }
+    await prisma.whatsappConnection.delete({ where: { id: connection.id } });
+
+    res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ==================== MENSAGENS / CHAT ====================
+
+exports.listConversations = async (req, res, next) => {
+  try {
+    const leadsWithMessages = await prisma.lead.findMany({
+      where: { userId: req.userId, messages: { some: {} } },
+      include: { messages: { orderBy: { createdAt: 'desc' }, take: 1 } },
+      orderBy: { updatedAt: 'desc' }
+    });
+    res.json({ conversations: leadsWithMessages });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.listConversation = async (req, res, next) => {
+  try {
+    const lead = await prisma.lead.findFirst({
+      where: { id: req.params.leadId, userId: req.userId }
+    });
+    if (!lead) {
+      return res.status(404).json({ error: 'Lead não encontrado' });
+    }
+    const messages = await prisma.message.findMany({
+      where: { leadId: lead.id },
+      orderBy: { createdAt: 'asc' }
+    });
+    res.json({ lead, messages });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.sendMessage = async (req, res, next) => {
+  try {
+    const { leadId, text, instanceId } = req.body;
+    if (!leadId || !text || !instanceId) {
+      return res.status(400).json({ error: 'leadId, text e instanceId são obrigatórios' });
+    }
+
+    const lead = await prisma.lead.findFirst({ where: { id: leadId, userId: req.userId } });
+    if (!lead) {
+      return res.status(404).json({ error: 'Lead não encontrado' });
+    }
+    if (!lead.phone) {
+      return res.status(400).json({ error: 'Este lead não tem telefone cadastrado' });
+    }
+
+    const connection = await prisma.whatsappConnection.findFirst({
+      where: { id: instanceId, userId: req.userId }
+    });
+    if (!connection) {
+      return res.status(404).json({ error: 'Conexão de WhatsApp não encontrada' });
+    }
+
+    const sendableConnection = await whatsappDispatcher.loadConnectionForSending(connection.id);
+    if (!whatsappDispatcher.isReady(sendableConnection)) {
+      return res.status(409).json({ error: 'Esta conexão de WhatsApp não está pronta para envio no momento.' });
+    }
+    await whatsappDispatcher.sendMessage(sendableConnection, lead.phone, text);
+
+    const message = await prisma.message.create({
+      data: { leadId: lead.id, direction: 'saida', channel: 'whatsapp', body: text }
+    });
+
+    const io = req.app.get('io');
+    io.to(`user:${req.userId}`).emit('whatsapp:message', { leadId: lead.id, message });
+
+    res.status(201).json({ message });
+  } catch (error) {
+    next(error);
+  }
+};

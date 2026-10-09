@@ -1,0 +1,9 @@
+# Caddy: recebe o acesso da internet, emite o HTTPS sozinho e entrega ao sistema.
+# WebSocket (QR Code/mensagens em tempo real) funciona sem configuração extra.
+{$DOMAIN} {
+	encode gzip
+	request_body {
+		max_size 50MB
+	}
+	reverse_proxy app:3333
+}

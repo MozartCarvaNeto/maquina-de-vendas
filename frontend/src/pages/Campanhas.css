@@ -1,0 +1,30 @@
+/* frontend/src/pages/Campanhas.css */
+.campanhas-page { padding: 32px; }
+.campanhas-page header p { color: var(--gray-500); margin-top: 4px; max-width: 640px; }
+
+.campanhas-toolbar { margin: 20px 0; }
+
+.status-tag { padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+.status-tag.active { background: var(--success-bg); color: var(--success); }
+.status-tag.inactive { background: var(--gray-100); color: var(--gray-500); }
+
+.modal-large { width: 640px; max-height: 85vh; overflow-y: auto; }
+
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.form-row label, .modal-large label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 6px; }
+.modal-large input, .modal-large select, .modal-large textarea { width: 100%; margin-bottom: 6px; }
+
+.modal-large hr { border: none; border-top: 1px solid var(--gray-100); margin: 20px 0; }
+.modal-large h3 { font-size: 15px; margin-bottom: 8px; }
+
+.step-row {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr 1.2fr 1fr auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.hint-text { font-size: 12px; color: var(--gray-500); margin-top: 4px; }
+
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }

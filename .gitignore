@@ -1,0 +1,37 @@
+# =====================================================================
+# .gitignore — lista do que NUNCA deve ir para o GitHub
+# =====================================================================
+
+# 1) SEGREDOS (senhas, chaves). NUNCA suba isto.
+.env
+.env.*
+!.env.example
+!env.example
+backend/.env
+frontend/.env
+
+# 2) Pastas que se recriam sozinhas com "npm install" (são enormes)
+node_modules/
+**/node_modules/
+
+# 3) Resultado de compilação (se recria com "npm run build")
+frontend/dist/
+frontend/dev-dist/
+dist/
+
+# 4) Sessões do WhatsApp (são o "login" do seu WhatsApp — equivalem a uma senha!)
+backend/sessions/
+backend/.wwebjs_auth/
+backend/.wwebjs_cache/
+
+# 5) Arquivos enviados pelos clientes (imagens de disparos etc.)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# 6) Lixo do sistema e do editor
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+.vscode/
+.idea/

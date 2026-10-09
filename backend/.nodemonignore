@@ -1,0 +1,4 @@
+sessions/**
+*.log
+.wwebjs_cache/**
+.wwebjs_auth/**

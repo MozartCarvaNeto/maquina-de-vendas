@@ -1,0 +1,176 @@
+/* frontend/src/pages/Disparos.css */
+.disparos-page { padding: 32px; }
+.disparos-page header p { color: var(--gray-500); margin-top: 4px; max-width: 640px; }
+.disparos-toolbar { margin: 20px 0; }
+
+.status-tag { padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 700; text-transform: capitalize; }
+.status-agendado { background: var(--primary-50); color: var(--primary-700); }
+.status-enviando { background: var(--warning-bg); color: var(--warning); }
+.status-concluido { background: var(--success-bg); color: var(--success); }
+.status-pausado { background: var(--gray-100); color: var(--gray-500); }
+.status-falhou { background: var(--danger-bg); color: var(--danger); }
+
+/* adicione ao final de frontend/src/pages/Disparos.css */
+.variant-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.variant-row textarea {
+  flex: 1;
+}
+
+/* Progresso na tabela */
+.progress-cell { display: flex; flex-direction: column; gap: 4px; min-width: 160px; }
+.progress-bar-track {
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--gray-100);
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: var(--primary-500, #2563eb);
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+.progress-cell-text { font-size: 12px; color: var(--gray-500); }
+.hint-text-small { font-size: 12px; color: var(--gray-500); }
+.btn-link-small {
+  background: none;
+  border: none;
+  color: var(--primary-600, #2563eb);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  margin-top: 4px;
+  display: block;
+  text-decoration: underline;
+}
+
+.details-row td { background: var(--gray-50); padding: 12px 16px; }
+.details-panel { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; }
+.details-note { width: 100%; color: var(--warning, #b45309); }
+
+/* Controles anti-bloqueio */
+.antiban-fieldset {
+  border: 1px solid var(--gray-200, #e5e7eb);
+  border-radius: 8px;
+  padding: 12px 16px 16px;
+  margin: 16px 0;
+}
+.antiban-fieldset legend { font-weight: 700; padding: 0 6px; }
+.antiban-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-top: 8px;
+}
+.antiban-grid label { font-size: 12px; margin-bottom: 4px; }
+.antiban-grid input { width: 100%; }
+
+/* Anexos de imagem */
+.attachments-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.attachments-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  background: var(--gray-50);
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+.connection-indicator {
+  margin-left: 12px;
+  font-size: 13px;
+  color: var(--gray-500);
+}
+
+.attachment-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 12px;
+  background: var(--gray-100);
+  color: var(--gray-600, #4b5563);
+  font-size: 11px;
+}
+
+.progress-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-bottom: 10px;
+}
+.summary-success { color: var(--success, #15803d); }
+.summary-danger { color: var(--danger, #dc2626); }
+.summary-pending { color: var(--warning, #b45309); }
+
+.recipient-table-wrap {
+  margin-top: 14px;
+  overflow-x: auto;
+  border: 1px solid var(--gray-200, #e5e7eb);
+  border-radius: 8px;
+  background: white;
+}
+
+.recipient-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 760px;
+}
+
+.recipient-table th,
+.recipient-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--gray-100, #f3f4f6);
+  text-align: left;
+  font-size: 12px;
+}
+
+.recipient-table th {
+  background: var(--gray-50, #f9fafb);
+  font-weight: 700;
+}
+
+.recipient-status {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 11px;
+}
+.recipient-enviado { background: var(--success-bg); color: var(--success); }
+.recipient-falhou { background: var(--danger-bg); color: var(--danger); }
+.recipient-pendente { background: var(--gray-100); color: var(--gray-600, #4b5563); }
+.recipient-error { max-width: 320px; white-space: normal; color: var(--danger, #dc2626); }
+
+.image-upload-box {
+  margin: 16px 0;
+  padding: 14px;
+  border: 1px dashed var(--gray-300, #d1d5db);
+  border-radius: 8px;
+  background: var(--gray-50, #f9fafb);
+}
+
+.image-upload-box input[type='file'] {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+}
+
+@media (max-width: 800px) {
+  .disparos-page { padding: 16px; }
+  .antiban-grid { grid-template-columns: 1fr; }
+  .connection-indicator { display: block; margin: 10px 0 0; }
+}

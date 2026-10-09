@@ -1,0 +1,79 @@
+/* frontend/src/pages/Discador.css */
+.discador-page { padding: 32px; }
+
+.discador-warning {
+  background: var(--warning-bg);
+  color: #92400e;
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  margin: 16px 0;
+  font-size: 14px;
+}
+
+.discador-warning-danger {
+  background: var(--danger-bg);
+  color: #991b1b;
+}
+
+.discador-warning a {
+  color: #92400e;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.discador-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.queue-preview-card { grid-column: span 2; }
+.history-card { grid-column: span 2; }
+
+.queue-preview-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+
+.queue-preview-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--gray-50);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.discador-team-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--gray-100);
+  font-size: 14px;
+}
+
+.discador-team-status strong { color: var(--primary-600); }
+
+.queue-count {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--primary-500);
+  margin: 8px 0 16px;
+}
+
+.ongoing-call {
+  background: var(--warning-bg);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}

@@ -1,0 +1,76 @@
+/* frontend/src/components/layout/Layout.css */
+.app-layout {
+  display: flex;
+}
+
+.app-main-content {
+  margin-left: 240px;
+  flex: 1;
+  min-height: 100vh;
+}
+.app-main-content { min-width: 0; }
+
+/* Barra do topo e fundo escurecido: só existem no celular/tablet. */
+.app-topbar,
+.app-sidebar-backdrop { display: none; }
+
+@media (max-width: 900px) {
+  .app-topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: calc(54px + env(safe-area-inset-top, 0px));
+    padding: env(safe-area-inset-top, 0px) 14px 0;
+    background: white;
+    border-bottom: 1px solid var(--gray-100);
+    z-index: 90;
+  }
+  .app-topbar strong { font-size: 16px; }
+  .app-topbar-btn {
+    background: var(--gray-100);
+    border: none;
+    border-radius: var(--radius-sm);
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+    cursor: pointer;
+  }
+  .app-sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    z-index: 99;
+  }
+  .app-main-content {
+    margin-left: 0;
+    padding-top: calc(54px + env(safe-area-inset-top, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+/* Aviso de assinatura perto de vencer */
+.sub-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 20px;
+  background: var(--warning-bg);
+  color: #92400e;
+  font-size: 13px;
+  font-weight: 600;
+}
+.sub-banner.is-danger { background: var(--danger-bg); color: #991b1b; }
+.sub-banner button {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 18px;
+  cursor: pointer;
+  line-height: 1;
+}

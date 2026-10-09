@@ -1,0 +1,893 @@
+// backend/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================================
+// CONTA (dona dos dados) / LOGINS INDIVIDUAIS DA EQUIPE
+// ==========================================================
+
+model Account {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  // ---- Controle de acesso / assinatura (painel Administração) ----
+  // accessStatus: "pendente" (aguardando aprovação) | "ativa" | "bloqueada".
+  // O VENCIMENTO é calculado em tempo real a partir de subscriptionEndsAt
+  // (null = sem vencimento), então bloquear por prazo é automático.
+  accessStatus         String    @default("ativa")
+  plan                 String?
+  subscriptionStartsAt DateTime?
+  subscriptionEndsAt   DateTime?
+  blockedReason        String?
+  adminNotes           String?
+  accessLogs           AccessLog[]
+
+  // ---- Plano comercial e cobrança automática ----
+  // plan (texto) = rótulo mostrado no painel; planId = plano com limites de verdade.
+  // Conta sem planId = sem limites (comportamento antigo).
+  planId                String?
+  subscriptionPlan      Plan?            @relation(fields: [planId], references: [id], onDelete: SetNull)
+  billingProvider       String?          // "asaas"
+  billingCustomerId     String?          // id do cliente no provedor de cobrança
+  billingSubscriptionId String?          // id da assinatura recorrente no provedor
+  billingPayments       BillingPayment[]
+  usageCounters         UsageCounter[]
+
+  members            Member[]
+  settings           Setting[]
+  campaigns          Campaign[]
+  leads              Lead[]
+  crmBoards          CrmBoard[]
+  whatsappConns      WhatsappConnection[]
+  calls              Call[]              @relation("CallOwner")
+  callQueueItems     CallQueueItem[]
+  callerNumbers      CallerNumber[]
+  agents             Agent[]
+  broadcastCampaigns BroadcastCampaign[]
+  leadLists          LeadList[]
+  emailDomains       EmailDomain[]
+  emailMessages      EmailMessage[]
+  emailSuppressions  EmailSuppression[]
+  roboCallCampaigns  RoboCallCampaign[]
+  callQueueActions   CallQueueAction[]
+  aiVoiceAgents      AiVoiceAgent[]
+  aiCallCampaigns    AiCallCampaign[]
+  aiCallSessions     AiCallSession[]
+
+  @@map("accounts")
+}
+
+// Planos que você vende. Campo de limite vazio (null) = sem limite.
+model Plan {
+  id                     String   @id @default(uuid())
+  name                   String
+  description            String?
+  priceCents             Int      // preço por ciclo, em centavos (R$ 99,90 = 9990)
+  cycleMonths            Int      @default(1) // 1 mensal, 3 trimestral, 6 semestral, 12 anual
+  maxWhatsappConnections Int?
+  maxMembers             Int?
+  maxMonthlyMessages     Int?     // mensagens de disparos por mês
+  features               Json?    // módulos liberados (lista de chaves). null = TODOS (plano completo)
+  isActive               Boolean  @default(true)
+  isPublic               Boolean  @default(true) // aparece para o cliente escolher
+  sortOrder              Int      @default(0)
+  createdAt              DateTime @default(now())
+  accounts               Account[]
+
+  @@map("plans")
+}
+
+// Cada pagamento confirmado pelo provedor. O id do provedor é a chave: assim o
+// mesmo aviso (webhook) chegando duas vezes nunca renova duas vezes.
+model BillingPayment {
+  id          String    @id
+  accountId   String
+  account     Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  provider    String    @default("asaas")
+  status      String
+  amountCents Int
+  dueDate     DateTime?
+  paidAt      DateTime?
+  appliedAt   DateTime?
+  invoiceUrl  String?
+  createdAt   DateTime  @default(now())
+
+  @@index([accountId, createdAt])
+  @@map("billing_payments")
+}
+
+// Contador de uso mensal (ex.: mensagens de disparos enviadas em 2026-10).
+model UsageCounter {
+  id        String  @id @default(uuid())
+  accountId String
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  period    String  // "AAAA-MM" no horário de Brasília
+  metric    String  // "broadcast_messages"
+  value     Int     @default(0)
+
+  @@unique([accountId, period, metric])
+  @@map("usage_counters")
+}
+
+// Histórico de tudo que o administrador da plataforma faz em cada conta.
+model AccessLog {
+  id        String   @id @default(uuid())
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  action    String   // cadastro | criada | aprovada | renovada | bloqueada | desbloqueada | editada | senha_redefinida | pagamento | cobranca | plano | estorno
+  detail    String?
+  byEmail   String?
+  createdAt DateTime @default(now())
+
+  @@index([accountId, createdAt])
+  @@map("access_logs")
+}
+
+model Member {
+  id                  String    @id @default(uuid())
+  accountId           String
+  account             Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  name                String
+  email               String    @unique
+  passwordHash        String
+  role                String    @default("vendedor")
+  status              String    @default("ativo")
+  agentId             String?   @unique
+  agent               Agent?    @relation(fields: [agentId], references: [id])
+  resetToken          String?
+  resetTokenExpiresAt DateTime?
+  lastLoginAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@map("members")
+}
+
+model Setting {
+  id        String   @id @default(uuid())
+  userId    String
+  account   Account  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category  String
+  provider  String
+  key       String
+  value     String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, category, provider, key])
+  @@map("settings")
+}
+
+// ==========================================================
+// LEADS / CAMPANHAS / QUALIFICAÇÃO
+// ==========================================================
+
+model Campaign {
+  id                 String    @id @default(uuid())
+  userId             String
+  account            Account   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name               String
+  enterpriseName     String?
+  active             Boolean   @default(true)
+  botPrompt          String?
+  firstMessage       String?
+  qualificationRules Json
+  followUpEnabled    Boolean   @default(true)
+  followUpDays       Int       @default(7)
+  followUpMessage    String?
+  nutritionDays      Int       @default(30)
+  nutritionMessage   String?
+  aiVoiceEnabled     Boolean   @default(false)
+  aiProviderOverride String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  leads Lead[]
+
+  @@map("campaigns")
+}
+
+model Lead {
+  id                   String    @id @default(uuid())
+  userId               String
+  account              Account   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaignId           String?
+  campaign             Campaign? @relation(fields: [campaignId], references: [id])
+  name                 String
+  phone                String?
+  email                String?
+  address              String?
+  tags                 String[]  @default([])
+  lastPurchaseAt       DateTime?
+  preferredChannel     String?
+  status               String    @default("novo")
+  qualificationAnswers Json?
+  consentSource        String
+  optOut               Boolean   @default(false)
+  lastFollowUpAt       DateTime?
+  lastNurtureAt        DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  crmCard             CrmCard?
+  calls               Call[]
+  queueItems          CallQueueItem[]
+  messages            Message[]
+  broadcastRecipients BroadcastRecipient[]
+  listMemberships     LeadListMembership[]
+
+  @@index([userId, status])
+  @@map("leads")
+}
+
+// ==========================================================
+// LISTAS DE LEADS
+// ==========================================================
+
+model LeadList {
+  id          String   @id @default(uuid())
+  userId      String
+  account     Account  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  type        String
+  filterRules Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  memberships LeadListMembership[]
+
+  @@map("lead_lists")
+}
+
+model LeadListMembership {
+  id      String   @id @default(uuid())
+  listId  String
+  list    LeadList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  leadId  String
+  lead    Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  addedAt DateTime @default(now())
+
+  // ---- Fila de ligação manual (vendedor humano) ----
+  // Posição na fila desta lista: quem tem o menor número é o próximo a ser
+  // ligado. "Não atendeu" manda pro fim da fila (maior número que existir).
+  queuePosition Int       @default(0)
+  // Enquanto no futuro, o contato fica fora da fila ("pausar por 3 meses").
+  snoozedUntil  DateTime?
+  // novo | nao_atendeu | nao_quer | interessado — "interessado" tira da fila
+  // (o contato já foi para o CRM) sem apagar o histórico da lista.
+  lastOutcome   String    @default("novo")
+  lastCallAt    DateTime?
+
+  @@unique([listId, leadId])
+  @@map("lead_list_memberships")
+}
+
+// ==========================================================
+// CRM PRÓPRIO (KANBAN)
+// ==========================================================
+
+model CrmBoard {
+  id        String   @id @default(uuid())
+  userId    String
+  account   Account  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime @default(now())
+
+  columns CrmColumn[]
+
+  @@map("crm_boards")
+}
+
+model CrmColumn {
+  id       String   @id @default(uuid())
+  boardId  String
+  board    CrmBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  name     String
+  position Int
+  color    String   @default("#00b4d8")
+
+  cards             CrmCard[]
+  roboCallCampaigns RoboCallCampaign[]
+
+  @@map("crm_columns")
+}
+
+model CrmCard {
+  id        String    @id @default(uuid())
+  columnId  String
+  column    CrmColumn @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  leadId    String    @unique
+  lead      Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  position  Int
+  value     Float?    @default(0)
+  notes     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // ---- Retorno agendado (follow-up) ----
+  // Quando preenchido, o card avisa na tela inicial no dia e fica vermelho
+  // se passar do horário sem que o retorno seja marcado como feito.
+  followUpAt    DateTime?
+  followUpNote  String?
+  // Última vez que o vendedor marcou "retorno feito".
+  lastContactAt DateTime?
+
+  // ---- Clientes perdidos (recuperáveis no futuro) ----
+  lostAt     DateTime?
+  lostReason String?
+
+  @@index([followUpAt])
+  @@map("crm_cards")
+}
+
+// ==========================================================
+// WHATSAPP / CHAT (conexão nativa via whatsapp-web.js)
+// ==========================================================
+
+model WhatsappConnection {
+  id           String   @id @default(uuid())
+  userId       String
+  account      Account  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  instanceName String
+  phone        String?
+  status       String   @default("desconectado")
+  createdAt    DateTime @default(now())
+
+  // "native"   -> sessão por QR Code (WhatsApp Web), como sempre funcionou.
+  // "cloud_api" -> API Oficial da Meta (WhatsApp Business Platform).
+  provider String @default("native")
+
+  // Preenchidos só quando provider = "cloud_api".
+  phoneNumberId    String? // "Phone number ID" do número, no painel da Meta
+  wabaId           String? // "WhatsApp Business Account ID" (só informativo)
+  accessTokenEnc   String? // token de acesso permanente, sempre criptografado
+  webhookVerifyToken String? // valor que você cola no painel da Meta ao configurar o Webhook
+  appSecretEnc       String? // "App Secret" do app da Meta — usado só para confirmar que o webhook é mesmo da Meta
+
+  @@map("whatsapp_connections")
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  direction String
+  channel   String   @default("whatsapp")
+  body      String
+  createdAt DateTime @default(now())
+
+  @@map("messages")
+}
+
+// ==========================================================
+// TELEFONIA / DISCADOR / MÚLTIPLAS LINHAS
+// ==========================================================
+
+model CallQueueItem {
+  id          String   @id @default(uuid())
+  userId      String
+  account     Account  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leadId      String
+  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  status      String   @default("pendente")
+  attempts    Int      @default(0)
+  lastError   String?
+  scheduledAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@map("call_queue_items")
+}
+
+model CallerNumber {
+  id          String    @id @default(uuid())
+  userId      String
+  account     Account   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label       String
+  phoneNumber String
+  isActive    Boolean   @default(true)
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  calls              Call[]
+  roboCallCampaigns  RoboCallCampaign[]
+
+  @@map("caller_numbers")
+}
+
+model Agent {
+  id          String    @id @default(uuid())
+  userId      String
+  account     Account   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  phoneNumber String
+  status      String    @default("disponivel")
+  isActive    Boolean   @default(true)
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  calls  Call[]
+  member Member?
+
+  @@map("agents")
+}
+
+model Call {
+  id                  String        @id @default(uuid())
+  userId              String
+  account             Account       @relation("CallOwner", fields: [userId], references: [id], onDelete: Cascade)
+  leadId              String
+  lead                Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  provider            String
+  providerCallId      String?
+  agentProviderCallId String?
+  conferenceRoom      String?
+  fromNumber          String
+  toNumber            String
+  callerNumberId      String?
+  callerNumber        CallerNumber? @relation(fields: [callerNumberId], references: [id])
+  agentId             String?
+  agent               Agent?        @relation(fields: [agentId], references: [id])
+  direction           String        @default("saida")
+  status              String        @default("iniciando")
+  answeredBy          String?
+  startedAt           DateTime?
+  answeredAt          DateTime?
+  endedAt             DateTime?
+  durationSeconds     Int?
+  recordingUrl        String?
+  recordingSid        String?
+  createdAt           DateTime      @default(now())
+
+  // ---- Ligação robô (URA reversa) ----
+  // Preenchidos só quando a ligação foi feita por uma campanha automática.
+  roboCallCampaignId String?
+  roboCallCampaign   RoboCallCampaign? @relation(fields: [roboCallCampaignId], references: [id], onDelete: SetNull)
+  digitsPressed      String?
+  speechResult       String?
+  qualified          Boolean?
+
+  // ---- Agente de voz com IA (3º sistema de ligação) ----
+  aiCallCampaignId String?
+  aiCallCampaign   AiCallCampaign? @relation(fields: [aiCallCampaignId], references: [id], onDelete: SetNull)
+  aiSession        AiCallSession?
+
+  events CallEvent[]
+
+  @@map("calls")
+}
+
+model CallEvent {
+  id         String   @id @default(uuid())
+  callId     String
+  call       Call     @relation(fields: [callId], references: [id], onDelete: Cascade)
+  eventType  String
+  rawPayload Json?
+  createdAt  DateTime @default(now())
+
+  @@map("call_events")
+}
+
+// ==========================================================
+// DISPAROS EM MASSA (E-MAIL / SMS / WHATSAPP)
+// ==========================================================
+
+model BroadcastCampaign {
+  id                  String    @id @default(uuid())
+  userId              String
+  account             Account   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String
+  channel             String    // "email" | "sms" | "whatsapp"
+  subject             String?   // usado apenas quando channel = "email"
+  message             String    // usado quando channel = "email" ou "sms" (whatsapp usa "variants")
+  audienceFilter      Json
+  scheduleType        String    @default("now")
+  scheduledAt         DateTime?
+  recurringInterval   String?
+  status              String    @default("agendado")
+  lastRunAt           DateTime?
+  lastVariantIndex    Int       @default(0) // cursor de rodízio de variações (whatsapp)
+  lastConnectionIndex Int       @default(0) // cursor de rodízio de números (whatsapp)
+
+  // Imagens anexadas ao disparo (e-mail e whatsapp). Array de objetos
+  // { filename, originalName, mimeType } salvos em backend/uploads/broadcast-attachments/<id>/
+  attachments Json @default("[]")
+
+  // ---- Controles anti-bloqueio (somente usados quando channel = "whatsapp") ----
+  // Atraso aleatório (em segundos) sorteado entre cada mensagem enviada.
+  minDelaySeconds Int @default(40)
+  maxDelaySeconds Int @default(100)
+  // A cada "batchSize" mensagens enviadas, o disparo faz uma pausa longa
+  // (sorteada entre batchPauseMinMinutes e batchPauseMaxMinutes) para
+  // simular comportamento humano e reduzir o risco de bloqueio.
+  batchSize            Int @default(15)
+  batchPauseMinMinutes Int @default(6)
+  batchPauseMaxMinutes Int @default(18)
+
+  // Qual domínio/identidade de e-mail nativo usar neste disparo, quando o
+  // provedor ativo é "native" e a conta tem mais de um domínio cadastrado
+  // (ex: representando empresas/marcas diferentes). Deixe em branco para
+  // usar o domínio marcado como padrão.
+  emailDomainId String?
+  emailDomain   EmailDomain? @relation(fields: [emailDomainId], references: [id], onDelete: SetNull)
+  // Contador persistido de quantas mensagens já foram enviadas desde a
+  // última pausa longa — sobrevive a reinícios/quedas do backend.
+  sentSinceBatchPause Int @default(0)
+
+  // ---- Controle de execução / retomada após queda de conexão ----
+  // true enquanto o disparo está de fato rodando (mesmo durante uma pausa
+  // anti-bloqueio). Usado para impedir execução duplicada em paralelo.
+  isRunning Boolean @default(false)
+  // Atualizado periodicamente durante o envio. Se ficar "parado no tempo"
+  // com isRunning=true, o watchdog do scheduler entende que o processo
+  // caiu no meio do disparo e retoma automaticamente a partir de onde parou.
+  lastHeartbeatAt DateTime?
+  // Texto curto para a pessoa entender o que está acontecendo agora
+  // (ex: "pausa anti-bloqueio até 14:32", "aguardando reconexão do WhatsApp").
+  runningNote String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  recipients BroadcastRecipient[]
+  variants   BroadcastMessageVariant[]
+
+  @@map("broadcast_campaigns")
+}
+
+// Variações de mensagem para disparos de WhatsApp (até 12), usadas em
+// rodízio junto com os números conectados, para dificultar bloqueio.
+model BroadcastMessageVariant {
+  id                  String            @id @default(uuid())
+  broadcastCampaignId String
+  broadcastCampaign   BroadcastCampaign @relation(fields: [broadcastCampaignId], references: [id], onDelete: Cascade)
+  body                String
+  position            Int
+  createdAt           DateTime          @default(now())
+
+  @@map("broadcast_message_variants")
+}
+
+model BroadcastRecipient {
+  id                  String            @id @default(uuid())
+  broadcastCampaignId String
+  broadcastCampaign   BroadcastCampaign @relation(fields: [broadcastCampaignId], references: [id], onDelete: Cascade)
+  leadId              String
+  lead                Lead              @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  status              String            @default("pendente")
+  sentAt              DateTime?
+  errorMessage        String?
+  createdAt           DateTime          @default(now())
+
+  @@unique([broadcastCampaignId, leadId])
+  @@map("broadcast_recipients")
+}
+
+// ==========================================================
+// E-MAIL NATIVO (envio direto, sem Resend/Brevo/Mailchimp)
+// ==========================================================
+
+// Um domínio de e-mail verificado (ex: suaempresa.com.br), com o par de
+// chaves DKIM gerado pelo próprio sistema. É o que permite enviar e-mail
+// diretamente para a caixa do destinatário, sem depender de nenhuma
+// plataforma paga de terceiros.
+model EmailDomain {
+  id        String  @id @default(uuid())
+  userId    String
+  account   Account @relation(fields: [userId], references: [id], onDelete: Cascade)
+  domain    String
+
+  // Identidade padrão de envio para este domínio. Como SPF/DKIM/PTR são
+  // configurados no nível do domínio (não do endereço), qualquer endereço
+  // "@dominio" funciona sem nenhuma configuração extra — isto aqui é só o
+  // remetente sugerido/padrão, e pode ser sobrescrito por disparo.
+  fromEmail String?
+  fromName  String?
+
+  // Quando a conta tem mais de um domínio verificado, este é o usado por
+  // padrão nos disparos que não escolherem um explicitamente.
+  isDefault Boolean @default(false)
+
+  // DKIM: par de chaves gerado automaticamente (RSA 2048). A privada fica
+  // sempre criptografada no banco (mesma criptografia usada em Setting).
+  dkimSelector      String @default("mdv")
+  dkimPublicKeyPem  String
+  dkimPrivateKeyEnc String
+
+  // Endereço local usado para receber e-mails de retorno (bounce) desse
+  // domínio, ex: "bounce" em bounce@suaempresa.com.br.
+  bounceLocalPart String @default("bounce")
+
+  // Resultado da última verificação de DNS (ver emailDomainService).
+  spfVerified   Boolean   @default(false)
+  dkimVerified  Boolean   @default(false)
+  dmarcVerified Boolean   @default(false)
+  lastCheckedAt DateTime?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  broadcastCampaigns BroadcastCampaign[]
+
+  @@unique([userId, domain])
+  @@map("email_domains")
+}
+
+// Um e-mail nunca mais deve ser enviado para este endereço (bounce
+// definitivo, reclamação de spam ou pedido de descadastro).
+model EmailSuppression {
+  id        String   @id @default(uuid())
+  userId    String
+  account   Account  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email     String
+  reason    String // "bounce" | "reclamacao" | "descadastro"
+  createdAt DateTime @default(now())
+
+  @@unique([userId, email])
+  @@map("email_suppressions")
+}
+
+// Registro de cada e-mail individualmente enviado pelo motor nativo —
+// usado para abertura/clique/descadastro e para o histórico de entregas.
+model EmailMessage {
+  id                  String  @id @default(uuid())
+  userId              String
+  account             Account @relation(fields: [userId], references: [id], onDelete: Cascade)
+  broadcastCampaignId String?
+  leadId              String?
+
+  toEmail   String
+  fromEmail String
+  subject   String
+
+  // Cabeçalho Message-ID (RFC 5322), único, usado para casar bounces
+  // recebidos depois com o envio original.
+  messageId String @unique
+
+  // Token aleatório usado nos links de abertura/clique/descadastro deste
+  // e-mail — nunca exposto no Message-ID nem em nenhum outro lugar público.
+  trackingToken String @unique
+
+  // "enviado" (aceito pelo servidor do destinatário) | "falhou" (rejeitado
+  // na hora, bounce imediato) | "adiado" (erro temporário, ver attempts)
+  status       String  @default("enviado")
+  smtpResponse String?
+  mxHost       String?
+  attempts     Int     @default(1)
+
+  openedAt     DateTime?
+  clickedAt    DateTime?
+  bouncedAt    DateTime?
+  complainedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, toEmail])
+  @@index([broadcastCampaignId])
+  @@map("email_messages")
+}
+
+// ==========================================================
+// LIGAÇÕES ROBÔ (URA REVERSA): o sistema liga, toca um áudio gravado,
+// identifica interesse (tecla ou voz), avisa que continua no WhatsApp,
+// move o lead no CRM e dispara a mensagem de WhatsApp automaticamente.
+// ==========================================================
+model RoboCallCampaign {
+  id      String  @id @default(uuid())
+  userId  String
+  account Account @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name    String
+
+  audienceFilter Json
+
+  // Nomes dos arquivos salvos em backend/uploads/robocall-audio/<id>/
+  introAudioFilename         String
+  interestedAudioFilename    String?
+  notInterestedAudioFilename String?
+
+  // Como o lead demonstra interesse
+  digitInterested      String  @default("1")
+  digitNotInterested   String  @default("2")
+  useSpeechRecognition Boolean @default(true)
+
+  // O que acontece quando o lead tem interesse
+  crmColumnId             String?
+  crmColumn               CrmColumn? @relation(fields: [crmColumnId], references: [id], onDelete: SetNull)
+  whatsappFollowupMessage String?
+
+  callerNumberId     String?
+  callerNumber       CallerNumber? @relation(fields: [callerNumberId], references: [id], onDelete: SetNull)
+  recordCallsEnabled Boolean       @default(false)
+
+  // Ritmo de discagem
+  concurrency     Int @default(1)
+  minDelaySeconds Int @default(15)
+  maxDelaySeconds Int @default(40)
+
+  status          String    @default("rascunho") // rascunho | discando | pausado | concluido
+  isRunning       Boolean   @default(false)
+  lastHeartbeatAt DateTime?
+  runningNote     String?
+
+  totalLeads         Int @default(0)
+  calledCount        Int @default(0)
+  interestedCount    Int @default(0)
+  notInterestedCount Int @default(0)
+  noAnswerCount      Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  calls Call[]
+
+  @@map("robocall_campaigns")
+}
+
+// Guarda só a ÚLTIMA ação tomada em cada lista (por usuário), para o botão
+// "Voltar" desfazer exatamente aquele clique — um nível de desfazer, que é
+// o que a tela de discagem manual oferece.
+model CallQueueAction {
+  id     String   @id @default(uuid())
+  userId String
+  account Account @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listId String
+  leadId String
+
+  action              String // nao_atendeu | nao_quer_remover | nao_quer_pausar | interessado
+  membershipSnapshot  Json   // estado da LeadListMembership antes da ação (ou null se ela foi removida)
+  crmCardSnapshot     Json?  // estado do card do CRM antes da ação, só quando action = interessado
+  crmCardExisted      Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, listId])
+  @@map("call_queue_actions")
+}
+
+// ==========================================================
+// AGENTE DE VOZ COM IA (3º SISTEMA DE LIGAÇÃO)
+// A IA liga, conversa, qualifica e passa o lead quente ao vendedor.
+// ==========================================================
+
+// Configuração do "robô": quem ele é, o que sabe (mercado, glossário,
+// catálogo) e quando chama o vendedor humano.
+model AiVoiceAgent {
+  id      String  @id @default(uuid())
+  userId  String
+  account Account @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name    String
+
+  // Identidade
+  market      String @default("generico")
+  companyName String
+  agentName   String @default("Júlia")
+  language    String @default("pt-BR")
+  voice       String @default("Polly.Camila-Neural")
+
+  // Roteiro
+  objective         String
+  openingScript     String
+  extraInstructions String?
+  handoffCriteria   String
+
+  // Treinamento por mercado
+  glossary            Json? // [{ term, meaning }]
+  qualificationFields Json? // [{ key, label, required }]
+
+  // Catálogo / produtos (texto colado e/ou site)
+  catalogText      String?
+  catalogUrl       String?
+  catalogWebText   String?
+  catalogFetchedAt DateTime?
+
+  // Passagem para o vendedor (modelo híbrido)
+  handoffMode          String  @default("whatsapp") // transfer | whatsapp
+  handoffPhone         String?
+  handoffAgentId       String?
+  notifySellerWhatsapp Boolean @default(true)
+  leadWhatsappMessage  String?
+  crmColumnId          String?
+
+  // Operação
+  aiProvider     String?
+  maxTurns       Int     @default(14)
+  maxCallSeconds Int     @default(420)
+  recordCalls    Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  campaigns AiCallCampaign[]
+
+  @@map("ai_voice_agents")
+}
+
+model AiCallCampaign {
+  id      String       @id @default(uuid())
+  userId  String
+  account Account      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name    String
+  agentId String
+  agent   AiVoiceAgent @relation(fields: [agentId], references: [id], onDelete: Restrict)
+
+  audienceFilter Json
+  callerNumberId String?
+
+  // Ritmo e horário permitido para ligar
+  concurrency     Int     @default(1)
+  minDelaySeconds Int     @default(20)
+  maxDelaySeconds Int     @default(60)
+  windowStart     String  @default("09:00")
+  windowEnd       String  @default("18:00")
+  weekdaysOnly    Boolean @default(true)
+
+  status          String    @default("rascunho") // rascunho | discando | pausado | concluido
+  isRunning       Boolean   @default(false)
+  lastHeartbeatAt DateTime?
+  runningNote     String?
+
+  totalLeads         Int @default(0)
+  calledCount        Int @default(0)
+  answeredCount      Int @default(0)
+  hotCount           Int @default(0)
+  warmCount          Int @default(0)
+  callbackCount      Int @default(0)
+  handoffCount       Int @default(0)
+  notInterestedCount Int @default(0)
+  noAnswerCount      Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  calls    Call[]
+  sessions AiCallSession[]
+
+  @@map("ai_call_campaigns")
+}
+
+// Uma conversa da IA com um lead (1 por ligação): transcrição, dados
+// coletados, resultado e o que aconteceu na passagem para o vendedor.
+model AiCallSession {
+  id         String          @id @default(uuid())
+  userId     String
+  account    Account         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  callId     String          @unique
+  call       Call            @relation(fields: [callId], references: [id], onDelete: Cascade)
+  campaignId String?
+  campaign   AiCallCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  agentId    String?
+  leadId     String
+  isTest     Boolean         @default(false)
+
+  transcript Json? // [{ role: 'agent' | 'lead', text, at, raw? }]
+  collected  Json? // respostas de qualificação coletadas
+  summary    String?
+  outcome    String? // quente | morno | frio | nao_interessado | optout | retorno_agendado | numero_errado | caixa_postal | sem_resposta | sem_conclusao
+
+  turnCount      Int     @default(0)
+  silenceCount   Int     @default(0)
+  effectsApplied Boolean @default(false)
+
+  handoffStatus String? // transferindo | conectada | vendedor_indisponivel | whatsapp_enviado | whatsapp_pendente
+  handoffAt     DateTime?
+  handoffTarget String?
+
+  callbackAt   DateTime?
+  callbackNote String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([campaignId])
+  @@map("ai_call_sessions")
+}

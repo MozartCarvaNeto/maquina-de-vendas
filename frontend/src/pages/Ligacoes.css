@@ -1,0 +1,32 @@
+.ligacoes-page { display: flex; flex-direction: column; }
+.ligacoes-switch {
+  display: flex;
+  gap: 10px;
+  padding: 16px 24px 0;
+  flex-wrap: wrap;
+}
+.ligacoes-switch button {
+  flex: 1;
+  min-width: 220px;
+  text-align: left;
+  background: #fff;
+  border: 2px solid var(--gray-200, #e2e8f0);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--gray-700, #334155);
+}
+.ligacoes-switch button small {
+  display: block;
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--gray-500, #64748b);
+  margin-top: 2px;
+}
+.ligacoes-switch button.active {
+  border-color: var(--primary, #00b4d8);
+  background: var(--primary-bg, #ecfbff);
+  color: var(--primary, #00b4d8);
+}

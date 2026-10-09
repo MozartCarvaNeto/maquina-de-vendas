@@ -1,0 +1,31 @@
+/* frontend/src/pages/Listas.css */
+.listas-page { padding: 32px; }
+.listas-page header p { color: var(--gray-500); margin-top: 4px; max-width: 700px; font-size: 13px; }
+.listas-toolbar { margin: 20px 0; }
+
+.listas-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.badge-dynamic { background: #fef3c7; color: #92400e; }
+
+.list-desc { font-size: 13px; color: var(--gray-500); margin-bottom: 8px; }
+.list-count { font-size: 13px; font-weight: 700; color: var(--primary-600); margin-bottom: 14px; }
+
+.list-actions { display: flex; gap: 8px; }
+
+.member-list { max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+
+.member-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--gray-50);
+  border-radius: var(--radius-sm);
+}
+
+.member-row div { display: flex; flex-direction: column; }
+.member-row span { font-size: 12px; color: var(--gray-500); }

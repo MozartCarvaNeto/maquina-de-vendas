@@ -1,0 +1,80 @@
+/* frontend/src/pages/Contatos.css */
+.contatos-page { padding: 32px; }
+.contatos-page header p { color: var(--gray-500); margin-top: 4px; max-width: 700px; font-size: 13px; }
+
+.contatos-actions {
+  display: flex;
+  gap: 12px;
+  margin: 20px 0;
+}
+
+.contatos-actions input[type="text"], .contatos-actions > input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+}
+
+.bulk-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  background: var(--primary-50);
+  border: 1px solid var(--primary-100);
+  border-radius: var(--radius-sm);
+  padding: 14px 18px;
+  margin-bottom: 16px;
+}
+
+.bulk-toolbar strong { color: var(--primary-700); }
+
+.bulk-action {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.bulk-action select {
+  padding: 8px 10px;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+}
+
+.table-container {
+  background: white;
+  border: 1px solid var(--gray-100);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.row-selected { background: var(--primary-50); }
+
+.secondary-text { font-size: 12px; color: var(--gray-500); }
+
+.status-tag {
+  background: var(--gray-100);
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+}
+
+.pagination-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--gray-500);
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pagination-page { font-weight: 600; color: var(--gray-700); }
+
+.modal input, .modal select { width: 100%; padding: 10px 12px; border: 1px solid var(--gray-200); border-radius: var(--radius-sm); margin-bottom: 12px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }

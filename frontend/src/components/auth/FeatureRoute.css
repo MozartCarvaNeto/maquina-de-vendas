@@ -1,0 +1,12 @@
+/* Tela "recurso não incluído no plano" */
+.feature-locked { display: flex; align-items: center; justify-content: center; min-height: 70vh; padding: 24px 16px; }
+.feature-locked-card {
+  background: #fff; border-radius: 16px; padding: 36px 28px; max-width: 460px; width: 100%;
+  text-align: center; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.07);
+}
+.feature-locked-icon { font-size: 44px; margin-bottom: 8px; }
+.feature-locked-card h1 { font-size: 22px; margin: 0 0 8px; }
+.feature-locked-card p { margin: 0 0 8px; color: var(--gray-700, #444); }
+.feature-locked-hint { color: var(--gray-400, #888); font-size: 14px; }
+.feature-locked-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
+.feature-locked-actions a { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }

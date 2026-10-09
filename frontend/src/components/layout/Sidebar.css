@@ -1,0 +1,101 @@
+/* frontend/src/components/layout/Sidebar.css */
+.sidebar {
+  width: 252px;
+  background: white;
+  border-right: 1px solid var(--gray-100);
+  height: 100vh;
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 0;
+  z-index: 100;
+}
+
+.sidebar-logo {
+  padding: 0 24px 28px;
+  font-size: 18px;
+  font-weight: 800;
+  background: var(--primary-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.sidebar-menu { list-style: none; flex: 1; padding: 0 12px; overflow-y: auto; }
+
+.sidebar-menu li { margin-bottom: 2px; }
+
+.sidebar-menu li a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  color: var(--gray-700);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 14px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.sidebar-menu li a:hover { background: var(--gray-50); }
+
+.sidebar-menu li a.active {
+  background: var(--primary-gradient);
+  color: white;
+  box-shadow: 0 4px 12px rgba(0, 180, 216, 0.3);
+}
+
+.sidebar-footer {
+  padding: 16px 24px 0;
+  border-top: 1px solid var(--gray-100);
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-footer strong { font-size: 14px; }
+
+.sidebar-role {
+  font-size: 12px;
+  color: var(--gray-400);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.sidebar-footer button {
+  background: none;
+  border: none;
+  text-align: left;
+  color: var(--gray-400);
+  cursor: pointer;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sidebar-footer button:hover { color: var(--danger); }
+
+/* ===== Celular / tablet: o menu vira uma gaveta que abre pelo botão ☰ ===== */
+@media (max-width: 900px) {
+  .sidebar {
+    width: min(290px, 86vw);
+    height: 100vh;
+    height: 100dvh;
+    padding-top: calc(24px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-105%);
+    transition: transform 0.22s ease;
+  }
+  .sidebar.open {
+    transform: translateX(0);
+    box-shadow: var(--shadow-lg);
+  }
+  .sidebar-menu li a { padding: 13px 14px; }
+}
+
+/* Módulo fora do plano: item esmaecido com cadeado */
+.sidebar-menu li a.locked { opacity: 0.55; }
+.sidebar-menu li a.locked:hover { opacity: 0.85; }
+.sidebar-lock { margin-left: auto; font-size: 12px; }

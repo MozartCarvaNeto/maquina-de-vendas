@@ -1,0 +1,56 @@
+# =====================================================================
+# Máquina de Vendas — instalação com UM comando:   docker compose up -d --build
+#
+# Antes: crie backend/.env (veja backend/env.example) e, na raiz do projeto,
+# um arquivo ".env" com a linha  DOMAIN=app.seudominio.com.br
+# (copie de deploy/docker.env.example).
+# O HTTPS (cadeado) é emitido sozinho pelo Caddy.
+# =====================================================================
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      PORT: "3333"
+      NODE_ENV: production
+      BACKEND_PUBLIC_URL: https://${DOMAIN}
+      FRONTEND_URL: https://${DOMAIN}
+      TRUST_PROXY: "1"
+    # O navegador do WhatsApp precisa de memória compartilhada grande (o padrão do Docker é 64 MB e ele trava).
+    shm_size: "1gb"
+    volumes:
+      - sessions:/app/backend/sessions          # login dos WhatsApps (NÃO apague)
+      - wwebjs_cache:/app/backend/.wwebjs_cache
+      - uploads:/app/backend/uploads
+    expose:
+      - "3333"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3333/api/public/config').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  sessions:
+  wwebjs_cache:
+  uploads:
+  caddy_data:
+  caddy_config:
