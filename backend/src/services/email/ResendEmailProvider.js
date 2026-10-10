@@ -8,7 +8,7 @@ class ResendEmailProvider extends IEmailProvider {
     super();
     this.apiKey = credentials.apiKey;
     this.fromEmail = credentials.fromEmail;
-    this.fromName = credentials.fromName || 'Máquina de Vendas';
+    this.fromName = credentials.fromName || 'Turbo Prospect';
   }
 
   async sendEmail({ to, subject, html, attachments }) {

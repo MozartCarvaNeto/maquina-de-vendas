@@ -42,7 +42,7 @@ class NativeEmailProvider extends IEmailProvider {
   constructor({ fromEmail, fromName, userId, domain, dkimSelector, dkimPrivateKey, bounceLocalPart, sendingHostname }) {
     super();
     this.fromEmail = fromEmail;
-    this.fromName = fromName || 'Máquina de Vendas';
+    this.fromName = fromName || 'Turbo Prospect';
     this.userId = userId;
     this.domain = domain;
     this.dkimSelector = dkimSelector;

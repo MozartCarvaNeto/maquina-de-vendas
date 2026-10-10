@@ -23,7 +23,7 @@ async function request(method, path, body) {
     headers: {
       'Content-Type': 'application/json',
       access_token: env.asaas.apiKey,
-      'User-Agent': 'MaquinaDeVendas/1.0'
+      'User-Agent': 'TurboProspect/1.0'
     },
     body: body ? JSON.stringify(body) : undefined
   });

@@ -15,7 +15,7 @@ class SmtpEmailProvider extends IEmailProvider {
   constructor(credentials) {
     super();
     this.fromEmail = credentials.fromEmail;
-    this.fromName = credentials.fromName || 'Máquina de Vendas';
+    this.fromName = credentials.fromName || 'Turbo Prospect';
     this.transporter = nodemailer.createTransport({
       host: credentials.host,
       port: Number(credentials.port) || 587,

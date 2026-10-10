@@ -110,7 +110,7 @@ async function fetchPage(url) {
     timeout: FETCH_TIMEOUT_MS,
     maxContentLength: 3 * 1024 * 1024,
     responseType: 'text',
-    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MaquinaDeVendasBot/1.0)', Accept: 'text/html' }
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; TurboProspectBot/1.0)', Accept: 'text/html' }
   });
   return String(data || '');
 }

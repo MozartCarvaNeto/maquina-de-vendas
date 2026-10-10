@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import PasswordInput from '../components/auth/PasswordInput';
 import usePublicConfig from '../hooks/usePublicConfig';
+import Brand from '../components/brand/Brand';
 import './Auth.css';
 
 export default function Login() {
@@ -45,7 +46,7 @@ export default function Login() {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <h1>🚀 {config.appName}</h1>
+        <Brand variant="auth" />
         <p>Entre na sua conta</p>
 
         {error && <div className="auth-error">{error}</div>}

@@ -1,5 +1,5 @@
 # =====================================================================
-# Máquina de Vendas — instalação com UM comando:   docker compose up -d --build
+# Turbo Prospect (Máquina de Vendas) — instalação com UM comando:   docker compose up -d --build
 #
 # Antes: crie backend/.env (veja backend/env.example) e, na raiz do projeto,
 # um arquivo ".env" com a linha  DOMAIN=app.seudominio.com.br

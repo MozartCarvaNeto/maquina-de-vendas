@@ -1,0 +1,21 @@
+/* Marca: símbolo + nome + subtítulo */
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand-symbol { border-radius: 12px; flex-shrink: 0; display: block; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.1; min-width: 0; }
+.brand-name { font-size: 17px; letter-spacing: 0.02em; color: var(--gray-900, #0b2239); white-space: nowrap; }
+.brand-name b { font-weight: 900; font-style: italic; }
+.brand-name span { font-weight: 300; font-style: italic; }
+.brand-subtitle { color: var(--gray-400, #6b7280); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; margin-top: 3px; }
+
+.brand-sidebar { padding: 0 20px 24px; }
+.brand-sidebar .brand-symbol { width: 44px; height: 44px; }
+
+.brand-topbar .brand-symbol { width: 34px; height: 34px; border-radius: 9px; }
+.brand-topbar .brand-name { font-size: 15px; }
+
+/* Telas de login / cadastro: centralizada, símbolo grande */
+.brand-auth { flex-direction: column; text-align: center; gap: 12px; margin-bottom: 8px; }
+.brand-auth .brand-symbol { width: 96px; height: 96px; border-radius: 22px; box-shadow: 0 8px 24px rgba(3, 27, 51, 0.25); }
+.brand-auth .brand-text { align-items: center; }
+.brand-auth .brand-name { font-size: 26px; }
+.brand-auth .brand-subtitle { font-size: 12px; }

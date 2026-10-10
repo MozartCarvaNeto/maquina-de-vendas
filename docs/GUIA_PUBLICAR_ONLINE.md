@@ -1,4 +1,4 @@
-# 🚀 Máquina de Vendas — Guia completo: acesso, planos, cobrança, recuperação de senha, celular, Docker e publicar online
+# 🚀 Turbo Prospect (Máquina de Vendas) — Guia completo: acesso, planos, cobrança, recuperação de senha, celular, Docker e publicar online
 
 > Escrito para quem **nunca** fez isso. Siga na ordem. Onde aparecer um bloco cinza, é para **copiar e colar**.
 > Preços citados foram conferidos em **out/2026** e mudam com frequência: confirme no site antes de pagar.
@@ -401,7 +401,7 @@ No Chrome do computador, abra o site → tecla **F12** → aba **Application** �
 |---|---|
 | **Android (Chrome)** | Abra o site → botão **📲 Instalar aplicativo** que aparece no sistema, ou menu ⋮ → **Instalar app** |
 | **iPhone/iPad** | **Tem que ser no Safari.** Botão **Compartilhar** (quadrado com seta) → **Adicionar à Tela de Início** → Adicionar |
-| **Windows/Mac (Chrome/Edge)** | Ícone de instalar na barra de endereço (à direita), ou menu → **Instalar Máquina de Vendas** |
+| **Windows/Mac (Chrome/Edge)** | Ícone de instalar na barra de endereço (à direita), ou menu → **Instalar Turbo Prospect** |
 
 Depois de instalado, o ícone fica na tela inicial/menu iniciar e abre **sem barra de endereço**, como um app.
 
@@ -510,14 +510,14 @@ Quando a mudança incluir **tabelas novas no banco**: `bash deploy/atualizar-ser
 
 **Configurar o e-mail do sistema (exemplo com Gmail)**
 1. Na conta Google que enviará os e-mails: **Conta Google → Segurança → Verificação em duas etapas** (ative).
-2. Ainda em Segurança, procure **Senhas de app** → crie uma (nome: "Máquina de Vendas") → o Google mostra **16 letras**. Copie.
+2. Ainda em Segurança, procure **Senhas de app** → crie uma (nome: "Turbo Prospect") → o Google mostra **16 letras**. Copie.
 3. No `backend/.env`:
 ```
 SYSTEM_SMTP_HOST=smtp.gmail.com
 SYSTEM_SMTP_PORT=587
 SYSTEM_SMTP_USER=seu-email@gmail.com
 SYSTEM_SMTP_PASS=as16letrasdasenhadeapp
-SYSTEM_MAIL_FROM=Máquina de Vendas <seu-email@gmail.com>
+SYSTEM_MAIL_FROM=Turbo Prospect <seu-email@gmail.com>
 SUPPORT_CONTACT=WhatsApp (11) 99999-9999
 ```
 4. Reinicie e teste: saia, clique em **Esqueci minha senha**, digite seu e-mail e confira a caixa (e o spam).

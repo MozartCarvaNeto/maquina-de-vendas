@@ -1,5 +1,5 @@
 -- =====================================================================
--- Máquina de Vendas — atualização do banco
+-- Turbo Prospect (Máquina de Vendas) — atualização do banco
 --   • Retorno agendado + clientes perdidos no CRM
 --   • Agente de voz com IA (3º sistema de ligação)
 --

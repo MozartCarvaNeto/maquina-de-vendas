@@ -129,7 +129,7 @@ if (fs.existsSync(frontendDistPath)) {
 app.use(errorHandler);
 
 server.listen(env.port, async () => {
-  console.log(`🚀 Backend Máquina de Vendas rodando na porta ${env.port}`);
+  console.log(`🚀 Backend Turbo Prospect rodando na porta ${env.port}`);
   console.log(`🔐 Cadastro público: modo "${env.registrationMode}"`);
   startFollowUpNurtureJob();
   startBroadcastSchedulerJob();

@@ -1,5 +1,5 @@
 # =====================================================================
-# Máquina de Vendas — imagem Docker (frontend compilado + backend + Chromium)
+# Turbo Prospect (Máquina de Vendas) — imagem Docker (frontend compilado + backend + Chromium)
 # Não precisa editar. Use com o docker-compose.yml.
 # =====================================================================
 

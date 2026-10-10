@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
 import usePublicConfig from '../hooks/usePublicConfig';
+import Brand from '../components/brand/Brand';
 import './Auth.css';
 
 export default function ForgotPassword() {
@@ -30,7 +31,7 @@ export default function ForgotPassword() {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <h1>🚀 {config.appName}</h1>
+        <Brand variant="auth" />
         <p>Esqueci minha senha</p>
 
         {error && <div className="auth-error">{error}</div>}

@@ -52,7 +52,7 @@ module.exports = {
     from: process.env.SYSTEM_MAIL_FROM || ''
   },
   supportContact: process.env.SUPPORT_CONTACT || '',
-  appName: process.env.APP_NAME || 'Máquina de Vendas',
+  appName: process.env.APP_NAME || 'Turbo Prospect',
 
   // ---- Cobrança automática (Asaas) ----
   asaas: {

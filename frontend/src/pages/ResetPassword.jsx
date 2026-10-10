@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import PasswordInput from '../components/auth/PasswordInput';
+import Brand from '../components/brand/Brand';
 import './Auth.css';
 
 export default function ResetPassword() {
@@ -44,7 +45,7 @@ export default function ResetPassword() {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <h1>🚀 Máquina de Vendas</h1>
+        <Brand variant="auth" />
         <p>Redefinir senha</p>
 
         {error && <div className="auth-error">{error}</div>}

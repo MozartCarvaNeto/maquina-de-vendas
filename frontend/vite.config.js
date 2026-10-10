@@ -19,22 +19,22 @@ export default defineConfig({
       includeAssets: ['favicon.png', 'favicon-16.png', 'favicon-32.png', 'apple-touch-icon.png'],
 
       manifest: {
-        name: 'Máquina de Vendas',
-        short_name: 'Máquina de Vendas',
+        name: 'Turbo Prospect — Máquina de Vendas',
+        short_name: 'Turbo Prospect',
         description: 'Prospecção, disparos, CRM e ligações — tudo em um só lugar.',
         lang: 'pt-BR',
         start_url: '/',
         scope: '/',
         display: 'standalone',
         // Cor da barra do navegador/topo do app quando instalado.
-        theme_color: '#00b4d8',
+        theme_color: '#031b33',
         // Cor de fundo mostrada por um instante enquanto o app carrega.
-        background_color: '#ffffff',
+        background_color: '#031b33',
         icons: [
           { src: '/pwa-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/pwa-512.png', sizes: '512x512', type: 'image/png' },
           // "maskable": versão com respiro nas bordas, pro Android poder
-          // recortar em círculo, quadrado arredondado, etc. sem cortar o "MV".
+          // recortar em círculo, quadrado arredondado, etc. sem cortar o símbolo.
           { src: '/pwa-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
         ]
       },

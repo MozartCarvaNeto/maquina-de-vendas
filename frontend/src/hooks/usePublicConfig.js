@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 import api from '../services/api';
 
-const DEFAULTS = { appName: 'Máquina de Vendas', registrationMode: 'approval', supportContact: null, billingEnabled: false };
+const DEFAULTS = { appName: 'Turbo Prospect', registrationMode: 'approval', supportContact: null, billingEnabled: false };
 let cache = null;
 
 export default function usePublicConfig() {

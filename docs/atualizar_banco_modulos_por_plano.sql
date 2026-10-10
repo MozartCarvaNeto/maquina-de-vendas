@@ -1,4 +1,4 @@
--- Máquina de Vendas — módulos (funcionalidades) por plano
+-- Turbo Prospect (Máquina de Vendas) — módulos (funcionalidades) por plano
 -- Rode UMA vez no Supabase: SQL Editor > New query > cole tudo > Run.
 -- Pode rodar de novo sem problema (não duplica nada).
 --

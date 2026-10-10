@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
+import Brand from '../brand/Brand';
 import SubscriptionBanner from './SubscriptionBanner';
 import './Layout.css';
 
@@ -21,7 +22,7 @@ export default function Layout() {
         <button className="app-topbar-btn" onClick={() => setMenuOpen(true)} aria-label="Abrir menu">
           ☰
         </button>
-        <strong>🚀 Máquina de Vendas</strong>
+        <Brand variant="topbar" />
       </header>
 
       {menuOpen && <div className="app-sidebar-backdrop" onClick={() => setMenuOpen(false)} />}

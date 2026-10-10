@@ -1,6 +1,7 @@
 // frontend/src/components/layout/Sidebar.jsx
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useFollowUps } from '../../hooks/useFollowUps';
+import Brand from '../brand/Brand';
 import useCurrentUser from '../../hooks/useCurrentUser';
 import { userHasFeature } from '../../utils/features';
 import '../crm/FollowUps.css';
@@ -47,9 +48,7 @@ export default function Sidebar({ open = false }) {
 
   return (
     <nav className={`sidebar ${open ? 'open' : ''}`}>
-      <div className="sidebar-logo">
-        <h2>🚀 Máquina de Vendas</h2>
-      </div>
+      <Brand variant="sidebar" />
 
       <ul className="sidebar-menu">
         {visibleItems.map((item) => {

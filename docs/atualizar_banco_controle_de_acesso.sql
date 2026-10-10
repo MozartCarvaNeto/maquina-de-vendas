@@ -1,5 +1,5 @@
 -- =====================================================================
--- Máquina de Vendas — atualização do banco: CONTROLE DE ACESSO / ASSINATURA
+-- Turbo Prospect (Máquina de Vendas) — atualização do banco: CONTROLE DE ACESSO / ASSINATURA
 --
 -- COMO USAR (sem terminal):
 --   Supabase > SQL Editor > New query > cole TODO este arquivo > Run.

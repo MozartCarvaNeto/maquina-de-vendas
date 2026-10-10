@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import PasswordInput from '../components/auth/PasswordInput';
 import usePublicConfig from '../hooks/usePublicConfig';
+import Brand from '../components/brand/Brand';
 import './Auth.css';
 
 export default function Register() {
@@ -42,7 +43,7 @@ export default function Register() {
     return (
       <div className="auth-page">
         <div className="auth-card">
-          <h1>🚀 Máquina de Vendas</h1>
+          <Brand variant="auth" />
           <p>Cadastro recebido</p>
           <div className="auth-success">{pendingMessage}</div>
           <p className="auth-footer">
@@ -56,7 +57,7 @@ export default function Register() {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <h1>🚀 Máquina de Vendas</h1>
+        <Brand variant="auth" />
         <p>Crie a conta da sua empresa</p>
 
         {error && <div className="auth-error">{error}</div>}
