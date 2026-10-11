@@ -1,6 +1,7 @@
 // frontend/src/pages/Configuracoes.jsx
 import { useState, useEffect, useCallback } from 'react';
 import api from '../services/api';
+import { AI_PROVIDERS, aiProviderLabel } from '../utils/aiProviders';
 import './Configuracoes.css';
 
 const CATEGORY_LABELS = {
@@ -26,6 +27,8 @@ export default function Configuracoes() {
   const [aiProvider, setAiProvider] = useState('gemini');
   const [aiApiKey, setAiApiKey] = useState('');
   const [aiModel, setAiModel] = useState('');
+  const [aiBaseUrl, setAiBaseUrl] = useState('');
+  const [aiSaving, setAiSaving] = useState(false);
   const [configuredAiProviders, setConfiguredAiProviders] = useState([]);
   const [configuredSettings, setConfiguredSettings] = useState([]);
   const [messages, setMessages] = useState({});
@@ -87,19 +90,28 @@ export default function Configuracoes() {
     }
   }
 
+  const selectedAi = AI_PROVIDERS.find((p) => p.id === aiProvider);
+
   async function saveAi(e) {
     e.preventDefault();
+    setAiSaving(true);
+    setMessages((m) => ({ ...m, ai: 'Testando a chave…' }));
     try {
       const credentials = { apiKey: aiApiKey };
       if (aiModel) credentials.model = aiModel;
+      if (selectedAi?.needsBaseUrl) credentials.baseUrl = aiBaseUrl;
       await api.post('/settings/ai', { provider: aiProvider, credentials });
-      setMessages((m) => ({ ...m, ai: `✅ Provedor de IA "${aiProvider}" configurado com sucesso` }));
+      setMessages((m) => ({ ...m, ai: `✅ ${aiProviderLabel(aiProvider)} configurado e testado com sucesso` }));
       setAiApiKey('');
       setAiModel('');
+      setAiBaseUrl('');
       loadAiProviders();
       loadConfiguredSettings();
     } catch (error) {
-      setMessages((m) => ({ ...m, ai: `❌ ${error.response?.data?.error || 'Erro'}` }));
+      const d = error.response?.data;
+      setMessages((m) => ({ ...m, ai: `❌ ${d?.error || 'Erro'}${d?.details ? ` — ${d.details}` : ''}` }));
+    } finally {
+      setAiSaving(false);
     }
   }
 
@@ -390,7 +402,7 @@ export default function Configuracoes() {
             <ul className="ai-provider-list">
               {configuredAiProviders.map((p) => (
                 <li key={p}>
-                  <span>{p === 'gemini' ? '✅ Google Gemini' : p === 'openai' ? '✅ OpenAI ChatGPT' : `✅ ${p}`}</span>
+                  <span>✅ {aiProviderLabel(p)}</span>
                   <button type="button" className="btn-danger-small" onClick={() => removeAiProvider(p)}>Remover</button>
                 </li>
               ))}
@@ -400,12 +412,20 @@ export default function Configuracoes() {
           <form onSubmit={saveAi}>
             <label>Provedor</label>
             <select value={aiProvider} onChange={(e) => setAiProvider(e.target.value)}>
-              <option value="gemini">Google Gemini</option>
-              <option value="openai">OpenAI ChatGPT</option>
+              {AI_PROVIDERS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
             </select>
+            {selectedAi?.hint && <p className="card-desc">{selectedAi.hint}</p>}
+            {selectedAi?.needsBaseUrl && (
+              <input placeholder="Endereço da API (ex: https://meu-servidor.com/v1)" value={aiBaseUrl} onChange={(e) => setAiBaseUrl(e.target.value)} required />
+            )}
             <input placeholder="API Key" type="password" value={aiApiKey} onChange={(e) => setAiApiKey(e.target.value)} required />
-            <input placeholder="Modelo (opcional)" value={aiModel} onChange={(e) => setAiModel(e.target.value)} />
-            <button className="btn-primary" type="submit">Salvar</button>
+            <input
+              placeholder={selectedAi?.model ? `Modelo (opcional — padrão: ${selectedAi.model})` : 'Nome do modelo'}
+              value={aiModel}
+              onChange={(e) => setAiModel(e.target.value)}
+              required={Boolean(selectedAi?.needsBaseUrl)}
+            />
+            <button className="btn-primary" type="submit" disabled={aiSaving}>{aiSaving ? 'Testando…' : 'Salvar e testar'}</button>
             {messages.ai && <p className="config-msg">{messages.ai}</p>}
           </form>
         </div>

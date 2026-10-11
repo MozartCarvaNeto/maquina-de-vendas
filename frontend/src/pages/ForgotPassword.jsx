@@ -31,6 +31,7 @@ export default function ForgotPassword() {
   return (
     <div className="auth-page">
       <div className="auth-card">
+        <Link className="auth-back" to="/login">← Voltar ao login</Link>
         <Brand variant="auth" />
         <p>Esqueci minha senha</p>
 

@@ -45,6 +45,7 @@ export default function ResetPassword() {
   return (
     <div className="auth-page">
       <div className="auth-card">
+        <Link className="auth-back" to="/login">← Voltar ao login</Link>
         <Brand variant="auth" />
         <p>Redefinir senha</p>
 

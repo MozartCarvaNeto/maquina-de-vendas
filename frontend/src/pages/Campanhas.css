@@ -28,3 +28,55 @@
 .hint-text { font-size: 12px; color: var(--gray-500); margin-top: 4px; }
 
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+/* ---- Campanhas inteligentes ---- */
+.camp-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.camp-tabs button, .camp-steps button {
+  border: 1px solid var(--gray-200, #e2e8f0); background: white; border-radius: 999px;
+  padding: 8px 14px; font-weight: 600; font-size: 13px; cursor: pointer; color: var(--gray-600, #475569);
+}
+.camp-tabs button.active, .camp-steps button.active { background: var(--primary, #0096c7); color: white; border-color: transparent; }
+.default-tag { background: #e0f2fe; color: #075985; margin-left: 8px; }
+.kw-cell { max-width: 200px; font-size: 12px; color: var(--gray-500); word-break: break-word; }
+.camp-actions { white-space: nowrap; }
+.camp-actions button + button { margin-left: 6px; }
+
+.camp-modal { padding-bottom: 12px; }
+.camp-modal-head { display: flex; justify-content: space-between; align-items: center; }
+.camp-close { border: none; background: var(--gray-100); border-radius: 8px; width: 36px; height: 36px; font-size: 16px; cursor: pointer; }
+.camp-steps { display: flex; gap: 6px; overflow-x: auto; padding: 10px 0 12px; margin: 0 -4px; -webkit-overflow-scrolling: touch; }
+.camp-steps button { white-space: nowrap; flex: 0 0 auto; }
+.camp-notice { background: #fef3c7; color: #92400e; border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-bottom: 8px; }
+.inline-field { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.inline-field input { flex: 1; min-width: 160px; }
+.modal-large .checkbox-label { display: flex; gap: 8px; align-items: flex-start; font-weight: 500; margin-top: 14px; }
+.modal-large .checkbox-label input { width: auto; margin-top: 3px; }
+.file-btn { display: inline-block; cursor: pointer; }
+
+.track-box { margin: 16px 0 4px; padding: 12px; background: #f0f9ff; border: 1px dashed #7dd3fc; border-radius: 10px; display: grid; gap: 8px; }
+.track-box code { display: block; word-break: break-all; font-size: 12px; background: white; padding: 8px; border-radius: 6px; }
+
+.step-card { border: 1px solid var(--gray-100); border-radius: 10px; padding: 10px; margin: 10px 0; }
+.step-grid { display: grid; grid-template-columns: 1.3fr 1fr 1fr auto; gap: 8px; align-items: center; }
+
+.chat-box { background: #f8fafc; border: 1px solid var(--gray-100); border-radius: 10px; padding: 10px; min-height: 160px; max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.bubble { max-width: 85%; padding: 8px 12px; border-radius: 12px; font-size: 14px; white-space: pre-wrap; }
+.bubble.user { align-self: flex-end; background: #dcf8c6; }
+.bubble.model { align-self: flex-start; background: white; border: 1px solid var(--gray-100); }
+.bubble.system { align-self: center; background: #fef3c7; font-size: 12px; }
+.collected { font-size: 12px; background: #ecfdf5; color: #065f46; padding: 8px 10px; border-radius: 8px; margin-bottom: 8px; }
+.prompt-preview { margin-top: 14px; }
+.prompt-preview pre { white-space: pre-wrap; font-size: 12px; background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 8px; max-height: 320px; overflow: auto; }
+
+.camp-report-filter { display: flex; gap: 10px; align-items: center; margin: 16px 0; }
+.camp-report h3 { margin: 18px 0 10px; font-size: 15px; }
+.source-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.source-card { background: white; border: 1px solid var(--gray-100); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.source-card strong { font-size: 24px; }
+
+@media (max-width: 700px) {
+  .campanhas-page { padding: 16px; }
+  .form-row { grid-template-columns: 1fr; }
+  .step-grid { grid-template-columns: 1fr; }
+  .camp-modal { width: 100%; max-width: 100%; max-height: 100%; height: 100%; border-radius: 0; }
+  .table-container { overflow-x: auto; }
+}

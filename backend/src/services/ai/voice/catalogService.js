@@ -284,4 +284,4 @@ function buildCatalogContext(agent, query) {
   return out.trim();
 }
 
-module.exports = { fetchSiteCatalog, buildCatalogContext, htmlToText, extractJsonLdProducts, chunkText, normalize };
+module.exports = { assertSafeUrl, fetchSiteCatalog, buildCatalogContext, htmlToText, extractJsonLdProducts, chunkText, normalize };

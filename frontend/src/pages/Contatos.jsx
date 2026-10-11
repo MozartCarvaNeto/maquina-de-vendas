@@ -6,6 +6,17 @@ import './Contatos.css';
 
 const PAGE_SIZE = 50;
 
+const SOURCE_LABEL = {
+  facebook_ads: '📘 Facebook/Instagram Ads',
+  google_ads: '🔎 Google Ads',
+  instagram: '📸 Instagram',
+  indicacao: '🤝 Indicação',
+  site: '🛒 Site',
+  cliente: '⭐ Cliente',
+  organico: '💬 Espontâneo',
+  outro: '📦 Outra'
+};
+
 export default function Contatos() {
   const [leads, setLeads] = useState([]);
   const [total, setTotal] = useState(0);
@@ -317,6 +328,7 @@ export default function Contatos() {
               <th>Nome</th>
               <th>Contato</th>
               <th>Canal / Avisos</th>
+              <th>Origem / Campanha</th>
               <th>Status</th>
               <th>Ações</th>
             </tr>
@@ -338,6 +350,11 @@ export default function Contatos() {
                   {!lead.phone && !lead.email && <span className="secondary-text">Sem contato</span>}
                 </td>
                 <td><ChannelBadge lead={lead} /></td>
+                <td>
+                  {lead.source ? <div>{SOURCE_LABEL[lead.source] || lead.source}</div> : null}
+                  {lead.campaign?.name ? <div className="secondary-text">{lead.campaign.name}</div> : null}
+                  {!lead.source && !lead.campaign && <span className="secondary-text">—</span>}
+                </td>
                 <td><span className="status-tag">{lead.status}</span></td>
                 <td>
                   {lead.phone ? (
@@ -349,7 +366,7 @@ export default function Contatos() {
               </tr>
             ))}
             {leads.length === 0 && (
-              <tr><td colSpan={6} className="empty-state">Nenhum contato encontrado</td></tr>
+              <tr><td colSpan={7} className="empty-state">Nenhum contato encontrado</td></tr>
             )}
           </tbody>
         </table>

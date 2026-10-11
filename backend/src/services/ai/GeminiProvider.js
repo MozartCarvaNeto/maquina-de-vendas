@@ -6,7 +6,7 @@ class GeminiProvider extends IAiProvider {
   constructor(credentials) {
     super();
     this.apiKey = credentials.apiKey;
-    this.model = credentials.model || 'gemini-1.5-flash';
+    this.model = credentials.model || 'gemini-2.5-flash';
     this.baseUrl = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`;
   }
 

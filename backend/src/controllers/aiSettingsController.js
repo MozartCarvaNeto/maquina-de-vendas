@@ -9,7 +9,7 @@ const {
 
 exports.listAvailableProviders = async (req, res, next) => {
   try {
-    res.json({ providers: Object.keys(AI_PROVIDER_REGISTRY) });
+    res.json({ providers: Object.keys(AI_PROVIDER_REGISTRY), meta: require('../services/ai/providerMeta') });
   } catch (error) {
     next(error);
   }
@@ -40,6 +40,15 @@ exports.saveProvider = async (req, res, next) => {
       return res.status(400).json({ error: 'Campo "apiKey" é obrigatório em credentials' });
     }
 
+    const alreadyConfigured = (await prisma.setting.count({ where: { userId: req.userId, category: 'ai', provider } })) > 0;
+    if (credentials.baseUrl) {
+      try {
+        require('../services/ai/voice/catalogService').assertSafeUrl(credentials.baseUrl);
+      } catch (e) {
+        return res.status(400).json({ error: 'Endereço da API inválido ou interno. Use algo como https://meu-servidor.com/v1' });
+      }
+    }
+
     const upserts = Object.entries(credentials).map(([key, value]) =>
       prisma.setting.upsert({
         where: {
@@ -68,6 +77,10 @@ exports.saveProvider = async (req, res, next) => {
     const validation = await instance.validateCredentials();
 
     if (!validation.valid) {
+      // Chave nova que não funcionou: não deixa lixo salvo (o robô tentaria usá-la).
+      if (!alreadyConfigured) {
+        await prisma.setting.deleteMany({ where: { userId: req.userId, category: 'ai', provider } });
+      }
       return res.status(400).json({
         error: 'Credenciais salvas, mas a validação falhou. Verifique a chave de API.',
         details: validation.error

@@ -3,6 +3,9 @@ const prisma = require('../../config/db');
 const { decrypt } = require('../crypto/settingsCrypto');
 const GeminiProvider = require('./GeminiProvider');
 const OpenAiProvider = require('./OpenAiProvider');
+const AnthropicProvider = require('./AnthropicProvider');
+const compat = require('./compatProviders');
+const { assertSafeUrl } = require('./voice/catalogService');
 
 /**
  * Registro de provedores de IA disponíveis. Para adicionar um novo
@@ -13,7 +16,9 @@ const OpenAiProvider = require('./OpenAiProvider');
  */
 const AI_PROVIDER_REGISTRY = {
   gemini: GeminiProvider,
-  openai: OpenAiProvider
+  openai: OpenAiProvider,
+  anthropic: AnthropicProvider,
+  ...compat
 };
 
 /**
@@ -43,6 +48,9 @@ async function getActiveAiProvider(userId, overrideProviderName) {
   for (const setting of providerSettings) {
     credentials[setting.key] = decrypt(setting.value);
   }
+
+  // Endereço informado pelo cliente (provedor "custom"): bloqueia endereços internos do servidor.
+  if (credentials.baseUrl) assertSafeUrl(credentials.baseUrl);
 
   return new ProviderClass(credentials);
 }

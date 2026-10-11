@@ -7,9 +7,15 @@ const { getAccountIdsWithoutFeature } = require('../services/featureService');
 
 async function sendAutoMessage(lead, text) {
   try {
-    const connection = await prisma.whatsappConnection.findFirst({
-      where: { userId: lead.userId, status: 'conectado' }
+    // Prefere o número da campanha, depois o número em que o lead já conversou, depois qualquer conectado.
+    const connected = await prisma.whatsappConnection.findMany({
+      where: { userId: lead.userId, status: 'conectado' },
+      orderBy: { createdAt: 'asc' }
     });
+    const connection =
+      connected.find((c) => c.id === lead.campaign?.whatsappConnectionId) ||
+      connected.find((c) => c.id === lead.lastConnectionId) ||
+      connected[0];
     if (!connection) {
       console.warn(`Lead ${lead.id}: nenhuma conexão WhatsApp ativa, follow-up não enviado`);
       return;

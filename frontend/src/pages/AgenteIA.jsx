@@ -228,7 +228,7 @@ export default function AgenteIA() {
       {error && <div className="ia-alert ia-alert-error">{error}</div>}
       {!aiConfigured && (
         <div className="ia-alert ia-alert-error">
-          Nenhuma IA configurada. Cadastre a chave do Gemini ou da OpenAI em <strong>Configurações › Inteligência Artificial</strong> — o agente usa essa mesma chave.
+          Nenhuma IA configurada. Cadastre a chave de uma IA (Gemini, ChatGPT, Claude, Groq…) em <strong>Configurações › Inteligência Artificial</strong> — o agente usa essa mesma chave.
         </div>
       )}
 

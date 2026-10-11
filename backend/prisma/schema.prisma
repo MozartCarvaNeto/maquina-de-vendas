@@ -188,6 +188,19 @@ model Campaign {
   nutritionMessage   String?
   aiVoiceEnabled     Boolean   @default(false)
   aiProviderOverride String?
+  // ---- Origem do lead (de onde esta campanha traz os contatos) ----
+  sourceType         String    @default("outro") // facebook_ads | google_ads | instagram | indicacao | site | cliente | organico | outro
+  triggerKeywords    String[]  @default([])      // códigos/frases que identificam esta campanha na 1ª mensagem
+  adSourceIds        String[]  @default([])      // IDs de anúncio (Click-to-WhatsApp), quando o WhatsApp informar
+  isDefault          Boolean   @default(false)   // atende quem chega sem código (clientes regulares, indicação)
+  whatsappConnectionId String?                   // número de WhatsApp desta campanha (opcional)
+  // ---- Robô guiado + conhecimento ----
+  botConfig          Json?                       // campos guiados que montam o prompt
+  botEnabled         Boolean   @default(true)
+  catalogUrl         String?
+  catalogText        String?
+  catalogWebText     String?
+  catalogFetchedAt   DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -215,6 +228,9 @@ model Lead {
   optOut               Boolean   @default(false)
   lastFollowUpAt       DateTime?
   lastNurtureAt        DateTime?
+  source               String?   // facebook_ads | google_ads | ... | organico | cliente
+  sourceDetail         String?   // como foi identificado (código, anúncio, regra)
+  lastConnectionId     String?   // WhatsApp (conexão) pelo qual a conversa acontece
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
@@ -226,6 +242,7 @@ model Lead {
   listMemberships     LeadListMembership[]
 
   @@index([userId, status])
+  @@index([userId, campaignId])
   @@map("leads")
 }
 

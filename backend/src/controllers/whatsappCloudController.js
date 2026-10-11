@@ -89,6 +89,9 @@ exports.handleWebhook = async (req, res) => {
             phone: message.from,
             text: message.text?.body || '',
             contactName: contact?.profile?.name,
+            referral: message.referral
+              ? { sourceId: message.referral.source_id, sourceUrl: message.referral.source_url, headline: message.referral.headline }
+              : null,
             sendReply: async (replyText) => {
               const ready = await whatsappDispatcher.loadConnectionForSending(connection.id);
               await whatsappDispatcher.sendMessage(ready, message.from, replyText);

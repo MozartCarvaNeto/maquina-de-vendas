@@ -718,41 +718,19 @@ class NativeWhatsappService {
     const io = global.socketIoInstance;
     if (io) io.to(`user:${userId}`).emit('whatsapp:message', { leadId: lead.id, message: savedMessage });
 
-    if (lead.campaignId) {
-      const campaign = await prisma.campaign.findUnique({ where: { id: lead.campaignId } });
-      if (campaign?.botPrompt) {
-        await this.tryAutoReply({ userId, connectionId, lead, campaign, incomingText: text });
-      }
-    }
-  }
-
-  async tryAutoReply({ userId, connectionId, lead, campaign, incomingText }) {
-    try {
-      const { getActiveAiProvider } = require('../ai/aiProviderFactory');
-      const aiProvider = await getActiveAiProvider(userId, campaign.aiProviderOverride);
-      if (!aiProvider) return;
-
-      const history = await prisma.message.findMany({
-        where: { leadId: lead.id },
-        orderBy: { createdAt: 'asc' },
-        take: 20
-      });
-      const aiHistory = history
-        .slice(0, -1)
-        .map((m) => ({ role: m.direction === 'entrada' ? 'user' : 'model', text: m.body }));
-
-      const replyText = await aiProvider.generateReply(campaign.botPrompt, aiHistory, incomingText);
-      await this.sendMessage(connectionId, lead.phone, replyText, null, { sendSeen: true });
-
-      const savedReply = await prisma.message.create({
-        data: { leadId: lead.id, direction: 'saida', channel: 'whatsapp', body: replyText }
-      });
-
-      const io = global.socketIoInstance;
-      if (io) io.to(`user:${userId}`).emit('whatsapp:message', { leadId: lead.id, message: savedReply });
-    } catch (error) {
-      console.error('Erro no bot de resposta automática:', error.message);
-    }
+    // Descobre a campanha/origem do lead e deixa o robô responder (se ativo).
+    const ctx = message._data?.ctwaContext || message.rawData?.ctwaContext || null;
+    const referral = ctx
+      ? { sourceId: ctx.sourceId || ctx.source_id, sourceUrl: ctx.sourceUrl || ctx.source_url, headline: ctx.title || ctx.headline }
+      : null;
+    await require('../campaignBotService').handleIncoming({
+      userId,
+      connectionId,
+      lead,
+      text,
+      referral,
+      sendReply: (replyText) => this.sendMessage(connectionId, lead.phone, replyText, null, { sendSeen: true })
+    });
   }
 
   buildSendError(error, fallbackMessage = 'Falha ao enviar mensagem pelo WhatsApp.') {

@@ -4,6 +4,7 @@
 // (glossário técnico), o catálogo, como qualifica e quando chama o vendedor.
 import { useEffect, useState } from 'react';
 import api from '../../services/api';
+import { aiProviderLabel } from '../../utils/aiProviders';
 
 const EMPTY = {
   name: '',
@@ -296,7 +297,7 @@ export default function AiAgentEditor({ agentId, options, onClose, onSaved }) {
                 <label>IA usada nas ligações</label>
                 <select value={form.aiProvider} onChange={(e) => set({ aiProvider: e.target.value })}>
                   <option value="">A configurada na conta (padrão)</option>
-                  {options.aiProviders.map((p) => <option key={p} value={p}>{p}</option>)}
+                  {options.aiProviders.map((p) => <option key={p} value={p}>{aiProviderLabel(p)}</option>)}
                 </select>
               </div>
               <div><label>Máximo de falas da IA por ligação</label><input type="number" min="4" max="30" value={form.maxTurns} onChange={(e) => set({ maxTurns: e.target.value })} /></div>

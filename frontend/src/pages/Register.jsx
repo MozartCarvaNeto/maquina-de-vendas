@@ -43,6 +43,7 @@ export default function Register() {
     return (
       <div className="auth-page">
         <div className="auth-card">
+          <Link className="auth-back" to="/login">← Voltar ao login</Link>
           <Brand variant="auth" />
           <p>Cadastro recebido</p>
           <div className="auth-success">{pendingMessage}</div>
@@ -57,6 +58,7 @@ export default function Register() {
   return (
     <div className="auth-page">
       <div className="auth-card">
+        <Link className="auth-back" to="/login">← Voltar ao login</Link>
         <Brand variant="auth" />
         <p>Crie a conta da sua empresa</p>
 
