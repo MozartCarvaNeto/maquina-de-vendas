@@ -6,11 +6,13 @@ const auth = require('../middlewares/auth');
 const requireRole = require('../middlewares/requireRole');
 
 router.use(auth);
-router.use(requireRole(['owner', 'admin']));
 
-router.get('/providers', aiSettingsController.listAvailableProviders);
+// Leitura: qualquer membro logado (Campanhas e Agente IA precisam saber quais IAs existem).
 router.get('/', aiSettingsController.listMyProviders);
-router.post('/', aiSettingsController.saveProvider);
-router.delete('/:provider', aiSettingsController.deleteProvider);
+
+// Alterar chaves: só dono/administrador.
+router.get('/providers', requireRole(['owner', 'admin']), aiSettingsController.listAvailableProviders);
+router.post('/', requireRole(['owner', 'admin']), aiSettingsController.saveProvider);
+router.delete('/:provider', requireRole(['owner', 'admin']), aiSettingsController.deleteProvider);
 
 module.exports = router;

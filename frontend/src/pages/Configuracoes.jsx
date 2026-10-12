@@ -1,5 +1,5 @@
 // frontend/src/pages/Configuracoes.jsx
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../services/api';
 import { AI_PROVIDERS, aiProviderLabel } from '../utils/aiProviders';
 import './Configuracoes.css';
@@ -33,21 +33,61 @@ export default function Configuracoes() {
   const [aiSaving, setAiSaving] = useState(false);
   const [configuredAiProviders, setConfiguredAiProviders] = useState([]);
   const [configuredSettings, setConfiguredSettings] = useState([]);
+  const [configuredAiDetails, setConfiguredAiDetails] = useState({});
   const [messages, setMessages] = useState({});
+  const [loadError, setLoadError] = useState('');
+  // Quando o teste de uma chave falha, guardamos o pedido para oferecer "Salvar mesmo assim".
+  const [forceOffer, setForceOffer] = useState(null);
+  const prefilled = useRef(false);
 
   const loadAiProviders = useCallback(async () => {
-    const { data } = await api.get('/settings/ai');
-    setConfiguredAiProviders(data.providers);
+    try {
+      const { data } = await api.get('/settings/ai');
+      setConfiguredAiProviders(data.providers || []);
+      setConfiguredAiDetails(data.details || {});
+    } catch (error) {
+      setLoadError(error.response?.data?.error || 'Não foi possível carregar as integrações salvas. Verifique se o backend está rodando.');
+    }
   }, []);
 
   const loadConfiguredSettings = useCallback(async () => {
-    const { data } = await api.get('/settings');
-    setConfiguredSettings(data.settings);
+    try {
+      const { data } = await api.get('/settings');
+      const list = data.settings || [];
+      setConfiguredSettings(list);
+      setLoadError('');
+
+      // Na primeira carga, preenche os formulários com o que já está salvo (campos comuns).
+      // As chaves secretas nunca voltam inteiras: o formulário mostra só o final (••••abcd).
+      if (!prefilled.current) {
+        prefilled.current = true;
+        const tel = list.find((x) => x.category === 'telephony');
+        if (tel?.values?.accountSid) setTelephony((t) => ({ ...t, accountSid: tel.values.accountSid }));
+
+        const mail = list.find((x) => x.category === 'email');
+        if (mail && ['smtp', 'resend', 'native'].includes(mail.provider)) {
+          setEmailProvider(mail.provider);
+          const v = mail.values || {};
+          if (mail.provider === 'smtp') {
+            setSmtp((cur) => ({ ...cur, host: v.host || '', port: v.port || '587', user: v.user || '', fromEmail: v.fromEmail || '', fromName: v.fromName || '' }));
+          }
+          if (mail.provider === 'resend') {
+            setResend((cur) => ({ ...cur, fromEmail: v.fromEmail || '', fromName: v.fromName || '' }));
+          }
+        }
+      }
+    } catch (error) {
+      setLoadError(error.response?.data?.error || 'Não foi possível carregar as integrações salvas. Verifique se o backend está rodando.');
+    }
   }, []);
 
   const loadEnvStatus = useCallback(async () => {
-    const { data } = await api.get('/settings/env-status');
-    setTelephonyEnvActive(data.telephonyConfiguredViaEnv);
+    try {
+      const { data } = await api.get('/settings/env-status');
+      setTelephonyEnvActive(data.telephonyConfiguredViaEnv);
+    } catch (_) {
+      /* só informativo */
+    }
   }, []);
 
   const loadDomains = useCallback(async () => {
@@ -69,27 +109,70 @@ export default function Configuracoes() {
     loadDomains();
   }, [loadAiProviders, loadConfiguredSettings, loadEnvStatus, loadDomains]);
 
+  // Ao escolher um provedor de IA já configurado, mostra o modelo e o endereço que estavam salvos.
+  useEffect(() => {
+    const saved = configuredAiDetails[aiProvider];
+    setAiModel(saved?.values?.model || '');
+    setAiBaseUrl(saved?.values?.baseUrl || '');
+  }, [aiProvider, configuredAiDetails]);
+
+  const hintOf = (category, provider, key) =>
+    configuredSettings.find((x) => x.category === category && x.provider === provider)?.hints?.[key] || '';
+
+  async function submitSetting({ area, url, body, okText, afterOk }) {
+    setForceOffer(null);
+    try {
+      const { data } = await api.post(url, body);
+      setMessages((m) => ({ ...m, [area]: `✅ ${okText}${data?.warning ? ` (aviso: ${data.warning})` : ''}` }));
+      if (afterOk) afterOk();
+    } catch (error) {
+      const d = error.response?.data;
+      setMessages((m) => ({ ...m, [area]: `❌ ${d?.error || 'Erro ao salvar'}${d?.details ? ` — ${d.details}` : ''}` }));
+      if (d?.canForce) setForceOffer({ area, url, body, okText, afterOk });
+    }
+  }
+
+  const forceButton = (area) =>
+    forceOffer && forceOffer.area === area ? (
+      <button
+        type="button"
+        className="btn-secondary-small"
+        onClick={() => submitSetting({ ...forceOffer, body: { ...forceOffer.body, force: true } })}
+      >
+        Salvar mesmo assim (sem validar)
+      </button>
+    ) : null;
+
   async function saveTelephony(e) {
     e.preventDefault();
-    try {
-      await api.post('/settings/telephony', { provider: 'twilio', credentials: telephony });
-      setMessages((m) => ({ ...m, telephony: '✅ Telefonia configurada com sucesso (substitui o .env)' }));
-      loadConfiguredSettings();
-    } catch (error) {
-      setMessages((m) => ({ ...m, telephony: `❌ ${error.response?.data?.error || 'Erro'}` }));
-    }
+    setMessages((m) => ({ ...m, telephony: 'Testando as credenciais…' }));
+    await submitSetting({
+      area: 'telephony',
+      url: '/settings/telephony',
+      body: { provider: 'twilio', credentials: telephony },
+      okText: 'Telefonia configurada e testada com sucesso',
+      afterOk: () => {
+        setTelephony((t) => ({ ...t, authToken: '' }));
+        loadConfiguredSettings();
+      }
+    });
   }
 
   async function saveEmail(e) {
     e.preventDefault();
-    try {
-      const credentials = emailProvider === 'smtp' ? smtp : emailProvider === 'resend' ? resend : {};
-      await api.post('/settings/email', { provider: emailProvider, credentials });
-      setMessages((m) => ({ ...m, email: '✅ E-mail configurado com sucesso' }));
-      loadConfiguredSettings();
-    } catch (error) {
-      setMessages((m) => ({ ...m, email: `❌ ${error.response?.data?.error || 'Erro'}` }));
-    }
+    const credentials = emailProvider === 'smtp' ? smtp : emailProvider === 'resend' ? resend : {};
+    setMessages((m) => ({ ...m, email: 'Testando a conexão…' }));
+    await submitSetting({
+      area: 'email',
+      url: '/settings/email',
+      body: { provider: emailProvider, credentials },
+      okText: 'E-mail configurado com sucesso',
+      afterOk: () => {
+        setSmtp((v) => ({ ...v, pass: '' }));
+        setResend((v) => ({ ...v, apiKey: '' }));
+        loadConfiguredSettings();
+      }
+    });
   }
 
   const selectedAi = AI_PROVIDERS.find((p) => p.id === aiProvider);
@@ -98,27 +181,28 @@ export default function Configuracoes() {
     e.preventDefault();
     setAiSaving(true);
     setMessages((m) => ({ ...m, ai: 'Testando a chave…' }));
-    try {
-      const credentials = { apiKey: aiApiKey };
-      if (aiModel) credentials.model = aiModel;
-      if (selectedAi?.needsBaseUrl) credentials.baseUrl = aiBaseUrl;
-      await api.post('/settings/ai', { provider: aiProvider, credentials });
-      setMessages((m) => ({ ...m, ai: `✅ ${aiProviderLabel(aiProvider)} configurado e testado com sucesso` }));
-      setAiApiKey('');
-      setAiModel('');
-      setAiBaseUrl('');
-      loadAiProviders();
-      loadConfiguredSettings();
-    } catch (error) {
-      const d = error.response?.data;
-      setMessages((m) => ({ ...m, ai: `❌ ${d?.error || 'Erro'}${d?.details ? ` — ${d.details}` : ''}` }));
-    } finally {
-      setAiSaving(false);
-    }
+    const credentials = { apiKey: aiApiKey, model: aiModel };
+    if (selectedAi?.needsBaseUrl) credentials.baseUrl = aiBaseUrl;
+    await submitSetting({
+      area: 'ai',
+      url: '/settings/ai',
+      body: { provider: aiProvider, credentials },
+      okText: `${aiProviderLabel(aiProvider)} configurado e testado com sucesso`,
+      afterOk: () => {
+        setAiApiKey('');
+        loadAiProviders();
+        loadConfiguredSettings();
+      }
+    });
+    setAiSaving(false);
   }
 
   async function savePlacesKey(e) {
     e.preventDefault();
+    if (!placesKey.trim()) {
+      setMessages((m) => ({ ...m, places: 'ℹ️ A chave já está salva. Cole uma nova só se quiser trocar.' }));
+      return;
+    }
     try {
       await api.post('/lead-search/key', { apiKey: placesKey.trim() });
       setMessages((m) => ({ ...m, places: '✅ Chave do Google Maps salva. Já pode usar a Busca de empresas.' }));
@@ -224,6 +308,8 @@ export default function Configuracoes() {
         </p>
       </header>
 
+      {loadError && <div className="env-banner warning-banner">⚠️ {loadError}</div>}
+
       {configuredSettings.length > 0 && (
         <div className="card configured-settings-card">
           <h3>✅ Integrações já configuradas</h3>
@@ -232,7 +318,14 @@ export default function Configuracoes() {
               <div className="configured-setting-row" key={`${s.category}:${s.provider}`}>
                 <div>
                   <strong>{CATEGORY_LABELS[s.category] || s.category}</strong>
-                  <span className="secondary-text"> — {s.provider} • atualizado em {new Date(s.updatedAt).toLocaleDateString('pt-BR')}</span>
+                  <span className="secondary-text">
+                    {' '}— {s.provider}
+                    {Object.values(s.hints || {})[0] ? ` • chave ${Object.values(s.hints)[0]}` : ''}
+                    {' '}• atualizado em {new Date(s.updatedAt).toLocaleDateString('pt-BR')}
+                  </span>
+                  {s.unreadable && (
+                    <div className="hint-text">⚠️ Não foi possível ler esta chave (a SETTINGS_ENCRYPTION_KEY do servidor mudou). Cadastre-a de novo.</div>
+                  )}
                 </div>
                 <button className="btn-danger-small" onClick={() => removeConfiguredSetting(s.category, s.provider)}>Remover</button>
               </div>
@@ -256,9 +349,16 @@ export default function Configuracoes() {
 
           <form onSubmit={saveTelephony}>
             <input placeholder="Account SID" value={telephony.accountSid} onChange={(e) => setTelephony({ ...telephony, accountSid: e.target.value })} required />
-            <input placeholder="Auth Token" type="password" value={telephony.authToken} onChange={(e) => setTelephony({ ...telephony, authToken: e.target.value })} required />
+            <input
+              placeholder={hintOf('telephony', 'twilio', 'authToken') ? `Auth Token (salvo ${hintOf('telephony', 'twilio', 'authToken')} — deixe vazio para manter)` : 'Auth Token'}
+              type="password"
+              value={telephony.authToken}
+              onChange={(e) => setTelephony({ ...telephony, authToken: e.target.value })}
+              required={!hintOf('telephony', 'twilio', 'authToken')}
+            />
             <button className="btn-primary" type="submit">Salvar</button>
             {messages.telephony && <p className="config-msg">{messages.telephony}</p>}
+            {forceButton('telephony')}
           </form>
           <p className="card-note">
             O número de telefone é cadastrado em Linhas → Números de Discagem — ou, se você preencheu
@@ -290,21 +390,35 @@ export default function Configuracoes() {
               <input placeholder="Servidor SMTP (ex: smtp.gmail.com)" value={smtp.host} onChange={(e) => setSmtp({ ...smtp, host: e.target.value })} required />
               <input placeholder="Porta (587 ou 465)" value={smtp.port} onChange={(e) => setSmtp({ ...smtp, port: e.target.value })} required />
               <input placeholder="Usuário (seu e-mail completo)" value={smtp.user} onChange={(e) => setSmtp({ ...smtp, user: e.target.value })} required />
-              <input placeholder="Senha de aplicativo" type="password" value={smtp.pass} onChange={(e) => setSmtp({ ...smtp, pass: e.target.value })} required />
+              <input
+                placeholder={hintOf('email', 'smtp', 'pass') ? `Senha de aplicativo (salva ${hintOf('email', 'smtp', 'pass')} — deixe vazio para manter)` : 'Senha de aplicativo'}
+                type="password"
+                value={smtp.pass}
+                onChange={(e) => setSmtp({ ...smtp, pass: e.target.value })}
+                required={!hintOf('email', 'smtp', 'pass')}
+              />
               <input placeholder="E-mail remetente (ex: contato@suaempresa.com)" value={smtp.fromEmail} onChange={(e) => setSmtp({ ...smtp, fromEmail: e.target.value })} required />
               <input placeholder="Nome do remetente (ex: Equipe Comercial)" value={smtp.fromName} onChange={(e) => setSmtp({ ...smtp, fromName: e.target.value })} />
               <button className="btn-primary" type="submit">Salvar</button>
               {messages.email && <p className="config-msg">{messages.email}</p>}
+              {forceButton('email')}
             </form>
           )}
 
           {emailProvider === 'resend' && (
             <form onSubmit={saveEmail}>
-              <input placeholder="API Key do Resend" type="password" value={resend.apiKey} onChange={(e) => setResend({ ...resend, apiKey: e.target.value })} required />
+              <input
+                placeholder={hintOf('email', 'resend', 'apiKey') ? `API Key do Resend (salva ${hintOf('email', 'resend', 'apiKey')} — deixe vazio para manter)` : 'API Key do Resend'}
+                type="password"
+                value={resend.apiKey}
+                onChange={(e) => setResend({ ...resend, apiKey: e.target.value })}
+                required={!hintOf('email', 'resend', 'apiKey')}
+              />
               <input placeholder="E-mail remetente" value={resend.fromEmail} onChange={(e) => setResend({ ...resend, fromEmail: e.target.value })} required />
               <input placeholder="Nome do remetente" value={resend.fromName} onChange={(e) => setResend({ ...resend, fromName: e.target.value })} />
               <button className="btn-primary" type="submit">Salvar</button>
               {messages.email && <p className="config-msg">{messages.email}</p>}
+              {forceButton('email')}
             </form>
           )}
 
@@ -402,6 +516,7 @@ export default function Configuracoes() {
                   </p>
                   <button className="btn-primary" type="submit">Ativar E-mail Nativo</button>
                   {messages.email && <p className="config-msg">{messages.email}</p>}
+              {forceButton('email')}
                 </form>
               )}
             </>
@@ -432,7 +547,13 @@ export default function Configuracoes() {
             {selectedAi?.needsBaseUrl && (
               <input placeholder="Endereço da API (ex: https://meu-servidor.com/v1)" value={aiBaseUrl} onChange={(e) => setAiBaseUrl(e.target.value)} required />
             )}
-            <input placeholder="API Key" type="password" value={aiApiKey} onChange={(e) => setAiApiKey(e.target.value)} required />
+            <input
+              placeholder={configuredAiDetails[aiProvider]?.hints?.apiKey ? `API Key (salva ${configuredAiDetails[aiProvider].hints.apiKey} — deixe vazio para manter)` : 'API Key'}
+              type="password"
+              value={aiApiKey}
+              onChange={(e) => setAiApiKey(e.target.value)}
+              required={!configuredAiDetails[aiProvider]?.hints?.apiKey}
+            />
             <input
               placeholder={selectedAi?.model ? `Modelo (opcional — padrão: ${selectedAi.model})` : 'Nome do modelo'}
               value={aiModel}
@@ -441,6 +562,7 @@ export default function Configuracoes() {
             />
             <button className="btn-primary" type="submit" disabled={aiSaving}>{aiSaving ? 'Testando…' : 'Salvar e testar'}</button>
             {messages.ai && <p className="config-msg">{messages.ai}</p>}
+            {forceButton('ai')}
           </form>
         </div>
 
@@ -451,7 +573,14 @@ export default function Configuracoes() {
             O Google dá um crédito mensal gratuito; o uso acima disso é cobrado por ele no seu cartão. Sem a chave, a busca usa o OpenStreetMap (gratuito, com menos telefones).
           </p>
           <form onSubmit={savePlacesKey}>
-            <input placeholder="Chave de API do Google" type="password" value={placesKey} onChange={(e) => setPlacesKey(e.target.value)} required minLength={20} />
+            <input
+              placeholder={hintOf('leadsearch', 'google_places', 'apiKey') ? `Chave de API do Google (salva ${hintOf('leadsearch', 'google_places', 'apiKey')} — cole outra só para trocar)` : 'Chave de API do Google'}
+              type="password"
+              value={placesKey}
+              onChange={(e) => setPlacesKey(e.target.value)}
+              required={!hintOf('leadsearch', 'google_places', 'apiKey')}
+              minLength={20}
+            />
             <button className="btn-primary" type="submit">Salvar chave</button>
             {messages.places && <p className="config-msg">{messages.places}</p>}
           </form>

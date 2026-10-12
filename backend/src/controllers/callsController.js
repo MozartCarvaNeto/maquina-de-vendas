@@ -187,10 +187,10 @@ exports.getRecording = async (req, res, next) => {
       return res.status(404).json({ error: 'Esta ligação não possui gravação disponível' });
     }
 
-    const telephonySettings = await getCredentials(req.userId, 'telephony');
-    if (!telephonySettings) {
-      return res.status(400).json({ error: 'Telefonia não configurada' });
-    }
+    // Usa o mesmo provedor das ligações (banco ou, se vazio, o .env) — antes só olhava o banco
+    // e falhava com "Telefonia não configurada" quando a Twilio estava só no .env.
+    const telephonyProvider = await getActiveTelephonyProvider(req.userId);
+    const telephonySettings = { accountSid: telephonyProvider.accountSid, authToken: telephonyProvider.authToken };
 
     const audioUrl = `${call.recordingUrl}.mp3`;
     const response = await axios.get(audioUrl, {

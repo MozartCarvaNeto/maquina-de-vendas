@@ -88,8 +88,10 @@ app.use('/api/billing', billingRoutes);
 app.get('/api/public/config', billingController.publicConfig);
 app.post('/api/webhooks/asaas', billingController.asaasWebhook);
 app.use('/api/team', teamRoutes);
-app.use('/api/settings', settingsRoutes);
+// IMPORTANTE: /api/settings/ai precisa vir ANTES de /api/settings. O roteador generico de settings
+// exige papel de administrador em tudo e interceptava /settings/ai antes do roteador de IA.
 app.use('/api/settings/ai', aiSettingsRoutes);
+app.use('/api/settings', settingsRoutes);
 app.use('/api/campaigns', campaignsRoutes);
 app.use('/api/lead-search', leadSearchRoutes);
 app.use('/api/leads', leadsRoutes);
