@@ -8,6 +8,7 @@ const CATEGORY_LABELS = {
   telephony: '📞 Telefonia',
   email: '📧 E-mail',
   ai: '🤖 Inteligência Artificial',
+  leadsearch: '🔍 Busca de empresas',
   dialer: '📟 Discador'
 };
 
@@ -28,6 +29,7 @@ export default function Configuracoes() {
   const [aiApiKey, setAiApiKey] = useState('');
   const [aiModel, setAiModel] = useState('');
   const [aiBaseUrl, setAiBaseUrl] = useState('');
+  const [placesKey, setPlacesKey] = useState('');
   const [aiSaving, setAiSaving] = useState(false);
   const [configuredAiProviders, setConfiguredAiProviders] = useState([]);
   const [configuredSettings, setConfiguredSettings] = useState([]);
@@ -112,6 +114,18 @@ export default function Configuracoes() {
       setMessages((m) => ({ ...m, ai: `❌ ${d?.error || 'Erro'}${d?.details ? ` — ${d.details}` : ''}` }));
     } finally {
       setAiSaving(false);
+    }
+  }
+
+  async function savePlacesKey(e) {
+    e.preventDefault();
+    try {
+      await api.post('/lead-search/key', { apiKey: placesKey.trim() });
+      setMessages((m) => ({ ...m, places: '✅ Chave do Google Maps salva. Já pode usar a Busca de empresas.' }));
+      setPlacesKey('');
+      loadConfiguredSettings();
+    } catch (error) {
+      setMessages((m) => ({ ...m, places: `❌ ${error.response?.data?.error || 'Erro'}` }));
     }
   }
 
@@ -427,6 +441,19 @@ export default function Configuracoes() {
             />
             <button className="btn-primary" type="submit" disabled={aiSaving}>{aiSaving ? 'Testando…' : 'Salvar e testar'}</button>
             {messages.ai && <p className="config-msg">{messages.ai}</p>}
+          </form>
+        </div>
+
+        <div className="card">
+          <h3>🔍 Busca de empresas (Google Maps)</h3>
+          <p className="card-desc">
+            Para buscar empresas pelo Google Maps, cadastre a sua chave da <strong>Places API (New)</strong> no Google Cloud (console.cloud.google.com → APIs e serviços → ative "Places API (New)" → Credenciais → Criar chave de API).
+            O Google dá um crédito mensal gratuito; o uso acima disso é cobrado por ele no seu cartão. Sem a chave, a busca usa o OpenStreetMap (gratuito, com menos telefones).
+          </p>
+          <form onSubmit={savePlacesKey}>
+            <input placeholder="Chave de API do Google" type="password" value={placesKey} onChange={(e) => setPlacesKey(e.target.value)} required minLength={20} />
+            <button className="btn-primary" type="submit">Salvar chave</button>
+            {messages.places && <p className="config-msg">{messages.places}</p>}
           </form>
         </div>
       </div>

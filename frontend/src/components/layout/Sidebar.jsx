@@ -12,6 +12,7 @@ const MENU_ITEMS = [
   { path: '/chat', label: '💬 Chat', feature: ['chat'], adminOnly: false },
   { path: '/crm', label: '📋 CRM', feature: ['crm'], adminOnly: false },
   { path: '/campanhas', label: '🎯 Campanhas', feature: ['contatos'], adminOnly: false },
+  { path: '/buscar-empresas', label: '🔍 Buscar Empresas', feature: ['contatos'], adminOnly: false },
   { path: '/listas', label: '🗂️ Listas', feature: ['contatos'], adminOnly: false },
   { path: '/disparos', label: '📣 Disparos', feature: ['disparos'], adminOnly: false },
   { path: '/conexoes', label: '📱 Conexões', feature: ['conexoes'], adminOnly: false },

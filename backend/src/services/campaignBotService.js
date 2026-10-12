@@ -138,6 +138,8 @@ function originInstruction(source, campaign) {
       return `Este contato chegou por INDICAÇÃO${name}. Agradeça a confiança, pergunte (sem insistir) quem indicou, e trate com atenção especial.`;
     case 'site':
       return `Este contato veio do site/loja online${name}. Pode já conhecer os produtos: ajude com dúvidas de compra, prazo e pagamento.`;
+    case 'prospeccao_b2b':
+      return 'Esta é uma EMPRESA que nós prospectamos (ela não nos procurou antes). Apresente-se com educação, explique em uma frase por que está falando com ela, e pergunte se é a pessoa certa para tratar do assunto. Se pedir para não ser contatada, respeite na hora.';
     case 'cliente':
       return 'Este contato JÁ É CLIENTE. Trate com familiaridade, NÃO refaça perguntas de qualificação; ajude com dúvidas, pedidos e recompra.';
     default:

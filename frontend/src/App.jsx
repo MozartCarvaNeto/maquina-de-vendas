@@ -15,6 +15,7 @@ import Chat from './pages/Chat';
 import CRM from './pages/CRM';
 import Campanhas from './pages/Campanhas';
 import Listas from './pages/Listas';
+import BuscarEmpresas from './pages/BuscarEmpresas';
 import Disparos from './pages/Disparos';
 import Conexoes from './pages/Conexoes';
 import Discador from './pages/Discador';
@@ -48,6 +49,7 @@ export default function App() {
           <Route path="chat" element={<FeatureRoute feature="chat"><Chat /></FeatureRoute>} />
           <Route path="crm" element={<FeatureRoute feature="crm"><CRM /></FeatureRoute>} />
           <Route path="campanhas" element={<FeatureRoute feature="contatos"><Campanhas /></FeatureRoute>} />
+          <Route path="buscar-empresas" element={<FeatureRoute feature="contatos"><BuscarEmpresas /></FeatureRoute>} />
           <Route path="listas" element={<FeatureRoute feature="contatos"><Listas /></FeatureRoute>} />
           <Route path="disparos" element={<FeatureRoute feature="disparos"><Disparos /></FeatureRoute>} />
           <Route path="conexoes" element={<FeatureRoute feature="conexoes"><Conexoes /></FeatureRoute>} />

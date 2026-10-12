@@ -1,0 +1,29 @@
+/* frontend/src/pages/BuscarEmpresas.css */
+.busca-page { padding: 32px; }
+.busca-page header p { color: var(--gray-500); margin-top: 4px; max-width: 680px; }
+.busca-form { display: grid; grid-template-columns: 1.4fr 1.2fr 1fr 0.7fr auto; gap: 12px; align-items: end; margin: 20px 0 12px; }
+.busca-form label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.busca-form input, .busca-form select { width: 100%; }
+.busca-save-form { grid-template-columns: 1.4fr 1.2fr auto; }
+.busca-alert { background: #fef3c7; color: #92400e; border-radius: 8px; padding: 10px 14px; font-size: 14px; margin: 8px 0; }
+.busca-alert a { font-weight: 700; color: inherit; }
+.busca-error { background: #fee2e2; color: #991b1b; }
+.busca-summary { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: 16px 0 10px; font-size: 14px; }
+.busca-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.busca-table td { vertical-align: top; }
+.busca-dim { opacity: 0.55; }
+.busca-tag { margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: #e0f2fe; color: #075985; font-size: 11px; font-weight: 700; }
+.busca-link { display: block; font-size: 12px; margin-top: 2px; }
+.busca-wa { margin-left: 6px; }
+.busca-addr { max-width: 280px; font-size: 13px; color: var(--gray-500); }
+.busca-save { margin-top: 24px; padding: 16px; background: white; border: 1px solid var(--gray-100); border-radius: 12px; }
+.busca-save h3 { margin: 0 0 8px; font-size: 16px; }
+.busca-ok { background: #ecfdf5; color: #065f46; padding: 12px 14px; border-radius: 8px; }
+.busca-ok-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.busca-ok-actions a { text-decoration: none; }
+@media (max-width: 900px) {
+  .busca-page { padding: 16px; }
+  .busca-form, .busca-save-form { grid-template-columns: 1fr; }
+  .table-container { overflow-x: auto; }
+  .busca-table { min-width: 720px; }
+}

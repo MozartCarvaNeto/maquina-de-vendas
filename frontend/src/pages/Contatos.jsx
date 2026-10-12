@@ -14,6 +14,7 @@ const SOURCE_LABEL = {
   site: '🛒 Site',
   cliente: '⭐ Cliente',
   organico: '💬 Espontâneo',
+  prospeccao_b2b: '🔍 Busca de empresas',
   outro: '📦 Outra'
 };
 

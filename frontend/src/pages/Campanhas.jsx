@@ -16,6 +16,7 @@ const SOURCES = [
 ];
 const SOURCE_LABEL = Object.fromEntries(SOURCES.map((s) => [s.value, s.label]));
 SOURCE_LABEL.importado = '📥 Lista importada';
+SOURCE_LABEL.prospeccao_b2b = '🔍 Busca de empresas (B2B)';
 SOURCE_LABEL.sem_origem = '❔ Sem origem';
 
 const OBJECTIVES = [
