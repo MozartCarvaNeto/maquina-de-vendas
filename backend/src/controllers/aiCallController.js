@@ -70,7 +70,7 @@ async function sanitizeAgentBody(body, userId) {
   if (!handoffCriteria) throw badRequest('Explique quando a IA deve chamar o vendedor.');
 
   const glossary = asList(body.glossary)
-    .map((g) => ({ term: text(g?.term, 80), meaning: text(g?.meaning, 300) }))
+    .map((g) => ({ term: text(g?.term, 80), meaning: text(g?.meaning, 300), pronunciation: text(g?.pronunciation, 80) }))
     .filter((g) => g.term)
     .slice(0, 150);
 

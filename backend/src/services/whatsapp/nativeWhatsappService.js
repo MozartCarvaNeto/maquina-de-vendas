@@ -685,6 +685,49 @@ class NativeWhatsappService {
     return null;
   }
 
+  /** Texto mostrado no chat quando o anexo chegou mas não pôde ser salvo (diz QUAL tipo de anexo era). */
+  mediaFailureLabel(message) {
+    const type = String(message.type || '').toLowerCase();
+    const names = { ptt: 'Áudio', audio: 'Áudio', image: 'Foto', video: 'Vídeo', document: 'Documento', sticker: 'Figurinha' };
+    const name = names[type] || 'Anexo';
+    return `[${name} recebido, mas não foi possível baixar — peça para o contato reenviar ou veja no WhatsApp do celular]`;
+  }
+
+  /**
+   * Baixa a mídia recebida com até 3 tentativas. O WhatsApp Web às vezes ainda não terminou de
+   * liberar o arquivo quando a mensagem chega (principalmente áudios e fotos grandes): a primeira
+   * tentativa devolve vazio. Esperamos um pouco, buscamos a mensagem de novo e tentamos outra vez.
+   */
+  async downloadIncomingMedia(connectionId, message) {
+    const attempts = [0, 2500, 6000];
+    let current = message;
+    let lastReason = 'o WhatsApp não liberou o arquivo';
+
+    for (let i = 0; i < attempts.length; i += 1) {
+      if (attempts[i] > 0) await new Promise((resolve) => setTimeout(resolve, attempts[i]));
+      try {
+        const media = await withTimeout(current.downloadMedia(), 30000, 'download de mídia demorou demais');
+        if (media?.data) return { media };
+        lastReason = 'o WhatsApp devolveu o anexo vazio';
+      } catch (err) {
+        lastReason = err.message;
+      }
+
+      // Antes da próxima tentativa, busca a mensagem de novo (traz os dados de mídia atualizados).
+      const client = this.clients.get(connectionId);
+      const id = message.id?._serialized;
+      if (client && id && i < attempts.length - 1) {
+        try {
+          const fresh = await withTimeout(client.getMessageById(id), 10000, 'busca da mensagem demorou demais');
+          if (fresh) current = fresh;
+        } catch (_) {
+          /* segue com a mensagem original */
+        }
+      }
+    }
+    return { media: null, reason: lastReason };
+  }
+
   async handleIncomingMessage(userId, connectionId, message) {
     if (message.fromMe) return;
     const from = String(message.from || '');
@@ -696,24 +739,30 @@ class NativeWhatsappService {
     // Foto, vídeo, áudio, documento ou figurinha: baixa e guarda o arquivo.
     // (Antes, mensagem sem texto era descartada — por isso o chat "não recebia" mídia.)
     let mediaFields = {};
+    let mediaFailReason = null;
     if (message.hasMedia) {
-      try {
-        const media = await withTimeout(message.downloadMedia(), 60000, 'download de mídia demorou demais');
-        if (media?.data) {
-          const buffer = Buffer.from(media.data, 'base64');
+      const result = await this.downloadIncomingMedia(connectionId, message);
+      if (result.media?.data) {
+        try {
+          const buffer = Buffer.from(result.media.data, 'base64');
           if (buffer.length <= chatMediaService.MAX_RECEIVE_BYTES) {
             mediaFields = chatMediaService.saveBuffer(
               userId,
               buffer,
-              media.mimetype,
-              media.filename || (message.type === 'sticker' ? 'figurinha.webp' : null)
+              result.media.mimetype,
+              result.media.filename || (message.type === 'sticker' ? 'figurinha.webp' : null)
             );
           } else {
-            console.warn(`⚠️ [${connectionId}] Mídia recebida muito grande (${buffer.length} bytes) — não salva.`);
+            mediaFailReason = `arquivo muito grande (${buffer.length} bytes)`;
           }
+        } catch (err) {
+          mediaFailReason = `não consegui gravar o arquivo no disco: ${err.message}`;
         }
-      } catch (err) {
-        console.warn(`⚠️ [${connectionId}] Não consegui baixar a mídia recebida: ${err.message}`);
+      } else {
+        mediaFailReason = result.reason;
+      }
+      if (mediaFailReason) {
+        console.warn(`⚠️ [${connectionId}] Anexo (${message.type || 'mídia'}) não baixado: ${mediaFailReason}`);
       }
     }
 
@@ -746,7 +795,7 @@ class NativeWhatsappService {
         leadId: lead.id,
         direction: 'entrada',
         channel: 'whatsapp',
-        body: text || (message.hasMedia && !mediaFields.mediaPath ? '[Anexo recebido, mas não foi possível baixar]' : ''),
+        body: text || (message.hasMedia && !mediaFields.mediaPath ? this.mediaFailureLabel(message) : ''),
         ...mediaFields
       }
     });

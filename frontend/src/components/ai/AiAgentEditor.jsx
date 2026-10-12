@@ -208,11 +208,12 @@ export default function AiAgentEditor({ agentId, options, onClose, onSaved }) {
 
           <details open className="ia-section">
             <summary>3) Treinamento do mercado — termos técnicos</summary>
-            <p className="ia-muted">A IA usa estes termos corretamente e o reconhecimento de voz passa a entendê-los melhor ao telefone ({form.glossary.length} termo(s)).</p>
+            <p className="ia-muted">A IA usa estes termos corretamente e o reconhecimento de voz passa a entendê-los melhor ao telefone ({form.glossary.length} termo(s)). Se a voz pronunciar algum termo ou o nome da empresa errado, preencha "Como falar" escrevendo do jeito que se lê em português (ex.: Piercing → Pírsin).</p>
             {form.glossary.map((g, index) => (
               <div className="ia-row ia-gloss-row" key={index}>
                 <input value={g.term} onChange={(e) => updateRow('glossary', index, { term: e.target.value })} placeholder="Termo (ex.: threadless)" />
                 <input className="ia-grow" value={g.meaning} onChange={(e) => updateRow('glossary', index, { meaning: e.target.value })} placeholder="O que significa" />
+                <input value={g.pronunciation || ''} onChange={(e) => updateRow('glossary', index, { pronunciation: e.target.value })} placeholder="Como falar (ex.: Pírsin)" title="Escreva como se lê em português, para a voz pronunciar certo" />
                 <button type="button" className="ia-x" onClick={() => removeRow('glossary', index)}>✕</button>
               </div>
             ))}

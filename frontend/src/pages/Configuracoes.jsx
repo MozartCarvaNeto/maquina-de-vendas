@@ -19,6 +19,7 @@ export default function Configuracoes() {
   const [emailProvider, setEmailProvider] = useState('smtp');
   const [smtp, setSmtp] = useState({ host: '', port: '587', user: '', pass: '', fromEmail: '', fromName: '' });
   const [resend, setResend] = useState({ apiKey: '', fromEmail: '', fromName: '' });
+  const [sendgrid, setSendgrid] = useState({ apiKey: '', fromEmail: '', fromName: '' });
   const [domains, setDomains] = useState([]);
   const [newDomain, setNewDomain] = useState('');
   const [dnsInfoByDomain, setDnsInfoByDomain] = useState({});
@@ -65,7 +66,7 @@ export default function Configuracoes() {
         if (tel?.values?.accountSid) setTelephony((t) => ({ ...t, accountSid: tel.values.accountSid }));
 
         const mail = list.find((x) => x.category === 'email');
-        if (mail && ['smtp', 'resend', 'native'].includes(mail.provider)) {
+        if (mail && ['smtp', 'resend', 'sendgrid', 'native'].includes(mail.provider)) {
           setEmailProvider(mail.provider);
           const v = mail.values || {};
           if (mail.provider === 'smtp') {
@@ -73,6 +74,9 @@ export default function Configuracoes() {
           }
           if (mail.provider === 'resend') {
             setResend((cur) => ({ ...cur, fromEmail: v.fromEmail || '', fromName: v.fromName || '' }));
+          }
+          if (mail.provider === 'sendgrid') {
+            setSendgrid((cur) => ({ ...cur, fromEmail: v.fromEmail || '', fromName: v.fromName || '' }));
           }
         }
       }
@@ -160,7 +164,7 @@ export default function Configuracoes() {
 
   async function saveEmail(e) {
     e.preventDefault();
-    const credentials = emailProvider === 'smtp' ? smtp : emailProvider === 'resend' ? resend : {};
+    const credentials = emailProvider === 'smtp' ? smtp : emailProvider === 'resend' ? resend : emailProvider === 'sendgrid' ? sendgrid : {};
     setMessages((m) => ({ ...m, email: 'Testando a conexão…' }));
     await submitSetting({
       area: 'email',
@@ -170,6 +174,7 @@ export default function Configuracoes() {
       afterOk: () => {
         setSmtp((v) => ({ ...v, pass: '' }));
         setResend((v) => ({ ...v, apiKey: '' }));
+        setSendgrid((v) => ({ ...v, apiKey: '' }));
         loadConfiguredSettings();
       }
     });
@@ -369,7 +374,7 @@ export default function Configuracoes() {
         <div className="card">
           <h3>📧 E-mail</h3>
           <p className="card-desc">
-            Três jeitos de enviar: pelo e-mail da sua empresa (SMTP), pelo Resend (serviço pago com plano grátis)
+            Vários jeitos de enviar: pelo e-mail da sua empresa (SMTP), pelo Resend ou pela Twilio SendGrid (ambos com plano grátis)
             ou pelo <strong>E-mail Nativo</strong> — motor de envio próprio, sem mensalidade nem limite de terceiros.
           </p>
 
@@ -377,6 +382,7 @@ export default function Configuracoes() {
           <select value={emailProvider} onChange={(e) => setEmailProvider(e.target.value)}>
             <option value="smtp">📮 E-mail próprio (SMTP)</option>
             <option value="resend">☁️ Resend (plataforma dedicada)</option>
+            <option value="sendgrid">📨 Twilio SendGrid (e-mail da Twilio)</option>
             <option value="native">🚀 E-mail Nativo (sem terceiros)</option>
           </select>
 
@@ -416,6 +422,30 @@ export default function Configuracoes() {
               />
               <input placeholder="E-mail remetente" value={resend.fromEmail} onChange={(e) => setResend({ ...resend, fromEmail: e.target.value })} required />
               <input placeholder="Nome do remetente" value={resend.fromName} onChange={(e) => setResend({ ...resend, fromName: e.target.value })} />
+              <button className="btn-primary" type="submit">Salvar</button>
+              {messages.email && <p className="config-msg">{messages.email}</p>}
+              {forceButton('email')}
+            </form>
+          )}
+
+          {emailProvider === 'sendgrid' && (
+            <form onSubmit={saveEmail}>
+              <p className="hint-text">
+                O e-mail da Twilio é o <strong>SendGrid</strong> e usa uma chave própria — <strong>não</strong> é o Account
+                SID/Auth Token. Passo a passo: (1) entre em app.sendgrid.com (pelo console da Twilio, em "Send an email");
+                (2) em <em>Settings → API Keys</em> crie uma chave com permissão <em>Mail Send</em> (ou Full Access) e copie
+                o valor que começa com <code>SG.</code>; (3) em <em>Settings → Sender Authentication</em> verifique o
+                e-mail remetente (Single Sender) ou o domínio. O e-mail remetente abaixo precisa ser exatamente o verificado.
+              </p>
+              <input
+                placeholder={hintOf('email', 'sendgrid', 'apiKey') ? `API Key do SendGrid (salva ${hintOf('email', 'sendgrid', 'apiKey')} — deixe vazio para manter)` : 'API Key do SendGrid (SG.xxxxx)'}
+                type="password"
+                value={sendgrid.apiKey}
+                onChange={(e) => setSendgrid({ ...sendgrid, apiKey: e.target.value })}
+                required={!hintOf('email', 'sendgrid', 'apiKey')}
+              />
+              <input placeholder="E-mail remetente verificado no SendGrid" value={sendgrid.fromEmail} onChange={(e) => setSendgrid({ ...sendgrid, fromEmail: e.target.value })} required />
+              <input placeholder="Nome do remetente" value={sendgrid.fromName} onChange={(e) => setSendgrid({ ...sendgrid, fromName: e.target.value })} />
               <button className="btn-primary" type="submit">Salvar</button>
               {messages.email && <p className="config-msg">{messages.email}</p>}
               {forceButton('email')}

@@ -261,7 +261,7 @@ function botIsOn(campaign) {
 }
 
 async function recentHistory(leadId, incomingText) {
-  const rows = await prisma.message.findMany({ where: { leadId }, orderBy: { createdAt: 'desc' }, take: 20 });
+  const rows = await prisma.message.findMany({ where: { leadId, direction: { not: 'nota' } }, orderBy: { createdAt: 'desc' }, take: 20 });
   const ordered = rows.reverse();
   // A mensagem que acabou de chegar já foi salva: ela vai separada, não no histórico.
   const last = ordered[ordered.length - 1];

@@ -89,6 +89,23 @@
   align-self: flex-end;
 }
 
+/* Nota interna (ex.: relatório da ligação da IA): aparece só para a equipe, não foi enviada ao cliente. */
+.chat-bubble.nota {
+  align-self: center;
+  max-width: min(640px, 92%);
+  background: #fff8e1;
+  border: 1px dashed #f0b429;
+  color: #5c4400;
+  font-size: 13px;
+}
+
+.chat-note-label {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #8a6100;
+}
+
 .chat-input-bar {
   display: flex;
   gap: 8px;

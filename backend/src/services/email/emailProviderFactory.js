@@ -3,12 +3,15 @@ const prisma = require('../../config/db');
 const { decrypt } = require('../crypto/settingsCrypto');
 const ResendEmailProvider = require('./ResendEmailProvider');
 const SmtpEmailProvider = require('./SmtpEmailProvider');
+const SendGridEmailProvider = require('./SendGridEmailProvider');
 const NativeEmailProvider = require('./NativeEmailProvider');
 const { getActiveDomainForSending } = require('./emailDomainService');
 
 const EMAIL_PROVIDER_REGISTRY = {
   resend: ResendEmailProvider,
   smtp: SmtpEmailProvider,
+  // Twilio SendGrid: o serviço de e-mail da Twilio (chave própria "SG.…", remetente verificado).
+  sendgrid: SendGridEmailProvider,
   // "native": envio direto pelo próprio servidor (DKIM + SMTP direto no MX
   // do destinatário), sem Resend/Brevo/Mailchimp. Registrado aqui só para
   // aparecer na lista de provedores disponíveis e passar na validação de

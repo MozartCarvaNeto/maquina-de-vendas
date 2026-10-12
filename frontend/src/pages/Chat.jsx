@@ -8,6 +8,7 @@ import './Chat.css';
 
 function previewLabel(message) {
   if (!message) return '';
+  if (message.direction === 'nota') return '📋 Relatório da ligação (IA)';
   if (message.body) return message.body;
   const labels = { image: '📷 Foto', video: '🎥 Vídeo', audio: '🎤 Áudio' };
   if (message.mediaType === 'document') return `📄 ${message.mediaName || 'Documento'}`;
@@ -230,6 +231,7 @@ export default function Chat() {
               {messages.map((msg) => (
                 <div key={msg.id} className={`chat-bubble ${msg.direction}${msg.mediaType ? ' has-media' : ''}`}>
                   {msg.mediaType && <ChatMedia message={msg} />}
+                  {msg.direction === 'nota' && <div className="chat-note-label">📌 Nota interna — só a equipe vê (não foi enviada ao cliente)</div>}
                   {msg.body && <div className="chat-bubble-text">{msg.body}</div>}
                 </div>
               ))}

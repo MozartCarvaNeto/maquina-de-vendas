@@ -54,7 +54,7 @@ async function processFollowUpsAndNurture() {
     },
     include: {
       campaign: true,
-      messages: { orderBy: { createdAt: 'desc' }, take: 1 }
+      messages: { where: { direction: { not: 'nota' } }, orderBy: { createdAt: 'desc' }, take: 1 }
     }
   });
 

@@ -21,6 +21,7 @@ const {
   runAgentTurn,
   looksLikeVoicemail
 } = require('./aiVoiceEngine');
+const { applyPronunciation } = require('./pronunciation');
 
 const TERMINAL_STATUSES = ['encerrada', 'ocupado', 'falhou', 'sem_resposta'];
 const RING_TIMEOUT_SECONDS = 25;
@@ -128,7 +129,9 @@ function validatePublicUrl() {
 
 function sayTag(text, agent) {
   const voice = agent.voice ? ` voice="${escapeXml(agent.voice)}"` : '';
-  return `<Say${voice} language="${escapeXml(agent.language || 'pt-BR')}">${escapeXml(text)}</Say>`;
+  // Troca palavras em inglês (ex.: nome da empresa) pela grafia que a voz em português lê direito.
+  const spoken = applyPronunciation(text, agent);
+  return `<Say${voice} language="${escapeXml(agent.language || 'pt-BR')}">${escapeXml(spoken)}</Say>`;
 }
 
 // Os termos do glossário viram "dicas" para o reconhecimento de voz acertar
@@ -473,6 +476,110 @@ const OUTCOME_LABEL = {
   sem_conclusao: 'Sem conclusão'
 };
 
+// ------------------------------------------------------------------ relatório da ligação
+
+const NO_REPORT_OUTCOMES = ['optout', 'numero_errado', 'caixa_postal', 'sem_resposta'];
+
+const NEXT_STEP = {
+  quente: 'Chame o cliente agora: ele demonstrou interesse e está esperando o consultor.',
+  morno: 'Retome o contato em até 2 dias úteis, enviando catálogo e condições.',
+  retorno_agendado: 'Ligue ou chame no WhatsApp no horário combinado.',
+  frio: 'Sem ação imediata.',
+  nao_interessado: 'Sem ação — o cliente não tem interesse agora.',
+  sem_conclusao: 'A conversa não terminou com uma conclusão: vale uma segunda tentativa.'
+};
+
+/** Resume a conversa: no máximo 14 falas (as 2 primeiras e as últimas), cada uma curta. */
+function transcriptDigest(session) {
+  const turns = asList(session.transcript).filter((t) => t && t.text);
+  const fmt = (t) => `${t.role === 'agent' ? '🤖 IA' : '👤 Cliente'}: ${String(t.text).replace(/\s+/g, ' ').slice(0, 180)}`;
+  if (turns.length <= 14) return turns.map(fmt);
+  const omitted = turns.length - 14;
+  return [...turns.slice(0, 2).map(fmt), `… (${omitted} falas omitidas) …`, ...turns.slice(-12).map(fmt)];
+}
+
+/**
+ * Relatório básico para quem vai continuar o atendimento saber o que já foi conversado.
+ * `markdown` = true usa *negrito* do WhatsApp; false é texto limpo para o Chat do sistema.
+ */
+function buildCallReport({ lead, session, agent, outcome, isTest, markdown }) {
+  const b = (text) => (markdown ? `*${text}*` : text);
+  const stamp = new Date().toLocaleString('pt-BR', { timeZone: SP_TZ });
+  const lines = [];
+
+  lines.push(`📋 ${b(`Relatório da ligação — ${agent.name}`)}${isTest ? ' 🧪 TESTE' : ''}`);
+  lines.push(`🕒 ${stamp}`);
+  lines.push(`👤 ${b('Contato:')} ${lead.name}${lead.phone ? ` — ${lead.phone}` : ''}`);
+  lines.push(`🎯 ${b('Resultado:')} ${OUTCOME_LABEL[outcome] || outcome}`);
+
+  const collected = collectedToLines(session, agent);
+  lines.push('');
+  lines.push(`📝 ${b('Resumo:')} ${session.summary || (collected.length ? 'A IA não gerou um resumo; veja as informações coletadas abaixo.' : 'A IA não gerou um resumo desta conversa.')}`);
+
+  if (collected.length) {
+    lines.push('');
+    lines.push(`✅ ${b('Informações coletadas:')}`);
+    lines.push(...collected);
+  }
+
+  if (session.callbackAt) {
+    const when = new Date(session.callbackAt).toLocaleString('pt-BR', { timeZone: SP_TZ });
+    lines.push('');
+    lines.push(`🗓️ ${b('Retorno combinado:')} ${when}${session.callbackNote ? ` — ${session.callbackNote}` : ''}`);
+  }
+
+  const handoffText = {
+    conectada: 'ligação transferida e atendida pelo consultor',
+    vendedor_indisponivel: 'o consultor NÃO atendeu a transferência — o cliente aguarda retorno',
+    whatsapp_enviado: 'consultor avisado por WhatsApp',
+    whatsapp_pendente: 'passagem ao consultor combinada com o cliente',
+    transferindo: 'transferência em andamento'
+  }[session.handoffStatus];
+  if (handoffText) lines.push('', `🤝 ${b('Passagem ao consultor:')} ${handoffText}`);
+
+  const digest = transcriptDigest(session);
+  if (digest.length) {
+    lines.push('', `💬 ${b('Conversa (resumida):')}`, ...digest);
+  }
+
+  lines.push('', `➡️ ${b('Próximo passo:')} ${NEXT_STEP[outcome] || NEXT_STEP.sem_conclusao}`);
+
+  const digits = String(lead.phone || '').replace(/\D/g, '');
+  if (digits) lines.push(`📱 Chamar no WhatsApp: https://wa.me/${digits.length <= 11 ? `55${digits}` : digits}`);
+  if (isTest) lines.push('', '🧪 Ligação de teste: nada foi alterado no CRM nem enviado ao cliente.');
+
+  return lines.join('\n');
+}
+
+/**
+ * Entrega o relatório: (1) no histórico do contato em Conversas, como nota interna — assim quem abre o
+ * chat vê o que a IA conversou antes de responder; (2) no WhatsApp do consultor. Na ligação de teste
+ * o relatório vai para o consultor cadastrado ou, se não houver, para o próprio número de teste.
+ */
+async function deliverCallReport({ session, agent, lead, outcome, isTest }) {
+  if (!session.turnCount) return;
+  if (!isTest && NO_REPORT_OUTCOMES.includes(outcome)) return;
+
+  const target = await resolveHandoffTarget(agent);
+
+  const plain = buildCallReport({ lead, session, agent, outcome, isTest, markdown: false });
+  const note = await prisma.message.create({
+    data: { leadId: lead.id, direction: 'nota', channel: 'ia_relatorio', body: plain }
+  });
+  emitToAccount(lead.userId, 'whatsapp:message', { leadId: lead.id, message: note });
+
+  const qualifies = ['quente', 'morno', 'retorno_agendado'].includes(outcome);
+  const sellerPhone = isTest ? target?.phone || lead.phone : qualifies && agent.notifySellerWhatsapp ? target?.phone : null;
+  if (!sellerPhone) return;
+
+  const result = await sendWhatsapp(
+    lead.userId,
+    sellerPhone,
+    buildCallReport({ lead, session, agent, outcome, isTest, markdown: true })
+  );
+  if (!result.sent) console.warn(`⚠️ Relatório da ligação não enviado ao consultor: ${result.reason}`);
+}
+
 /** Aplica no sistema o que a ligação concluiu (uma única vez por ligação). */
 async function applyOutcomeEffects(sessionId) {
   const claim = await prisma.aiCallSession.updateMany({
@@ -482,13 +589,20 @@ async function applyOutcomeEffects(sessionId) {
   if (claim.count === 0) return null;
 
   const session = await prisma.aiCallSession.findUnique({ where: { id: sessionId } });
-  if (!session || session.isTest) return null;
+  if (!session) return null;
 
   const agent = session.agentId ? await getAgentCached(session.agentId) : null;
   const lead = await prisma.lead.findUnique({ where: { id: session.leadId } });
   if (!agent || !lead) return null;
 
   const outcome = session.outcome || (session.turnCount > 0 ? 'sem_conclusao' : 'sem_resposta');
+
+  // Relatório da conversa (nota no chat + WhatsApp do consultor). Falha aqui nunca derruba o fechamento.
+  deliverCallReport({ session, agent, lead, outcome, isTest: !!session.isTest }).catch((error) =>
+    console.error(`⚠️ Relatório da ligação falhou: ${error.message}`)
+  );
+  // Ligação de teste: só o relatório; não mexe em CRM, status do lead nem manda mensagem ao cliente.
+  if (session.isTest) return null;
   const stamp = new Date().toLocaleString('pt-BR', { timeZone: SP_TZ });
   const headerLines = [`🤖 Agente IA "${agent.name}" — ${stamp}`, `Resultado: ${OUTCOME_LABEL[outcome] || outcome}`];
   if (session.summary) headerLines.push(`Resumo: ${session.summary}`);

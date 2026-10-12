@@ -134,6 +134,14 @@ exports.saveEmailSettings = async (req, res, next) => {
         return res.status(400).json({ error: 'apiKey e fromEmail são obrigatórios para o Resend' });
       }
     }
+    if (provider === 'sendgrid') {
+      if (!merged.apiKey || !merged.fromEmail) {
+        return res.status(400).json({ error: 'Informe a API Key do SendGrid e o e-mail remetente (já verificado no SendGrid).' });
+      }
+      if (!/^SG\./.test(merged.apiKey)) {
+        return res.status(400).json({ error: 'A chave do SendGrid começa com "SG.". O Account SID/Auth Token da Twilio não envia e-mails.' });
+      }
+    }
     if (provider === 'smtp') {
       const requiredFields = ['host', 'port', 'user', 'pass', 'fromEmail'];
       const missing = requiredFields.filter((key) => !merged[key]);
