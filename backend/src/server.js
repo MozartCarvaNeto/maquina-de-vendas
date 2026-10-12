@@ -110,6 +110,8 @@ app.use('/api/email/t', emailTrackingRoutes);
 
 // Serve as imagens anexadas aos disparos (usadas para pré-visualização na
 // tela de Disparos e como fonte dos anexos enviados por e-mail/WhatsApp).
+// Arquivos do Chat são privados: só saem pela rota autenticada /api/whatsapp/messages/:id/media.
+app.use('/uploads/chat-media', (req, res) => res.sendStatus(404));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 /**

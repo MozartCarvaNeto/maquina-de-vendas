@@ -3,6 +3,8 @@ const prisma = require('../config/db');
 const nativeWhatsappService = require('../services/whatsapp/nativeWhatsappService');
 const whatsappDispatcher = require('../services/whatsapp/whatsappDispatcher');
 const { checkLimit } = require('../services/planService');
+const chatMediaService = require('../services/whatsapp/chatMediaService');
+const fs = require('fs');
 
 // ==================== CONEXÕES (SESSÕES NATIVAS) ====================
 
@@ -176,9 +178,15 @@ exports.listConversation = async (req, res, next) => {
 
 exports.sendMessage = async (req, res, next) => {
   try {
-    const { leadId, text, instanceId } = req.body;
-    if (!leadId || !text || !instanceId) {
-      return res.status(400).json({ error: 'leadId, text e instanceId são obrigatórios' });
+    const { leadId, instanceId } = req.body;
+    const text = typeof req.body.text === 'string' ? req.body.text : '';
+    const file = req.file || null;
+    if (!leadId || !instanceId || (!text.trim() && !file)) {
+      return res.status(400).json({ error: 'Informe o contato, o número e uma mensagem ou um arquivo.' });
+    }
+    if (file) {
+      const fileError = chatMediaService.validateOutgoing(file);
+      if (fileError) return res.status(400).json({ error: fileError });
     }
 
     const lead = await prisma.lead.findFirst({ where: { id: leadId, userId: req.userId } });
@@ -200,16 +208,66 @@ exports.sendMessage = async (req, res, next) => {
     if (!whatsappDispatcher.isReady(sendableConnection)) {
       return res.status(409).json({ error: 'Esta conexão de WhatsApp não está pronta para envio no momento.' });
     }
-    await whatsappDispatcher.sendMessage(sendableConnection, lead.phone, text);
+
+    let mediaFields = {};
+    if (file) {
+      mediaFields = chatMediaService.saveBuffer(req.userId, file.buffer, file.mimetype, file.originalname);
+      const absolute = chatMediaService.resolvePath(mediaFields.mediaPath);
+      try {
+        await whatsappDispatcher.sendMessage(sendableConnection, lead.phone, text, absolute, {
+          mimeType: mediaFields.mediaMime,
+          fileName: mediaFields.mediaName,
+          mediaMime: mediaFields.mediaMime,
+          mediaName: mediaFields.mediaName,
+          asDocument: mediaFields.mediaType === 'document'
+        });
+      } catch (sendError) {
+        fs.rm(absolute, { force: true }, () => null); // não deixa arquivo órfão se o envio falhou
+        throw sendError;
+      }
+    } else {
+      await whatsappDispatcher.sendMessage(sendableConnection, lead.phone, text);
+    }
 
     const message = await prisma.message.create({
-      data: { leadId: lead.id, direction: 'saida', channel: 'whatsapp', body: text }
+      data: { leadId: lead.id, direction: 'saida', channel: 'whatsapp', body: text, ...mediaFields }
     });
 
     const io = req.app.get('io');
     io.to(`user:${req.userId}`).emit('whatsapp:message', { leadId: lead.id, message });
 
     res.status(201).json({ message });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Entrega o arquivo de uma mensagem (foto, documento, áudio, vídeo) — só para
+ * quem é dono da conversa. O arquivo NÃO é público.
+ */
+exports.getMessageMedia = async (req, res, next) => {
+  try {
+    const message = await prisma.message.findFirst({
+      where: { id: req.params.messageId, lead: { userId: req.userId } }
+    });
+    if (!message || !message.mediaPath) {
+      return res.status(404).json({ error: 'Arquivo não encontrado' });
+    }
+    const absolute = chatMediaService.resolvePath(message.mediaPath);
+    if (!absolute || !fs.existsSync(absolute)) {
+      return res.status(404).json({ error: 'O arquivo não está mais no servidor' });
+    }
+
+    const type = message.mediaMime || 'application/octet-stream';
+    // Tipos que o navegador mostra direto; o resto (e qualquer coisa suspeita) vai como download.
+    const inline = /^(image\/(jpeg|png|webp|gif)|video\/|audio\/|application\/pdf)/.test(type);
+    const safeName = encodeURIComponent(message.mediaName || 'arquivo');
+    res.setHeader('Content-Type', type);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.setHeader('Content-Disposition', `${inline && req.query.download !== '1' ? 'inline' : 'attachment'}; filename*=UTF-8''${safeName}`);
+    res.sendFile(absolute, { headers: {} });
   } catch (error) {
     next(error);
   }

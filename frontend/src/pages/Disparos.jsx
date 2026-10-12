@@ -1,6 +1,7 @@
 // frontend/src/pages/Disparos.jsx
 import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import api from '../services/api';
+import { ATTACHMENT_REGEX, BLOCKED_EXT_REGEX, ATTACHMENT_ACCEPT } from '../utils/attachments';
 import './Disparos.css';
 
 function emptyForm() {
@@ -250,17 +251,14 @@ export default function Disparos() {
     const chosen = Array.from(e.target.files || []);
     const valid = [];
 
+    const maxBytes = (form.channel === 'whatsapp' ? 16 : 10) * 1024 * 1024;
     for (const file of chosen) {
-      if (file.size > 10 * 1024 * 1024) {
-        alert(`A imagem ${file.name} ultrapassa o limite de 10 MB.`);
+      if (file.size > maxBytes) {
+        alert(`O arquivo ${file.name} ultrapassa o limite de ${form.channel === 'whatsapp' ? 16 : 10} MB.`);
         continue;
       }
-      if (form.channel === 'whatsapp' && file.type !== 'image/jpeg') {
-        alert('Para WhatsApp, selecione uma imagem JPEG/JPG.');
-        continue;
-      }
-      if (!file.type.startsWith('image/')) {
-        alert('O arquivo selecionado não é uma imagem.');
+      if (!ATTACHMENT_REGEX.test(file.type || '') || BLOCKED_EXT_REGEX.test(file.name)) {
+        alert(`Formato não permitido: ${file.name}. Use foto (JPG, PNG, WebP), vídeo MP4, PDF, Word, Excel, PowerPoint, TXT, CSV ou ZIP.`);
         continue;
       }
       valid.push(file);
@@ -287,12 +285,6 @@ export default function Disparos() {
     const cleanVariants = form.variants.map((v) => v.trim()).filter(Boolean);
     if (form.channel === 'whatsapp' && !cleanVariants.length) {
       alert('Informe pelo menos uma variação de mensagem.');
-      setSaving(false);
-      return;
-    }
-
-    if (form.channel === 'whatsapp' && form.attachments[0] && form.attachments[0].type !== 'image/jpeg') {
-      alert('A imagem do WhatsApp deve ser JPEG/JPG.');
       setSaving(false);
       return;
     }
@@ -399,7 +391,7 @@ export default function Disparos() {
       <header>
         <h1>Disparos em Massa</h1>
         <p>
-          Crie campanhas, anexe uma imagem JPEG no WhatsApp, acompanhe cada lead e retome um disparo interrompido
+          Crie campanhas, anexe foto, vídeo ou PDF no WhatsApp, acompanhe cada lead e retome um disparo interrompido
           sem refazer a configuração. Os contatos que já foram enviados permanecem registrados.
         </p>
       </header>
@@ -432,7 +424,7 @@ export default function Disparos() {
                   <tr>
                     <td>
                       <strong>{b.name}</strong>
-                      {Array.isArray(b.attachments) && b.attachments.length > 0 && <span className="attachment-badge">🖼️ imagem</span>}
+                      {Array.isArray(b.attachments) && b.attachments.length > 0 && <span className="attachment-badge">📎 anexo</span>}
                     </td>
                     <td>{b.channel === 'email' ? '📧 E-mail' : b.channel === 'whatsapp' ? '💬 WhatsApp' : '📱 SMS'}</td>
                     <td>
@@ -684,25 +676,25 @@ export default function Disparos() {
 
               {(form.channel === 'whatsapp' || form.channel === 'email') && (
                 <div className="image-upload-box">
-                  <label>{form.channel === 'whatsapp' ? 'Imagem JPEG para acompanhar a mensagem' : 'Imagens anexadas (opcional)'}</label>
+                  <label>{form.channel === 'whatsapp' ? 'Foto, vídeo ou documento para acompanhar a mensagem (opcional)' : 'Anexos (opcional)'}</label>
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept={form.channel === 'whatsapp' ? 'image/jpeg,.jpg,.jpeg' : 'image/*'}
+                    accept={ATTACHMENT_ACCEPT}
                     multiple={form.channel !== 'whatsapp'}
                     onChange={handleAttachmentsChange}
                   />
                   <p className="hint-text">
                     {form.channel === 'whatsapp'
-                      ? 'WhatsApp: 1 imagem JPEG/JPG, até 10 MB. Ela será enviada como mídia com a mensagem como legenda.'
-                      : 'Até 5 imagens, 10 MB cada.'}
+                      ? 'WhatsApp: 1 arquivo (foto JPG/PNG/WebP, vídeo MP4, PDF, Word, Excel...), até 16 MB. A mensagem vai como legenda.'
+                      : 'Até 5 arquivos (fotos, PDF, Word, Excel...), 10 MB cada.'}
                   </p>
 
                   {form.attachments.length > 0 && (
                     <ul className="attachments-list">
                       {form.attachments.map((file, index) => (
                         <li key={`${file.name}-${index}`}>
-                          <span>🖼️ {file.name}</span>
+                          <span>{file.type.startsWith('image/') ? '🖼️' : '📄'} {file.name}</span>
                           <button type="button" className="btn-link-small" onClick={() => removeAttachment(index)}>remover</button>
                         </li>
                       ))}

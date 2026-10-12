@@ -20,17 +20,16 @@ function isReady(connection) {
  *   campo `accessToken` já descriptografado quando for cloud_api — use
  *   `loadConnectionForSending` abaixo pra isso).
  */
-async function sendMessage(connection, toPhone, text, mediaFilePath) {
+async function sendMessage(connection, toPhone, text, mediaFilePath, mediaOptions = {}) {
   if (connection.provider === 'cloud_api') {
-    // A Meta não aceita enviar um arquivo do seu disco — ela busca por uma
-    // URL pública. Como o backend já serve /uploads publicamente, isso
-    // funciona sem precisar subir o arquivo pra Meta antes.
-    const mediaUrl = mediaFilePath
-      ? `${env.backendPublicUrl.replace(/\/$/, '')}/uploads/${require('path').basename(mediaFilePath)}`
-      : null;
-    return metaCloudApiService.sendMessage(connection, toPhone, text, mediaUrl);
+    // Sobe o arquivo para a Meta e envia pelo id (antes usava uma URL
+    // pública montada errada, o que quebrava os disparos com imagem).
+    if (mediaFilePath) {
+      return metaCloudApiService.sendMediaFile(connection, toPhone, text, mediaFilePath, mediaOptions);
+    }
+    return metaCloudApiService.sendMessage(connection, toPhone, text, null);
   }
-  return nativeWhatsappService.sendMessage(connection.id, toPhone, text, mediaFilePath);
+  return nativeWhatsappService.sendMessage(connection.id, toPhone, text, mediaFilePath, mediaOptions);
 }
 
 /** Carrega a conexão já pronta pra enviar — com o token descriptografado, se for cloud_api. */

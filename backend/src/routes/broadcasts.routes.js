@@ -5,13 +5,14 @@ const router = express.Router();
 const broadcastController = require('../controllers/broadcastController');
 const auth = require('../middlewares/auth');
 const { requireFeature } = require('../services/featureService');
+const chatMediaService = require('../services/whatsapp/chatMediaService');
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024, files: 5 },
+  limits: { fileSize: 16 * 1024 * 1024, files: 5 },
   fileFilter: (req, file, cb) => {
-    if (!file.mimetype || !file.mimetype.startsWith('image/')) {
-      return cb(new Error('Só é permitido anexar arquivos de imagem.'));
+    if (!chatMediaService.isAllowedAttachment(file)) {
+      return cb(new Error('Formato não permitido. Use foto (JPG, PNG, WebP), vídeo MP4, PDF, Word, Excel, PowerPoint, TXT, CSV ou ZIP.'));
     }
     cb(null, true);
   }
@@ -24,15 +25,12 @@ function handleUpload(req, res, next) {
   upload.array('attachments', 5)(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message || 'Erro ao processar a imagem.' });
 
-    // O disparo de WhatsApp aceita exatamente uma imagem JPEG/JPG.
-    if (req.body?.channel === 'whatsapp' && req.files?.length) {
-      if (req.files.length > 1) {
-        return res.status(400).json({ error: 'No WhatsApp, anexe apenas 1 imagem JPEG.' });
-      }
-      const file = req.files[0];
-      if (file.mimetype !== 'image/jpeg') {
-        return res.status(400).json({ error: 'A imagem do WhatsApp deve estar no formato JPEG/JPG.' });
-      }
+    // O disparo de WhatsApp leva 1 anexo (foto, vídeo, PDF...). E-mail aceita até 10 MB por arquivo.
+    if (req.body?.channel === 'whatsapp' && req.files?.length > 1) {
+      return res.status(400).json({ error: 'No WhatsApp, anexe apenas 1 arquivo por disparo.' });
+    }
+    if (req.body?.channel === 'email' && req.files?.some((f) => f.size > 10 * 1024 * 1024)) {
+      return res.status(400).json({ error: 'Cada anexo de e-mail pode ter no máximo 10 MB.' });
     }
 
     next();

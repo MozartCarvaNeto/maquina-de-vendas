@@ -131,10 +131,7 @@ exports.create = async (req, res, next) => {
       }
 
       if (req.files?.length > 1) {
-        return res.status(400).json({ error: 'No WhatsApp, anexe apenas 1 imagem JPEG.' });
-      }
-      if (req.files?.[0] && req.files[0].mimetype !== 'image/jpeg') {
-        return res.status(400).json({ error: 'A imagem do WhatsApp deve estar no formato JPEG/JPG.' });
+        return res.status(400).json({ error: 'No WhatsApp, anexe apenas 1 arquivo por disparo.' });
       }
     } else if (!message) {
       return res.status(400).json({ error: 'message é obrigatório' });

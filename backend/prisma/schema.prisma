@@ -381,6 +381,12 @@ model Message {
   direction String
   channel   String   @default("whatsapp")
   body      String
+  // Anexos do chat (foto, vídeo, áudio, documento). Arquivo em uploads/chat-media/<mediaPath>
+  mediaType String?
+  mediaPath String?
+  mediaMime String?
+  mediaName String?
+  mediaSize Int?
   createdAt DateTime @default(now())
 
   @@map("messages")

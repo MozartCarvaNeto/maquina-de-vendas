@@ -3,6 +3,7 @@ const prisma = require('../config/db');
 const metaCloudApiService = require('../services/whatsapp/metaCloudApiService');
 const whatsappDispatcher = require('../services/whatsapp/whatsappDispatcher');
 const whatsappIncomingService = require('../services/whatsapp/whatsappIncomingService');
+const chatMediaService = require('../services/whatsapp/chatMediaService');
 
 exports.create = async (req, res, next) => {
   try {
@@ -80,14 +81,40 @@ exports.handleWebhook = async (req, res) => {
         }
 
         for (const message of value.messages || []) {
-          if (message.type !== 'text') continue; // áudio/imagem/etc podem ser adicionados depois
+          const MEDIA_TYPES = ['image', 'video', 'audio', 'document', 'sticker'];
+          const isMedia = MEDIA_TYPES.includes(message.type);
+          if (message.type !== 'text' && !isMedia) continue; // localização, contato etc. ainda não suportados
           const contact = (value.contacts || []).find((c) => c.wa_id === message.from);
+
+          let media = null;
+          let mediaFailed = false;
+          let text = message.text?.body || '';
+          if (isMedia) {
+            const payload = message[message.type] || {};
+            text = payload.caption || '';
+            try {
+              const sendable = await whatsappDispatcher.loadConnectionForSending(connection.id);
+              const downloaded = await metaCloudApiService.downloadMedia(sendable, payload.id);
+              if (downloaded.buffer.length <= chatMediaService.MAX_RECEIVE_BYTES) {
+                media = {
+                  buffer: downloaded.buffer,
+                  mimeType: payload.mime_type || downloaded.mimeType,
+                  fileName: payload.filename || (message.type === 'sticker' ? 'figurinha.webp' : null)
+                };
+              }
+            } catch (err) {
+              console.warn(`⚠️ Não consegui baixar a mídia da Meta (${message.type}): ${err.message}`);
+              mediaFailed = true;
+            }
+          }
 
           await whatsappIncomingService.processIncomingMessage({
             userId: connection.userId,
             connectionId: connection.id,
             phone: message.from,
-            text: message.text?.body || '',
+            text,
+            media,
+            mediaFailed,
             contactName: contact?.profile?.name,
             referral: message.referral
               ? { sourceId: message.referral.source_id, sourceUrl: message.referral.source_url, headline: message.referral.headline }

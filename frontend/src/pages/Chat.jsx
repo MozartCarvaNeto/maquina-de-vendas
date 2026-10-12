@@ -2,7 +2,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import api from '../services/api';
 import { useSocket } from '../hooks/useSocket';
+import ChatMedia from '../components/ChatMedia';
+import { ATTACHMENT_REGEX, BLOCKED_EXT_REGEX, ATTACHMENT_ACCEPT, formatBytes } from '../utils/attachments';
 import './Chat.css';
+
+function previewLabel(message) {
+  if (!message) return '';
+  if (message.body) return message.body;
+  const labels = { image: '📷 Foto', video: '🎥 Vídeo', audio: '🎤 Áudio' };
+  if (message.mediaType === 'document') return `📄 ${message.mediaName || 'Documento'}`;
+  return labels[message.mediaType] || '';
+}
 
 export default function Chat() {
   const [conversations, setConversations] = useState([]);
@@ -12,6 +22,9 @@ export default function Chat() {
   const [selectedInstance, setSelectedInstance] = useState('');
   const [inputText, setInputText] = useState('');
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const [pendingFile, setPendingFile] = useState(null);
+  const [sending, setSending] = useState(false);
 
   const [showNewChatModal, setShowNewChatModal] = useState(false);
   const [leadSearch, setLeadSearch] = useState('');
@@ -48,7 +61,7 @@ export default function Chat() {
 
     const handleIncoming = ({ leadId, message }) => {
       if (activeLead && leadId === activeLead.id) {
-        setMessages((prev) => [...prev, message]);
+        setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
       }
       // Várias mensagens em sequência geram uma única recarga da lista
       // (antes cada mensagem baixava todas as conversas de novo).
@@ -70,26 +83,65 @@ export default function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const MAX_FILE_BYTES = 16 * 1024 * 1024;
+
+  function pickFile(file) {
+    if (!file) return;
+    if (file.size > MAX_FILE_BYTES) {
+      alert('O arquivo ultrapassa o limite de 16 MB do WhatsApp.');
+      return;
+    }
+    if (!ATTACHMENT_REGEX.test(file.type || '') || BLOCKED_EXT_REGEX.test(file.name || '')) {
+      alert('Formato não permitido. Envie foto (JPG, PNG, WebP), vídeo MP4, PDF, Word, Excel, PowerPoint, TXT, CSV ou ZIP.');
+      return;
+    }
+    setPendingFile(file);
+  }
+
+  function handlePaste(e) {
+    const item = Array.from(e.clipboardData?.items || []).find((i) => i.kind === 'file' && i.type.startsWith('image/'));
+    if (item) {
+      e.preventDefault();
+      const blob = item.getAsFile();
+      pickFile(new File([blob], `imagem-${Date.now()}.${(blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`, { type: blob.type }));
+    }
+  }
+
+  function handleDrop(e) {
+    e.preventDefault();
+    pickFile(e.dataTransfer?.files?.[0]);
+  }
+
   async function handleSend(e) {
     e.preventDefault();
-    if (!inputText.trim() || !activeLead || !selectedInstance) return;
+    if ((!inputText.trim() && !pendingFile) || !activeLead || !selectedInstance || sending) return;
 
     if (!activeLead.phone) {
       alert('Este lead não tem telefone cadastrado — não é possível enviar WhatsApp.');
       return;
     }
 
+    setSending(true);
     try {
-      const { data } = await api.post('/whatsapp/messages', {
-        leadId: activeLead.id,
-        text: inputText,
-        instanceId: selectedInstance
-      });
-      setMessages((prev) => [...prev, data.message]);
+      let payload;
+      if (pendingFile) {
+        payload = new FormData();
+        payload.append('leadId', activeLead.id);
+        payload.append('instanceId', selectedInstance);
+        payload.append('text', inputText);
+        payload.append('file', pendingFile);
+      } else {
+        payload = { leadId: activeLead.id, text: inputText, instanceId: selectedInstance };
+      }
+      const { data } = await api.post('/whatsapp/messages', payload, { timeout: 120000 });
+      setMessages((prev) => (prev.some((m) => m.id === data.message.id) ? prev : [...prev, data.message]));
       setInputText('');
+      setPendingFile(null);
       loadConversations(); // atualiza a lista à esquerda, inclusive se esta era a 1ª mensagem
     } catch (error) {
       alert(error.response?.data?.error || 'Erro ao enviar mensagem');
+    } finally {
+      setSending(false);
     }
   }
 
@@ -127,7 +179,7 @@ export default function Chat() {
             onClick={() => openConversation(conv.id)}
           >
             <strong>{conv.name}</strong>
-            <p>{conv.messages[0]?.body?.slice(0, 40)}</p>
+            <p>{previewLabel(conv.messages[0]).slice(0, 40)}</p>
           </div>
         ))}
         {conversations.length === 0 && (
@@ -162,18 +214,25 @@ export default function Chat() {
               </div>
             )}
 
-            <div className="chat-messages">
+            <div className="chat-messages" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
               {messages.length === 0 && (
                 <p className="chat-empty-conversation">Esta é uma conversa nova — envie a primeira mensagem abaixo.</p>
               )}
               {messages.map((msg) => (
-                <div key={msg.id} className={`chat-bubble ${msg.direction}`}>
-                  {msg.body}
+                <div key={msg.id} className={`chat-bubble ${msg.direction}${msg.mediaType ? ' has-media' : ''}`}>
+                  {msg.mediaType && <ChatMedia message={msg} />}
+                  {msg.body && <div className="chat-bubble-text">{msg.body}</div>}
                 </div>
               ))}
               <div ref={messagesEndRef} />
             </div>
 
+            {pendingFile && (
+              <div className="chat-pending-file">
+                <span>{pendingFile.type.startsWith('image/') ? '🖼️' : '📎'} <strong>{pendingFile.name}</strong> ({formatBytes(pendingFile.size)})</span>
+                <button type="button" className="btn-link-small" onClick={() => setPendingFile(null)}>remover</button>
+              </div>
+            )}
             <form className="chat-input-bar" onSubmit={handleSend}>
               <select value={selectedInstance} onChange={(e) => setSelectedInstance(e.target.value)} disabled={!activeLead.phone}>
                 <option value="">Selecione o número</option>
@@ -182,12 +241,34 @@ export default function Chat() {
                 ))}
               </select>
               <input
-                placeholder={activeLead.phone ? 'Digite sua mensagem...' : 'Indisponível: lead sem telefone'}
+                ref={fileInputRef}
+                type="file"
+                accept={ATTACHMENT_ACCEPT}
+                style={{ display: 'none' }}
+                onChange={(e) => { pickFile(e.target.files?.[0]); e.target.value = ''; }}
+              />
+              <button
+                type="button"
+                className="chat-attach-btn"
+                title="Anexar foto, vídeo ou documento"
+                aria-label="Anexar arquivo"
+                disabled={!activeLead.phone}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                📎
+              </button>
+              <input
+                placeholder={
+                  !activeLead.phone ? 'Indisponível: lead sem telefone' : pendingFile ? 'Legenda (opcional)...' : 'Digite sua mensagem...'
+                }
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
+                onPaste={handlePaste}
                 disabled={!activeLead.phone}
               />
-              <button className="btn-primary" type="submit" disabled={!activeLead.phone || !selectedInstance}>Enviar</button>
+              <button className="btn-primary" type="submit" disabled={!activeLead.phone || !selectedInstance || sending}>
+                {sending ? 'Enviando…' : 'Enviar'}
+              </button>
             </form>
           </>
         )}

@@ -324,10 +324,21 @@ async function executeBroadcast(broadcastId) {
       ? path.join(ATTACHMENTS_ROOT, broadcastId, firstAttachment.filename)
       : null;
 
+  const attachmentMime = String(firstAttachment?.mimeType || '').split(';')[0].toLowerCase();
+  const whatsappMediaOptions = firstAttachment
+    ? {
+        mimeType: attachmentMime || undefined,
+        fileName: firstAttachment.originalName || firstAttachment.filename,
+        mediaMime: attachmentMime || undefined,
+        mediaName: firstAttachment.originalName || firstAttachment.filename,
+        asDocument: !/^(image|video)\//.test(attachmentMime)
+      }
+    : {};
+
   if (broadcast.channel === 'whatsapp' && whatsappMediaPath && !fs.existsSync(whatsappMediaPath)) {
     await prisma.broadcastCampaign.update({
       where: { id: broadcast.id },
-      data: { status: 'falhou', isRunning: false, runningNote: 'A imagem anexada não foi encontrada no servidor.' }
+      data: { status: 'falhou', isRunning: false, runningNote: 'O arquivo anexado não foi encontrado no servidor.' }
     });
     return;
   }
@@ -440,7 +451,7 @@ async function executeBroadcast(broadcastId) {
                 ? await whatsappDispatcher.loadConnectionForSending(connection.id)
                 : connection;
 
-            await whatsappDispatcher.sendMessage(sendableConnection, lead.phone, renderedBody, whatsappMediaPath);
+            await whatsappDispatcher.sendMessage(sendableConnection, lead.phone, renderedBody, whatsappMediaPath, whatsappMediaOptions);
 
             await prisma.message.create({
               data: {

@@ -6,6 +6,7 @@ const fs = require('fs');
 const { execFile } = require('child_process');
 const prisma = require('../../config/db');
 const env = require('../../config/env');
+const chatMediaService = require('./chatMediaService');
 
 // Quando o WhatsApp está publicando uma versão nova do Web, a página recarrega
 // sozinha e a inicialização falha por alguns minutos. Mais tentativas, com
@@ -690,7 +691,35 @@ class NativeWhatsappService {
 
     const phone = await this.resolveIncomingPhone(connectionId, message);
     const text = message.body || '';
-    if (!text) return;
+
+    // Foto, vídeo, áudio, documento ou figurinha: baixa e guarda o arquivo.
+    // (Antes, mensagem sem texto era descartada — por isso o chat "não recebia" mídia.)
+    let mediaFields = {};
+    if (message.hasMedia) {
+      try {
+        const media = await withTimeout(message.downloadMedia(), 60000, 'download de mídia demorou demais');
+        if (media?.data) {
+          const buffer = Buffer.from(media.data, 'base64');
+          if (buffer.length <= chatMediaService.MAX_RECEIVE_BYTES) {
+            mediaFields = chatMediaService.saveBuffer(
+              userId,
+              buffer,
+              media.mimetype,
+              media.filename || (message.type === 'sticker' ? 'figurinha.webp' : null)
+            );
+          } else {
+            console.warn(`⚠️ [${connectionId}] Mídia recebida muito grande (${buffer.length} bytes) — não salva.`);
+          }
+        }
+      } catch (err) {
+        console.warn(`⚠️ [${connectionId}] Não consegui baixar a mídia recebida: ${err.message}`);
+      }
+    }
+
+    if (!text && !mediaFields.mediaPath) {
+      // Mídia que não foi possível baixar: registra um aviso para a mensagem não "sumir".
+      if (!message.hasMedia) return;
+    }
     if (!phone) {
       console.warn(`⚠️ [${connectionId}] Mensagem recebida de ${from} sem telefone resolvido (LID) — ignorada.`);
       return;
@@ -712,7 +741,13 @@ class NativeWhatsappService {
     }
 
     const savedMessage = await prisma.message.create({
-      data: { leadId: lead.id, direction: 'entrada', channel: 'whatsapp', body: text }
+      data: {
+        leadId: lead.id,
+        direction: 'entrada',
+        channel: 'whatsapp',
+        body: text || (message.hasMedia && !mediaFields.mediaPath ? '[Anexo recebido, mas não foi possível baixar]' : ''),
+        ...mediaFields
+      }
     });
 
     const io = global.socketIoInstance;
@@ -723,6 +758,7 @@ class NativeWhatsappService {
     const referral = ctx
       ? { sourceId: ctx.sourceId || ctx.source_id, sourceUrl: ctx.sourceUrl || ctx.source_url, headline: ctx.title || ctx.headline }
       : null;
+    if (!text) return; // só mídia: o robô responde apenas a mensagens de texto
     await require('../campaignBotService').handleIncoming({
       userId,
       connectionId,
@@ -830,7 +866,7 @@ class NativeWhatsappService {
     }
 
     if (mediaFilePath && !fs.existsSync(mediaFilePath)) {
-      const err = new Error('Arquivo de imagem do disparo não encontrado no servidor.');
+      const err = new Error('Arquivo anexado não encontrado no servidor.');
       err.status = 500;
       throw err;
     }
@@ -839,8 +875,17 @@ class NativeWhatsappService {
 
     const sendTo = async (chatId) => {
       if (mediaFilePath) {
-        const media = MessageMedia.fromFilePath(mediaFilePath);
-        return client.sendMessage(chatId, media, { ...sendOptions, caption: text || '' });
+        const media = options.mediaMime
+          ? new MessageMedia(
+              options.mediaMime,
+              fs.readFileSync(mediaFilePath).toString('base64'),
+              options.mediaName || path.basename(mediaFilePath)
+            )
+          : MessageMedia.fromFilePath(mediaFilePath);
+        const mediaSendOptions = { ...sendOptions, caption: text || '' };
+        // Documentos (PDF, Word, Excel...) precisam ir como arquivo, não como foto.
+        if (options.asDocument) mediaSendOptions.sendMediaAsDocument = true;
+        return client.sendMessage(chatId, media, mediaSendOptions);
       }
       return client.sendMessage(chatId, text || '', sendOptions);
     };

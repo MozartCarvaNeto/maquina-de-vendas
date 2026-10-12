@@ -298,6 +298,7 @@ async function applyAnswers(lead, campaign, answers) {
  * Nunca lança erro: um problema no robô não pode derrubar o recebimento.
  */
 async function handleIncoming({ userId, connectionId, lead, text, referral, sendReply }) {
+  if (!String(text || '').trim()) return;
   try {
     const campaigns = await prisma.campaign.findMany({ where: { userId, active: true } });
     const route = resolveRoute({ campaigns, lead, text, referral, connectionId });

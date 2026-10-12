@@ -6,9 +6,13 @@
 // IA quando configurada. A sessão nativa tem a própria cópia dessa lógica
 // (não mexi nela); esta aqui é usada pela API Oficial.
 const prisma = require('../../config/db');
+const chatMediaService = require('./chatMediaService');
 
-async function processIncomingMessage({ userId, connectionId, phone, text, contactName, sendReply, referral }) {
-  if (!phone || !text) return;
+/**
+ * `media` (opcional) = { buffer, mimeType, fileName } — foto/áudio/documento já baixado.
+ */
+async function processIncomingMessage({ userId, connectionId, phone, text, contactName, sendReply, referral, media, mediaFailed }) {
+  if (!phone || (!text && !media && !mediaFailed)) return;
 
   let lead = await prisma.lead.findFirst({ where: { userId, phone: { contains: phone } } });
 
@@ -25,12 +29,19 @@ async function processIncomingMessage({ userId, connectionId, phone, text, conta
   }
 
   const savedMessage = await prisma.message.create({
-    data: { leadId: lead.id, direction: 'entrada', channel: 'whatsapp', body: text }
+    data: {
+      leadId: lead.id,
+      direction: 'entrada',
+      channel: 'whatsapp',
+      body: text || (mediaFailed ? '[Anexo recebido, mas não foi possível baixar]' : ''),
+      ...(media ? chatMediaService.saveBuffer(userId, media.buffer, media.mimeType, media.fileName) : {})
+    }
   });
 
   const io = global.socketIoInstance;
   if (io) io.to(`user:${userId}`).emit('whatsapp:message', { leadId: lead.id, message: savedMessage });
 
+  if (!text) return; // só mídia: o robô responde apenas a texto
   await require('../campaignBotService').handleIncoming({ userId, connectionId, lead, text, referral, sendReply });
 }
 

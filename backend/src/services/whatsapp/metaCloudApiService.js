@@ -4,6 +4,8 @@
 // como alternativa ao QR Code. Não existe "sessão" nem Chromium aqui — é só
 // uma chamada HTTP autenticada com o token de acesso de cada número.
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const prisma = require('../../config/db');
 const { encrypt, decrypt } = require('../crypto/settingsCrypto');
 
@@ -57,6 +59,85 @@ async function validateConnection({ phoneNumberId, accessToken }) {
     verifiedName: data.verified_name,
     codeVerificationStatus: data.code_verification_status
   };
+}
+
+/** Envia o arquivo para a Meta e devolve o id da mídia (funciona com arquivos privados). */
+async function uploadMedia(connection, filePath, mimeType, fileName) {
+  const buffer = fs.readFileSync(filePath);
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('type', mimeType);
+  form.append('file', new Blob([buffer], { type: mimeType }), fileName || path.basename(filePath));
+
+  const response = await fetch(`${GRAPH_BASE}/${connection.phoneNumberId}/media`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${connection.accessToken}` },
+    body: form
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.id) {
+    const err = new Error(friendlyGraphError(data, response.status));
+    err.status = 502;
+    throw err;
+  }
+  return data.id;
+}
+
+/** Baixa uma mídia recebida (a Meta entrega só o id; a URL exige o token). */
+async function downloadMedia(connection, mediaId) {
+  const info = await graphRequest(mediaId, { token: connection.accessToken });
+  if (!info.url) throw new Error('A Meta não devolveu a URL da mídia.');
+  const response = await fetch(info.url, { headers: { Authorization: `Bearer ${connection.accessToken}` } });
+  if (!response.ok) throw new Error(`Falha ao baixar a mídia da Meta (HTTP ${response.status}).`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return { buffer, mimeType: info.mime_type || response.headers.get('content-type') || 'application/octet-stream' };
+}
+
+/**
+ * Envia foto/vídeo/áudio/documento a partir de um arquivo local: sobe o
+ * arquivo para a Meta e manda pelo id. `opts` = { mimeType, fileName }.
+ */
+async function sendMediaFile(connection, toPhone, text, filePath, opts = {}) {
+  const to = normalizePhoneDigits(toPhone);
+  if (!to) {
+    const err = new Error('Telefone do lead inválido ou vazio.');
+    err.status = 400;
+    throw err;
+  }
+  if (!fs.existsSync(filePath)) {
+    const err = new Error('Arquivo não encontrado no servidor.');
+    err.status = 500;
+    throw err;
+  }
+
+  const mimeType = String(opts.mimeType || 'application/octet-stream').split(';')[0];
+  const fileName = opts.fileName || path.basename(filePath);
+  const kind = mimeType.startsWith('image/') && /^image\/(jpeg|png)$/.test(mimeType)
+    ? 'image'
+    : mimeType.startsWith('video/') && /^video\/(mp4|3gpp)$/.test(mimeType)
+      ? 'video'
+      : mimeType.startsWith('audio/') && /^audio\/(aac|mp4|mpeg|amr|ogg)$/.test(mimeType)
+        ? 'audio'
+        : 'document'; // webp/gif e demais formatos vão como documento (a Meta não aceita como imagem)
+
+  const mediaId = await uploadMedia(connection, filePath, mimeType, fileName);
+
+  const payload = { messaging_product: 'whatsapp', to, recipient_type: 'individual', type: kind };
+  payload[kind] = { id: mediaId };
+  if (kind !== 'audio' && text) payload[kind].caption = text;
+  if (kind === 'document') payload[kind].filename = fileName;
+
+  const data = await graphRequest(`${connection.phoneNumberId}/messages`, {
+    method: 'POST',
+    token: connection.accessToken,
+    body: payload
+  });
+
+  // Áudio não aceita legenda: se houver texto, vai logo em seguida.
+  if (kind === 'audio' && text) {
+    await sendMessage(connection, toPhone, text, null);
+  }
+  return { providerMessageId: data.messages?.[0]?.id || null };
 }
 
 /**
@@ -176,6 +257,8 @@ module.exports = {
   normalizePhoneDigits,
   validateConnection,
   sendMessage,
+  sendMediaFile,
+  downloadMedia,
   isReady,
   createConnection,
   updateConnection,
