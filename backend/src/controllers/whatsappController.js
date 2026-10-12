@@ -149,10 +149,52 @@ exports.listConversations = async (req, res, next) => {
   try {
     const leadsWithMessages = await prisma.lead.findMany({
       where: { userId: req.userId, messages: { some: {} } },
-      include: { messages: { orderBy: { createdAt: 'desc' }, take: 1 } },
-      orderBy: { updatedAt: 'desc' }
+      include: { messages: { orderBy: { createdAt: 'desc' }, take: 1 } }
     });
-    res.json({ conversations: leadsWithMessages });
+
+    // Quem recebeu um relatório de ligação da IA e ainda NÃO teve resposta do vendedor fica marcado como
+    // "aguardando": o vendedor vê de cara quem precisa de retorno.
+    const ids = leadsWithMessages.map((l) => l.id);
+    const notes = ids.length
+      ? await prisma.message.findMany({
+          where: { leadId: { in: ids }, direction: 'nota', channel: 'ia_relatorio' },
+          orderBy: { createdAt: 'desc' },
+          select: { leadId: true, createdAt: true, body: true }
+        })
+      : [];
+    const replies = ids.length
+      ? await prisma.message.groupBy({
+          by: ['leadId'],
+          where: { leadId: { in: ids }, direction: 'saida', channel: 'whatsapp' },
+          _max: { createdAt: true }
+        })
+      : [];
+    const lastReply = new Map(replies.map((r) => [r.leadId, r._max.createdAt]));
+    const lastNote = new Map();
+    for (const n of notes) if (!lastNote.has(n.leadId)) lastNote.set(n.leadId, n);
+
+    const conversations = leadsWithMessages.map((lead) => {
+      const note = lastNote.get(lead.id);
+      let aiReport = null;
+      if (note) {
+        const outcome = (note.body.match(/Resultado:\s*(.+)/) || [])[1] || '';
+        const qualifies = /quente|morno|retorno/i.test(outcome);
+        const reply = lastReply.get(lead.id);
+        aiReport = {
+          at: note.createdAt,
+          outcome: outcome.trim(),
+          isTest: /TESTE/.test(note.body.split('\n')[0] || ''),
+          awaitingSeller: qualifies && !(reply && reply > note.createdAt)
+        };
+      }
+      return { ...lead, aiReport };
+    });
+
+    // Mais recente primeiro, pela última mensagem (a nota do relatório sobe a conversa para o topo).
+    const lastAt = (l) => (l.messages[0] ? new Date(l.messages[0].createdAt).getTime() : 0);
+    conversations.sort((a, b) => lastAt(b) - lastAt(a));
+
+    res.json({ conversations });
   } catch (error) {
     next(error);
   }

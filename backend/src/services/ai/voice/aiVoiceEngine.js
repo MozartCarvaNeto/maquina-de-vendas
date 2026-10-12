@@ -58,14 +58,14 @@ function fillVars(template, { leadName, agent }) {
 }
 
 /** Deixa o texto seguro e natural para a voz: sem markdown, emoji, links; tamanho limitado. */
-function sanitizeSpeech(text) {
+function sanitizeSpeech(text, maxLength = 420) {
   return String(text || '')
     .replace(/https?:\/\/\S+/gi, '')
     .replace(/[*_#`>~|]/g, '')
     .replace(/\p{Extended_Pictographic}/gu, '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 420);
+    .slice(0, maxLength);
 }
 
 function formatNowBrasilia(date = new Date()) {

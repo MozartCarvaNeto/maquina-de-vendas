@@ -205,3 +205,21 @@
   .chat-input-bar input[type="text"], .chat-input-bar input:not([type]) { min-width: 0; }
   .chat-bubble { max-width: 85%; }
 }
+
+/* ---- Contatos vindos de ligação da IA: aguardando o vendedor ---- */
+.chat-conv-phone { display: block; font-size: 12px; color: var(--gray-500); }
+.chat-conv-badge {
+  display: inline-block; margin: 4px 0 2px; padding: 2px 8px; border-radius: 999px;
+  background: #fff0e0; color: #b45309; font-size: 11px; font-weight: 600;
+}
+.chat-conv-item.awaiting { border-left: 3px solid #f59e0b; background: #fffaf2; }
+.chat-conv-item.awaiting.active { background: var(--primary-50); }
+.chat-filter-chips { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.chat-filter-chips button {
+  border: 1px solid var(--gray-200); background: #fff; border-radius: 999px;
+  padding: 4px 10px; font-size: 12px; cursor: pointer;
+}
+.chat-filter-chips button.active { background: var(--primary-500); color: #fff; border-color: var(--primary-500); }
+.chat-report-pin { margin: 0 20px; padding: 8px 12px; background: #fff8e1; border: 1px dashed #f0b429; border-radius: 8px; font-size: 13px; color: #5c4400; }
+.chat-report-pin summary { cursor: pointer; font-weight: 600; }
+.chat-report-pin pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; margin: 8px 0 0; max-height: 220px; overflow-y: auto; }

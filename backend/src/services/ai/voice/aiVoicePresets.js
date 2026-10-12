@@ -58,7 +58,9 @@ const PRESETS = {
       "Aprofunde em camadas: pergunta aberta, aprofundamento, consequência ou necessidade. Após cada resposta, reconheça em poucas palavras o que ouviu antes da próxima pergunta; sem interrogatório. Observações comerciais só se verdadeiras, sem números inventados.",
       "ADAPTE-SE: objetivo, direta; comunicativo, converse mais; técnico, termos técnicos; inseguro, tranquilize; desconfiado, transparência; apressado, vá ao ponto."
     ].join('\n'),
-    openingScript: "Olá! Aqui é a {{agente}}, assistente virtual da {{empresa}}. A gente trabalha com joias e piercings no atacado e eu queria entender rapidinho: vocês já trabalham com piercing hoje?",
+    openingScript: "Olá! Aqui é a {{agente}}, assistente virtual da {{empresa}}, uma empresa atacadista de piercings, com uma infinidade de modelos em aço cirúrgico e titânio, com laudo e garantia, e envio rápido para todo o Brasil. Eu queria entender rapidinho: vocês já trabalham com piercing hoje?",
+    // Apresentação obrigatória: sempre dita por inteiro na abertura (a abertura não pode ser interrompida).
+    companyPitch: "uma empresa atacadista de piercings, com uma infinidade de modelos em aço cirúrgico e titânio, com laudo e garantia, e envio rápido para todo o Brasil",
     handoffCriteria: [
       "PASSE PARA O CONSULTOR (action handoff, outcome quente) quando houver intenção comercial clara ou alto potencial, sem continuar interrogando. Gatilhos de passagem imediata: pediu vendedor, consultor ou uma pessoa; quer comprar, fazer pedido ou orçamento; quer negociar ou perguntou de desconto; perguntou condições de atacado, pagamento ou pedido mínimo; fala em quantidade grande (ex.: 100 ou 200 peças); urgência (estoque acabou, precisa repor hoje ou esta semana, está sem fornecedor, tem cliente esperando); fornecedor atual dá problema e ele quer alternativa; pergunta complexa ou que o catálogo não responde com segurança (preço, estoque, prazo) e ele demonstra interesse.",
       "Se já está pronto, PARE de qualificar; pergunte só o essencial (\"Você já tem os modelos definidos ou quer ajuda do consultor para montar o pedido?\"). Antes de passar, peça permissão resumindo o motivo: \"Pelo que você me contou, acho que nosso consultor ajuda melhor agora, principalmente com [necessidade]. Posso te passar para ele?\". Depois do sim, use handoff. Se ele pediu uma pessoa de forma explícita, avise e passe direto.",
@@ -153,4 +155,31 @@ function listPresets() {
   return Object.entries(PRESETS).map(([id, preset]) => ({ id, ...preset }));
 }
 
-module.exports = { PRESETS, listPresets };
+/**
+ * Garante a apresentação da empresa na abertura de agentes do mercado de piercing (inclusive os
+ * criados antes desta regra). Se a fala já cita atacado + aço/titânio, não mexe.
+ */
+function ensureCompanyPitch(opening, agent) {
+  const preset = PRESETS[agent?.market];
+  const isPiercing = agent?.market === 'piercing_estudios' || /piercing\s*express/i.test(String(agent?.companyName || ''));
+  const pitch = preset?.companyPitch || (isPiercing ? PRESETS.piercing_estudios.companyPitch : null);
+  if (!pitch || !isPiercing) return opening;
+
+  const text = String(opening || '');
+  if (/atacad/i.test(text) && /tit[aâ]nio/i.test(text) && /aço/i.test(text)) return text;
+
+  const company = String(agent.companyName || '').trim();
+  const at = company ? text.toLowerCase().indexOf(company.toLowerCase()) : -1;
+  if (at >= 0) {
+    const end = at + company.length;
+    const rest = text
+      .slice(end)
+      .replace(/^[,.]/, '.')
+      .replace(/A gente trabalha com joias e piercings no atacado e eu queria/i, 'Eu queria'); // evita repetir o que a apresentação já disse
+    return `${text.slice(0, end)}, ${pitch}${rest}`;
+  }
+  const body = text.replace(/^\s*(olá|oi)[!,.]?\s*/i, '').replace(/^(tudo bem\??\s*)?(aqui é (a |o )?[\wÀ-ÿ]+[.,]?\s*)?/i, '');
+  return `Olá! Aqui é a ${agent.agentName || 'assistente'}, assistente virtual${company ? ` da ${company}` : ''}, ${pitch}. ${body}`.trim();
+}
+
+module.exports = { PRESETS, listPresets, ensureCompanyPitch };

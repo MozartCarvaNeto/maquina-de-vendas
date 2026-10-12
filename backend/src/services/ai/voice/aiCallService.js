@@ -22,6 +22,7 @@ const {
   looksLikeVoicemail
 } = require('./aiVoiceEngine');
 const { applyPronunciation } = require('./pronunciation');
+const { ensureCompanyPitch } = require('./aiVoicePresets');
 
 const TERMINAL_STATUSES = ['encerrada', 'ocupado', 'falhou', 'sem_resposta'];
 const RING_TIMEOUT_SECONDS = 25;
@@ -154,11 +155,24 @@ function turnUrl(callId) {
   return `${baseUrl()}/api/ai-calls/webhook/turn?callId=${callId}`;
 }
 
-function buildGatherTwiml({ agent, text, callId }) {
+/**
+ * `protect: true` = a fala NÃO pode ser interrompida: o <Say> fica FORA do <Gather>, então o cliente
+ * falando por cima não corta a fala (o Twilio só começa a ouvir depois que ela termina). É usado na
+ * apresentação inicial, que precisa sempre ser dita por inteiro.
+ */
+function buildGatherTwiml({ agent, text, callId, protect = false }) {
   const action = turnUrl(callId);
   const hints = buildHints(agent);
+  const gatherAttrs = `input="speech" language="${escapeXml(agent.language || 'pt-BR')}" speechTimeout="auto" timeout="6" actionOnEmptyResult="true" hints="${escapeXml(hints)}" action="${escapeXml(action)}" method="POST"`;
+  if (protect) {
+    return `<Response>
+  ${sayTag(text, agent)}
+  <Gather ${gatherAttrs}></Gather>
+  <Redirect method="POST">${escapeXml(action)}</Redirect>
+</Response>`;
+  }
   return `<Response>
-  <Gather input="speech" language="${escapeXml(agent.language || 'pt-BR')}" speechTimeout="auto" timeout="6" actionOnEmptyResult="true" hints="${escapeXml(hints)}" action="${escapeXml(action)}" method="POST">
+  <Gather ${gatherAttrs}>
     ${sayTag(text, agent)}
   </Gather>
   <Redirect method="POST">${escapeXml(action)}</Redirect>
@@ -180,7 +194,9 @@ function buildDialTwiml({ agent, text, callId, fromNumber, toPhone }) {
 }
 
 function buildOpeningText(agent, leadName) {
-  let opening = sanitizeSpeech(fillVars(agent.openingScript, { leadName, agent }));
+  // Garante que a apresentação da empresa (ex.: Piercing Express) sempre seja dita, mesmo em agentes
+  // criados antes desta regra.
+  let opening = sanitizeSpeech(ensureCompanyPitch(fillVars(agent.openingScript, { leadName, agent }), agent), 800);
   if (agent.recordCalls) opening = `${opening} Esta ligação pode ser gravada.`;
   return opening;
 }
@@ -198,10 +214,25 @@ async function pickReadyWhatsappConnection(userId) {
   return whatsappDispatcher.loadConnectionForSending(chosen.id);
 }
 
-async function sendWhatsapp(userId, toPhone, text) {
+/**
+ * `leadId` (opcional): registra a mensagem no Chat do contato (canal "ia_whatsapp") e guarda qual
+ * número de WhatsApp foi usado — assim o vendedor responde pelo mesmo número, sem escolher de novo.
+ */
+async function sendWhatsapp(userId, toPhone, text, { leadId } = {}) {
   const connection = await pickReadyWhatsappConnection(userId);
   if (!connection) return { sent: false, reason: 'nenhum WhatsApp conectado' };
   await whatsappDispatcher.sendMessage(connection, toPhone, text);
+  if (leadId) {
+    try {
+      const saved = await prisma.message.create({
+        data: { leadId, direction: 'saida', channel: 'ia_whatsapp', body: text }
+      });
+      await prisma.lead.update({ where: { id: leadId }, data: { lastConnectionId: connection.id } });
+      emitToAccount(userId, 'whatsapp:message', { leadId, message: saved });
+    } catch (error) {
+      console.warn(`⚠️ Mensagem enviada, mas não registrada no chat: ${error.message}`);
+    }
+  }
   return { sent: true };
 }
 
@@ -656,7 +687,7 @@ async function applyOutcomeEffects(sessionId) {
   const liveTransfer = outcome === 'quente' && session.handoffStatus === 'conectada';
   if (agent.leadWhatsappMessage && lead.phone && !liveTransfer && ['quente', 'morno'].includes(outcome)) {
     const text = fillVars(agent.leadWhatsappMessage, { leadName: lead.name, agent });
-    sendWhatsapp(lead.userId, lead.phone, text).catch((error) =>
+    sendWhatsapp(lead.userId, lead.phone, text, { leadId: lead.id }).catch((error) =>
       console.warn(`⚠️ WhatsApp para ${lead.name} não enviado: ${error.message}`)
     );
   }
@@ -763,7 +794,7 @@ async function placeAiCall({ campaign, agent, lead, provider, isTest = false }) 
       to: lead.phone,
       from: callerNumber.phoneNumber,
       statusCallbackUrl: `${baseUrl()}/api/ai-calls/webhook/status?callId=${callId}`,
-      twiml: buildGatherTwiml({ agent, text: opening, callId }),
+      twiml: buildGatherTwiml({ agent, text: opening, callId, protect: true }),
       ringTimeoutSeconds: RING_TIMEOUT_SECONDS,
       timeLimitSeconds: agent.maxCallSeconds || 420,
       recordingStatusCallbackUrl: agent.recordCalls ? `${baseUrl()}/api/ai-calls/webhook/recording?callId=${callId}` : undefined
@@ -800,14 +831,16 @@ async function startTestCall({ agent, phone }) {
   const provider = await getActiveTelephonyProvider(agent.userId);
 
   const TEST_TAG = 'teste-agente-ia';
-  let lead = await prisma.lead.findFirst({ where: { userId: agent.userId, tags: { has: TEST_TAG } } });
+  // Um contato de teste POR NÚMERO: testar com outro celular abre outra conversa no Chat
+  // (antes o mesmo contato era reaproveitado e só o número mudava).
+  let lead = await prisma.lead.findFirst({ where: { userId: agent.userId, tags: { has: TEST_TAG }, phone: e164 } });
   if (lead) {
-    lead = await prisma.lead.update({ where: { id: lead.id }, data: { phone: e164, optOut: false } });
+    lead = await prisma.lead.update({ where: { id: lead.id }, data: { optOut: false } });
   } else {
     lead = await prisma.lead.create({
       data: {
         userId: agent.userId,
-        name: 'Estúdio de Teste (Agente IA)',
+        name: `Teste IA — ${e164}`,
         phone: e164,
         tags: [TEST_TAG],
         consentSource: 'teste_interno',

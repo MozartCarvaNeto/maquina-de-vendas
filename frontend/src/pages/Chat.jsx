@@ -6,9 +6,9 @@ import ChatMedia from '../components/ChatMedia';
 import { ATTACHMENT_REGEX, BLOCKED_EXT_REGEX, ATTACHMENT_ACCEPT, formatBytes } from '../utils/attachments';
 import './Chat.css';
 
-function previewLabel(message) {
+function previewLabel(message, aiReport) {
   if (!message) return '';
-  if (message.direction === 'nota') return '📋 Relatório da ligação (IA)';
+  if (message.direction === 'nota') return `📋 Relatório da IA${aiReport?.outcome ? ` — ${aiReport.outcome}` : ''}`;
   if (message.body) return message.body;
   const labels = { image: '📷 Foto', video: '🎥 Vídeo', audio: '🎤 Áudio' };
   if (message.mediaType === 'document') return `📄 ${message.mediaName || 'Documento'}`;
@@ -26,6 +26,7 @@ export default function Chat() {
   const fileInputRef = useRef(null);
   const [pendingFile, setPendingFile] = useState(null);
   const [sending, setSending] = useState(false);
+  const [onlyAwaiting, setOnlyAwaiting] = useState(false);
 
   const [showNewChatModal, setShowNewChatModal] = useState(false);
   const [leadSearch, setLeadSearch] = useState('');
@@ -48,6 +49,17 @@ export default function Chat() {
     loadConversations();
     loadConnections();
   }, [loadConversations, loadConnections]);
+
+  // Já deixa o número de WhatsApp escolhido: o mesmo que a IA usou com o contato, ou o único conectado.
+  useEffect(() => {
+    if (!activeLead || connections.length === 0) return;
+    setSelectedInstance((current) => {
+      if (current && connections.some((c) => c.id === current)) return current;
+      const preferred = connections.find((c) => c.id === activeLead.lastConnectionId);
+      if (preferred) return preferred.id;
+      return connections.length === 1 ? connections[0].id : '';
+    });
+  }, [activeLead, connections]);
 
   async function openConversation(leadId) {
     const { data } = await api.get(`/whatsapp/conversations/${leadId}`);
@@ -182,16 +194,33 @@ export default function Chat() {
           <h2>Conversas</h2>
           <button className="btn-outline btn-small" onClick={() => setShowNewChatModal(true)}>➕ Nova</button>
         </div>
-        {conversations.map((conv) => (
+        {conversations.some((c) => c.aiReport) && (
+          <div className="chat-filter-chips">
+            <button type="button" className={!onlyAwaiting ? 'active' : ''} onClick={() => setOnlyAwaiting(false)}>Todas</button>
+            <button type="button" className={onlyAwaiting ? 'active' : ''} onClick={() => setOnlyAwaiting(true)}>
+              🔥 Aguardando você ({conversations.filter((c) => c.aiReport?.awaitingSeller).length})
+            </button>
+          </div>
+        )}
+        {conversations
+          .filter((conv) => !onlyAwaiting || conv.aiReport?.awaitingSeller)
+          .map((conv) => (
           <div
             key={conv.id}
-            className={`chat-conv-item ${activeLead?.id === conv.id ? 'active' : ''}`}
+            className={`chat-conv-item ${activeLead?.id === conv.id ? 'active' : ''} ${conv.aiReport?.awaitingSeller ? 'awaiting' : ''}`}
             onClick={() => openConversation(conv.id)}
           >
             <strong>{conv.name}</strong>
-            <p>{previewLabel(conv.messages[0]).slice(0, 40)}</p>
+            {conv.phone && <span className="chat-conv-phone">{conv.phone}</span>}
+            {conv.aiReport?.awaitingSeller && (
+              <span className="chat-conv-badge">🔥 Aguardando seu retorno{conv.aiReport.isTest ? ' (teste)' : ''}</span>
+            )}
+            <p>{previewLabel(conv.messages[0], conv.aiReport).slice(0, 48)}</p>
           </div>
         ))}
+        {onlyAwaiting && !conversations.some((c) => c.aiReport?.awaitingSeller) && (
+          <p className="empty-state">Ninguém aguardando retorno agora. 🎉</p>
+        )}
         {conversations.length === 0 && (
           <p className="empty-state">
             Nenhuma conversa ainda. Clique em "➕ Nova" para escrever para um contato.
@@ -223,6 +252,16 @@ export default function Chat() {
                 ⚠️ Nenhum número de WhatsApp conectado. Conecte um em <a href="/conexoes">Conexões</a>.
               </div>
             )}
+
+            {(() => {
+              const latestNote = [...messages].reverse().find((m) => m.direction === 'nota');
+              return latestNote ? (
+                <details className="chat-report-pin">
+                  <summary>📋 Relatório da última ligação da IA — clique para ver / esconder</summary>
+                  <pre>{latestNote.body}</pre>
+                </details>
+              ) : null;
+            })()}
 
             <div className="chat-messages" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
               {messages.length === 0 && (
