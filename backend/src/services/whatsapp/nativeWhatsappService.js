@@ -1,4 +1,5 @@
 // backend/src/services/whatsapp/nativeWhatsappService.js
+require('./patchWwebjs'); // precisa vir ANTES do whatsapp-web.js (corrige envio de mídia)
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
 const path = require('path');

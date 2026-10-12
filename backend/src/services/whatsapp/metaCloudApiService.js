@@ -112,13 +112,18 @@ async function sendMediaFile(connection, toPhone, text, filePath, opts = {}) {
 
   const mimeType = String(opts.mimeType || 'application/octet-stream').split(';')[0];
   const fileName = opts.fileName || path.basename(filePath);
-  const kind = mimeType.startsWith('image/') && /^image\/(jpeg|png)$/.test(mimeType)
+  let kind = mimeType.startsWith('image/') && /^image\/(jpeg|png)$/.test(mimeType)
     ? 'image'
     : mimeType.startsWith('video/') && /^video\/(mp4|3gpp)$/.test(mimeType)
       ? 'video'
       : mimeType.startsWith('audio/') && /^audio\/(aac|mp4|mpeg|amr|ogg)$/.test(mimeType)
         ? 'audio'
         : 'document'; // webp/gif e demais formatos vão como documento (a Meta não aceita como imagem)
+
+  // Limites da Meta: foto 5 MB, vídeo/áudio 16 MB. Acima disso vai como documento (até 100 MB).
+  const size = fs.statSync(filePath).size;
+  const tooBig = (kind === 'image' && size > 5 * 1024 * 1024) || ((kind === 'video' || kind === 'audio') && size > 16 * 1024 * 1024);
+  if (tooBig) kind = 'document';
 
   const mediaId = await uploadMedia(connection, filePath, mimeType, fileName);
 

@@ -186,7 +186,10 @@ exports.sendMessage = async (req, res, next) => {
     }
     if (file) {
       const fileError = chatMediaService.validateOutgoing(file);
-      if (fileError) return res.status(400).json({ error: fileError });
+      if (fileError) {
+        if (file.path) fs.rm(file.path, { force: true }, () => null);
+        return res.status(400).json({ error: fileError });
+      }
     }
 
     const lead = await prisma.lead.findFirst({ where: { id: leadId, userId: req.userId } });
@@ -211,7 +214,9 @@ exports.sendMessage = async (req, res, next) => {
 
     let mediaFields = {};
     if (file) {
-      mediaFields = chatMediaService.saveBuffer(req.userId, file.buffer, file.mimetype, file.originalname);
+      mediaFields = file.path
+        ? chatMediaService.saveFromDisk(req.userId, file.path, file.size, file.mimetype, file.originalname)
+        : chatMediaService.saveBuffer(req.userId, file.buffer, file.mimetype, file.originalname);
       const absolute = chatMediaService.resolvePath(mediaFields.mediaPath);
       try {
         await whatsappDispatcher.sendMessage(sendableConnection, lead.phone, text, absolute, {
@@ -219,7 +224,7 @@ exports.sendMessage = async (req, res, next) => {
           fileName: mediaFields.mediaName,
           mediaMime: mediaFields.mediaMime,
           mediaName: mediaFields.mediaName,
-          asDocument: mediaFields.mediaType === 'document'
+          asDocument: mediaFields.mediaType === 'document' || mediaFields.mediaSize > chatMediaService.MAX_INLINE_MEDIA_BYTES
         });
       } catch (sendError) {
         fs.rm(absolute, { force: true }, () => null); // não deixa arquivo órfão se o envio falhou

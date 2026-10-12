@@ -12,8 +12,10 @@ const MEDIA_ROOT = path.join(__dirname, '../../../uploads/chat-media');
 
 // Limites do próprio WhatsApp: ~16 MB para foto/vídeo/áudio, 100 MB para documento.
 // Usamos 16 MB no envio para não estourar a memória do servidor.
-const MAX_SEND_BYTES = 16 * 1024 * 1024;
-const MAX_RECEIVE_BYTES = 40 * 1024 * 1024;
+const MAX_SEND_BYTES = 100 * 1024 * 1024; // documentos: até 100 MB
+// Foto/vídeo/áudio acima disso vão como documento (o WhatsApp só aceita 16 MB como mídia).
+const MAX_INLINE_MEDIA_BYTES = 16 * 1024 * 1024;
+const MAX_RECEIVE_BYTES = 100 * 1024 * 1024;
 
 const MIME_EXT = {
   'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif',
@@ -62,8 +64,9 @@ function safeFileName(name, fallback) {
 
 /** Valida um arquivo que o usuário quer enviar. Devolve mensagem de erro ou null. */
 function validateOutgoing(file) {
-  if (!file || !file.buffer || file.buffer.length === 0) return 'O arquivo está vazio.';
-  if (file.buffer.length > MAX_SEND_BYTES) return 'O arquivo ultrapassa o limite de 16 MB do WhatsApp.';
+  const size = file ? file.size ?? file.buffer?.length ?? 0 : 0;
+  if (!file || size === 0) return 'O arquivo está vazio.';
+  if (size > MAX_SEND_BYTES) return 'O arquivo ultrapassa o limite de 100 MB do WhatsApp.';
   if (BLOCKED_EXT.test(String(file.originalname || ''))) {
     return 'Este tipo de arquivo (executável/script) não pode ser enviado.';
   }
@@ -88,6 +91,25 @@ function saveBuffer(accountId, buffer, mime, originalName) {
     mediaMime: mimeType,
     mediaName: safeFileName(originalName, `${type}${ext}`),
     mediaSize: buffer.length
+  };
+}
+
+/** Igual ao saveBuffer, mas para um arquivo já gravado em disco (upload grande). Apaga o temporário. */
+function saveFromDisk(accountId, tmpPath, size, mime, originalName) {
+  const mimeType = baseMime(mime) || 'application/octet-stream';
+  const ext = extensionFor(mimeType, originalName);
+  const dir = path.join(MEDIA_ROOT, String(accountId));
+  fs.mkdirSync(dir, { recursive: true });
+  const stored = `${crypto.randomUUID()}${ext}`;
+  fs.copyFileSync(tmpPath, path.join(dir, stored));
+  fs.rmSync(tmpPath, { force: true });
+  const type = classify(mimeType);
+  return {
+    mediaType: type,
+    mediaPath: `${accountId}/${stored}`,
+    mediaMime: mimeType,
+    mediaName: safeFileName(originalName, `${type}${ext}`),
+    mediaSize: size
   };
 }
 
@@ -124,6 +146,8 @@ module.exports = {
   isAllowedAttachment,
   MEDIA_ROOT,
   MAX_SEND_BYTES,
+  MAX_INLINE_MEDIA_BYTES,
+  saveFromDisk,
   MAX_RECEIVE_BYTES,
   classify,
   validateOutgoing,

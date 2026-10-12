@@ -1,6 +1,7 @@
 // backend/src/routes/whatsapp.routes.js
 const express = require('express');
 const multer = require('multer');
+const os = require('os');
 const router = express.Router();
 const whatsappController = require('../controllers/whatsappController');
 const auth = require('../middlewares/auth');
@@ -9,7 +10,8 @@ const { requireFeature } = require('../services/featureService');
 const chatMediaService = require('../services/whatsapp/chatMediaService');
 
 const upload = multer({
-  storage: multer.memoryStorage(),
+  // Em disco (pasta temporária), para arquivos de até 100 MB não lotarem a memória do servidor.
+  storage: multer.diskStorage({ destination: os.tmpdir() }),
   limits: { fileSize: chatMediaService.MAX_SEND_BYTES, files: 1 }
 });
 
@@ -17,7 +19,7 @@ const upload = multer({
 function handleChatUpload(req, res, next) {
   upload.single('file')(req, res, (err) => {
     if (err) {
-      const msg = err.code === 'LIMIT_FILE_SIZE' ? 'O arquivo ultrapassa o limite de 16 MB.' : err.message || 'Erro ao receber o arquivo.';
+      const msg = err.code === 'LIMIT_FILE_SIZE' ? 'O arquivo ultrapassa o limite de 100 MB.' : err.message || 'Erro ao receber o arquivo.';
       return res.status(400).json({ error: msg });
     }
     next();

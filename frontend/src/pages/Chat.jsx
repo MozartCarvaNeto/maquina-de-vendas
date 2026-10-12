@@ -83,12 +83,12 @@ export default function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const MAX_FILE_BYTES = 16 * 1024 * 1024;
+  const MAX_FILE_BYTES = 100 * 1024 * 1024;
 
   function pickFile(file) {
     if (!file) return;
     if (file.size > MAX_FILE_BYTES) {
-      alert('O arquivo ultrapassa o limite de 16 MB do WhatsApp.');
+      alert('O arquivo ultrapassa o limite de 100 MB do WhatsApp.');
       return;
     }
     if (!ATTACHMENT_REGEX.test(file.type || '') || BLOCKED_EXT_REGEX.test(file.name || '')) {
@@ -139,7 +139,16 @@ export default function Chat() {
       setPendingFile(null);
       loadConversations(); // atualiza a lista à esquerda, inclusive se esta era a 1ª mensagem
     } catch (error) {
-      alert(error.response?.data?.error || 'Erro ao enviar mensagem');
+      const resp = error.response;
+      let msg = resp?.data?.error;
+      if (!msg) {
+        if (resp?.status === 413) msg = 'O servidor recusou o arquivo por ser grande demais (limite de upload do nginx/Caddy). Aumente o limite no servidor — veja o guia.';
+        else if (resp?.status === 502 || resp?.status === 504) msg = 'O servidor não respondeu a tempo (erro ' + resp.status + '). Veja os logs do sistema no servidor.';
+        else if (resp) msg = 'Erro ' + resp.status + ' do servidor ao enviar. Veja os logs no servidor.';
+        else if (error.code === 'ECONNABORTED') msg = 'O envio demorou demais. Tente um arquivo menor.';
+        else msg = 'A conexão com o servidor foi interrompida ao enviar o arquivo (provável limite de tamanho do servidor ou queda de rede).';
+      }
+      alert(msg);
     } finally {
       setSending(false);
     }
