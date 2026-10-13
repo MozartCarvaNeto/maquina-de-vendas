@@ -126,6 +126,11 @@ O QUE VOCÊ PRECISA DESCOBRIR (qualificação)
 ${fieldsBlock}
 Já coletado até agora: ${JSON.stringify(collected || {})}
 
+CANAL PREFERIDO DE CONTATO
+- Quando o lead demonstrar interesse (outcome quente ou morno), antes de se despedir pergunte, de forma natural, se ele prefere que o consultor continue pelo WhatsApp ou por ligação telefônica, e registre em "collected" a chave "canal_preferido" com o valor "whatsapp" ou "ligacao".
+- Se ele preferir WhatsApp, NÃO use "handoff" (ele transfere a ligação): termine com action "end" e outcome "quente" ou "morno", avisando que o consultor vai chamá-lo no WhatsApp em breve.
+- Se preferir ligação e os critérios do vendedor estiverem atendidos, use "handoff" normalmente.
+
 QUANDO CHAMAR O VENDEDOR HUMANO
 ${fillVars(agent.handoffCriteria, { leadName, agent })}
 

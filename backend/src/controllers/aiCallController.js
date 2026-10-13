@@ -493,9 +493,20 @@ exports.listTestSessions = async (req, res, next) => {
       where: { userId: req.userId, isTest: true },
       orderBy: { createdAt: 'desc' },
       take: 5,
-      select: { id: true, outcome: true, summary: true, turnCount: true, handoffStatus: true, createdAt: true }
+      select: { id: true, leadId: true, outcome: true, summary: true, turnCount: true, handoffStatus: true, createdAt: true }
     });
-    res.json({ sessions });
+    // Mostra onde o contato de teste está no CRM, para conferir se o fluxo funcionou.
+    const cards = await prisma.crmCard.findMany({
+      where: { leadId: { in: sessions.map((s) => s.leadId) } },
+      select: { leadId: true, column: { select: { name: true } } }
+    });
+    const columnByLead = new Map(cards.map((c) => [c.leadId, c.column?.name]));
+    res.json({
+      sessions: sessions.map((s) => ({
+        ...s,
+        crmColumn: ['quente', 'morno', 'retorno_agendado'].includes(s.outcome) ? columnByLead.get(s.leadId) || null : null
+      }))
+    });
   } catch (error) {
     next(error);
   }

@@ -187,6 +187,11 @@ export default function AiAgentSimulator({ agents }) {
                 {new Date(t.createdAt).toLocaleString('pt-BR')} — {t.outcome ? OUTCOME_LABEL[t.outcome] || t.outcome : 'em andamento'}
                 {t.handoffStatus ? ` · ${HANDOFF_LABEL[t.handoffStatus] || t.handoffStatus}` : ''}
                 {t.summary ? <div className="ia-muted">{t.summary}</div> : null}
+                {['quente', 'morno', 'retorno_agendado'].includes(t.outcome) && (
+                  <div className="ia-muted">
+                    {t.crmColumn ? `📇 No CRM, coluna "${t.crmColumn}"` : '📇 Ainda não apareceu no CRM (confira em instantes ou veja o relatório em Conversas)'}
+                  </div>
+                )}
               </li>
             ))}
           </ul>

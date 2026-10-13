@@ -39,7 +39,10 @@ class TwilioProvider extends ITelephonyProvider {
         from,
         twiml: twiml || '<Response><Pause length="600"/></Response>',
         statusCallback: statusCallbackUrl,
-        statusCallbackEvent: ['queued', 'ringing', 'in-progress', 'completed', 'busy', 'failed', 'no-answer'],
+        // Valores válidos da Twilio: initiated, ringing, answered e completed. "answered" é o aviso de que a
+        // pessoa atendeu (CallStatus=in-progress); sem ele o sistema nunca sabia que a ligação foi atendida.
+        // busy/failed/no-answer chegam dentro do evento "completed".
+        statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
         statusCallbackMethod: 'POST'
       };
       if (ringTimeoutSeconds) params.timeout = ringTimeoutSeconds;

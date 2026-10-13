@@ -236,8 +236,16 @@ async function sendWhatsapp(userId, toPhone, text, { leadId } = {}) {
   return { sent: true };
 }
 
+/** Canal que o cliente escolheu na ligação ("whatsapp" | "call" | null). */
+function preferredChannelOf(session) {
+  const raw = String(session?.collected?.canal_preferido || '').toLowerCase();
+  if (/whats|zap|mensag|texto/.test(raw)) return 'whatsapp';
+  if (/lig|fone|telefon|call|voz/.test(raw)) return 'call';
+  return null;
+}
+
 function collectedToLines(session, agent) {
-  const labels = {};
+  const labels = { canal_preferido: 'Canal preferido de contato' };
   asList(agent?.qualificationFields).forEach((f) => {
     if (f?.key) labels[f.key] = f.label || f.key;
   });
@@ -259,7 +267,30 @@ async function findColumn(userId, { id, name }) {
   return null;
 }
 
+/** Se a conta ainda não tem nenhum quadro de CRM, cria o padrão (antes o card simplesmente não era criado). */
+async function ensureDefaultBoard(userId) {
+  const has = await prisma.crmColumn.findFirst({ where: { board: { userId } }, select: { id: true } });
+  if (has) return;
+  await prisma.crmBoard.create({
+    data: {
+      userId,
+      name: 'Funil Principal',
+      columns: {
+        create: [
+          { name: 'Novos', position: 0, color: '#00b4d8' },
+          { name: 'Em Qualificação', position: 1, color: '#48cae4' },
+          { name: 'Qualificado', position: 2, color: '#0096c7' },
+          { name: 'Em Negociação', position: 3, color: '#0077b6' },
+          { name: 'Fechado', position: 4, color: '#22c55e' },
+          { name: 'Perdido', position: 5, color: '#ef4444' }
+        ]
+      }
+    }
+  });
+}
+
 async function resolveColumn(userId, agent, kind) {
+  await ensureDefaultBoard(userId);
   if (kind === 'warm') {
     const warm = await findColumn(userId, { name: 'Em Qualificação' });
     if (warm) return warm;
@@ -385,11 +416,16 @@ async function handleDialResult({ callId, dialStatus }) {
 async function processTurn({ callId, speech, confidence }) {
   const call = await prisma.call.findUnique({
     where: { id: callId },
-    select: { id: true, userId: true, leadId: true, fromNumber: true, providerCallId: true }
+    select: { id: true, userId: true, leadId: true, fromNumber: true, providerCallId: true, answeredAt: true }
   });
   const session = call ? await prisma.aiCallSession.findUnique({ where: { callId } }) : null;
   const agent = session?.agentId ? await getAgentCached(session.agentId) : null;
   if (!call || !session || !agent) return '<Response><Say language="pt-BR">Obrigado, até logo.</Say><Hangup/></Response>';
+
+  // Se a pessoa está falando, a ligação foi atendida — não depende do aviso da Twilio.
+  if (!call.answeredAt) {
+    prisma.call.update({ where: { id: call.id }, data: { answeredAt: new Date(), status: 'atendida' } }).catch(() => {});
+  }
 
   const lead = await prisma.lead.findUnique({ where: { id: session.leadId }, select: { id: true, name: true, phone: true, userId: true } });
   const transcript = asList(session.transcript);
@@ -488,7 +524,11 @@ async function processTurn({ callId, speech, confidence }) {
   if (action === 'handoff') {
     return triggerHandoff({ call, session: updated, agent, lead: lead || { name: 'Lead', phone: null }, say });
   }
-  if (action === 'end') return buildHangupTwiml(agent, say);
+  if (action === 'end') {
+    // Despedida da IA: aplica o resultado já, sem esperar o aviso de "ligação encerrada" da Twilio.
+    applyOutcomeEffects(session.id).catch((error) => console.error('Erro ao aplicar resultado da IA:', error.message));
+    return buildHangupTwiml(agent, say);
+  }
   return buildGatherTwiml({ agent, text: say, callId });
 }
 
@@ -533,7 +573,7 @@ function transcriptDigest(session) {
  * Relatório básico para quem vai continuar o atendimento saber o que já foi conversado.
  * `markdown` = true usa *negrito* do WhatsApp; false é texto limpo para o Chat do sistema.
  */
-function buildCallReport({ lead, session, agent, outcome, isTest, markdown }) {
+function buildCallReport({ lead, session, agent, outcome, isTest, markdown, effects }) {
   const b = (text) => (markdown ? `*${text}*` : text);
   const stamp = new Date().toLocaleString('pt-BR', { timeZone: SP_TZ });
   const lines = [];
@@ -542,6 +582,8 @@ function buildCallReport({ lead, session, agent, outcome, isTest, markdown }) {
   lines.push(`🕒 ${stamp}`);
   lines.push(`👤 ${b('Contato:')} ${lead.name}${lead.phone ? ` — ${lead.phone}` : ''}`);
   lines.push(`🎯 ${b('Resultado:')} ${OUTCOME_LABEL[outcome] || outcome}`);
+  const preferred = effects?.preferred || preferredChannelOf(session);
+  if (preferred) lines.push(`📲 ${b('Canal preferido do cliente:')} ${preferred === 'call' ? 'LIGAÇÃO' : 'WhatsApp'}`);
 
   const collected = collectedToLines(session, agent);
   lines.push('');
@@ -568,16 +610,30 @@ function buildCallReport({ lead, session, agent, outcome, isTest, markdown }) {
   }[session.handoffStatus];
   if (handoffText) lines.push('', `🤝 ${b('Passagem ao consultor:')} ${handoffText}`);
 
+  if (effects) {
+    lines.push('');
+    if (effects.crmAdded) {
+      lines.push(`📇 ${b('CRM:')} contato adicionado na coluna "${effects.crmColumn}" com este relatório na anotação.`);
+    } else {
+      lines.push(`📇 ${b('CRM:')} contato NÃO adicionado. ${effects.remark || ''}`.trim());
+    }
+    if (effects.leadWhatsapp) lines.push(`💬 ${b('WhatsApp ao cliente:')} mensagem de continuidade enviada.`);
+    if (effects.queued) lines.push(`📞 ${b('Discador:')} contato colocado na fila para ligação.`);
+  }
+
   const digest = transcriptDigest(session);
   if (digest.length) {
     lines.push('', `💬 ${b('Conversa (resumida):')}`, ...digest);
   }
 
-  lines.push('', `➡️ ${b('Próximo passo:')} ${NEXT_STEP[outcome] || NEXT_STEP.sem_conclusao}`);
+  let nextStep = NEXT_STEP[outcome] || NEXT_STEP.sem_conclusao;
+  if (['quente', 'morno'].includes(outcome) && preferred === 'call') nextStep = 'O cliente pediu LIGAÇÃO: ligue para ele' + (outcome === 'quente' ? ' agora.' : ' em até 2 dias úteis.');
+  else if (['quente', 'morno'].includes(outcome) && preferred === 'whatsapp') nextStep = 'O cliente prefere WhatsApp: chame-o por lá' + (outcome === 'quente' ? ' agora.' : ' em até 2 dias úteis.');
+  lines.push('', `➡️ ${b('Próximo passo:')} ${nextStep}`);
 
   const digits = String(lead.phone || '').replace(/\D/g, '');
   if (digits) lines.push(`📱 Chamar no WhatsApp: https://wa.me/${digits.length <= 11 ? `55${digits}` : digits}`);
-  if (isTest) lines.push('', '🧪 Ligação de teste: nada foi alterado no CRM nem enviado ao cliente.');
+  if (isTest) lines.push('', '🧪 Ligação de teste: o fluxo foi aplicado de verdade ao contato de teste (seu celular). Apague o card de teste no CRM quando terminar.');
 
   return lines.join('\n');
 }
@@ -587,13 +643,13 @@ function buildCallReport({ lead, session, agent, outcome, isTest, markdown }) {
  * chat vê o que a IA conversou antes de responder; (2) no WhatsApp do consultor. Na ligação de teste
  * o relatório vai para o consultor cadastrado ou, se não houver, para o próprio número de teste.
  */
-async function deliverCallReport({ session, agent, lead, outcome, isTest }) {
+async function deliverCallReport({ session, agent, lead, outcome, isTest, effects }) {
   if (!session.turnCount) return;
   if (!isTest && NO_REPORT_OUTCOMES.includes(outcome)) return;
 
   const target = await resolveHandoffTarget(agent);
 
-  const plain = buildCallReport({ lead, session, agent, outcome, isTest, markdown: false });
+  const plain = buildCallReport({ lead, session, agent, outcome, isTest, markdown: false, effects });
   const note = await prisma.message.create({
     data: { leadId: lead.id, direction: 'nota', channel: 'ia_relatorio', body: plain }
   });
@@ -606,12 +662,20 @@ async function deliverCallReport({ session, agent, lead, outcome, isTest }) {
   const result = await sendWhatsapp(
     lead.userId,
     sellerPhone,
-    buildCallReport({ lead, session, agent, outcome, isTest, markdown: true })
+    buildCallReport({ lead, session, agent, outcome, isTest, markdown: true, effects })
   );
   if (!result.sent) console.warn(`⚠️ Relatório da ligação não enviado ao consultor: ${result.reason}`);
 }
 
-/** Aplica no sistema o que a ligação concluiu (uma única vez por ligação). */
+/**
+ * Aplica no sistema o que a ligação concluiu (uma única vez por ligação) — IGUAL para ligação de teste
+ * e de campanha real, para você validar o fluxo inteiro antes de rodar uma campanha:
+ *  - lead quente / morno / retorno agendado entra no CRM com o relatório na anotação;
+ *  - guarda o canal que o cliente prefere (WhatsApp ou ligação) no contato;
+ *  - manda o WhatsApp de continuidade ao cliente (se o cliente não preferir ligação);
+ *  - registra o relatório no chat e avisa o consultor por WhatsApp.
+ * Na ligação de teste o "cliente" é o seu próprio celular, e tudo vem marcado com 🧪 TESTE.
+ */
 async function applyOutcomeEffects(sessionId) {
   const claim = await prisma.aiCallSession.updateMany({
     where: { id: sessionId, effectsApplied: false },
@@ -626,74 +690,110 @@ async function applyOutcomeEffects(sessionId) {
   const lead = await prisma.lead.findUnique({ where: { id: session.leadId } });
   if (!agent || !lead) return null;
 
+  const isTest = !!session.isTest;
   const outcome = session.outcome || (session.turnCount > 0 ? 'sem_conclusao' : 'sem_resposta');
-
-  // Relatório da conversa (nota no chat + WhatsApp do consultor). Falha aqui nunca derruba o fechamento.
-  deliverCallReport({ session, agent, lead, outcome, isTest: !!session.isTest }).catch((error) =>
-    console.error(`⚠️ Relatório da ligação falhou: ${error.message}`)
-  );
-  // Ligação de teste: só o relatório; não mexe em CRM, status do lead nem manda mensagem ao cliente.
-  if (session.isTest) return null;
+  const preferred = preferredChannelOf(session);
   const stamp = new Date().toLocaleString('pt-BR', { timeZone: SP_TZ });
-  const headerLines = [`🤖 Agente IA "${agent.name}" — ${stamp}`, `Resultado: ${OUTCOME_LABEL[outcome] || outcome}`];
+
+  const headerLines = [
+    `🤖 Agente IA "${agent.name}"${isTest ? ' 🧪 TESTE' : ''} — ${stamp}`,
+    `Resultado: ${OUTCOME_LABEL[outcome] || outcome}`
+  ];
+  if (preferred) headerLines.push(`Canal preferido do cliente: ${preferred === 'call' ? 'LIGAÇÃO' : 'WhatsApp'}`);
   if (session.summary) headerLines.push(`Resumo: ${session.summary}`);
   const collectedLines = collectedToLines(session, agent);
   if (collectedLines.length) headerLines.push('Informações coletadas:', ...collectedLines);
   const note = headerLines.join('\n');
 
-  const result = { outcome, crm: false };
+  // O que realmente foi feito — aparece no relatório para você conferir.
+  const effects = { crmColumn: null, crmAdded: false, leadWhatsapp: false, queued: false, preferred, remark: null };
 
-  if (outcome === 'optout') {
-    await prisma.lead.update({ where: { id: lead.id }, data: { optOut: true } });
-    return result;
-  }
-  if (outcome === 'numero_errado') {
-    if (!lead.tags.includes('numero_errado')) {
-      await prisma.lead.update({ where: { id: lead.id }, data: { tags: { push: 'numero_errado' } } });
+  try {
+    if (outcome === 'optout') {
+      await prisma.lead.update({ where: { id: lead.id }, data: { optOut: true } });
+      effects.remark = 'Contato marcado para não receber mais ligações.';
+    } else if (outcome === 'numero_errado') {
+      if (!lead.tags.includes('numero_errado')) {
+        await prisma.lead.update({ where: { id: lead.id }, data: { tags: { push: 'numero_errado' } } });
+      }
+      effects.remark = 'Número marcado como errado.';
+    } else if (!['quente', 'morno', 'retorno_agendado'].includes(outcome)) {
+      effects.remark = `Resultado "${OUTCOME_LABEL[outcome] || outcome}" não entra no CRM (só entram lead quente, morno ou retorno agendado).`;
+    } else {
+      let followUpAt = null;
+      let followUpNote = null;
+      let overrideFollowUp = false;
+      const leadUpdate = {};
+
+      if (preferred) leadUpdate.preferredChannel = preferred;
+
+      if (outcome === 'quente') {
+        leadUpdate.status = 'qualificado';
+        // Se o vendedor não atendeu ao vivo, o card já nasce com retorno para AGORA (vermelho no CRM).
+        if (session.handoffStatus !== 'conectada') {
+          followUpAt = new Date();
+          followUpNote = `Lead quente passado pela IA — ${preferred === 'call' ? 'LIGAR' : 'chamar no WhatsApp'} e fechar a venda.`;
+          overrideFollowUp = true;
+        }
+      } else if (outcome === 'retorno_agendado') {
+        followUpAt = session.callbackAt || businessDayAt(10, 1);
+        followUpNote = session.callbackNote || 'Retorno combinado durante a ligação com a IA.';
+        overrideFollowUp = true;
+      } else {
+        followUpAt = businessDayAt(10, 2);
+        followUpNote = `Lead morno — retomar o contato${preferred === 'call' ? ' por ligação' : ''}.`;
+      }
+
+      if (Object.keys(leadUpdate).length) {
+        await prisma.lead.update({ where: { id: lead.id }, data: leadUpdate });
+      }
+
+      const column = await resolveColumn(lead.userId, agent, outcome === 'quente' ? 'hot' : 'warm');
+      if (column) {
+        await upsertCrmCard({ userId: lead.userId, lead, column, note, followUpAt, followUpNote, overrideFollowUp });
+        effects.crmAdded = true;
+        effects.crmColumn = column.name;
+        emitToAccount(lead.userId, 'crm:card_moved', { leadName: lead.name, toColumnId: column.id });
+      } else {
+        effects.remark = 'Não foi possível criar o card: nenhuma coluna de CRM encontrada.';
+      }
+
+      // Cliente que prefere LIGAÇÃO entra na fila do discador (só em campanha real; no teste o "cliente" é você).
+      if (preferred === 'call' && lead.phone && !isTest) {
+        const inQueue = await prisma.callQueueItem.findFirst({
+          where: { leadId: lead.id, status: { in: ['pendente', 'discando'] } }
+        });
+        if (!inQueue) {
+          await prisma.callQueueItem.create({ data: { userId: lead.userId, leadId: lead.id, status: 'pendente' } });
+          effects.queued = true;
+        }
+      }
+
+      // WhatsApp para o cliente: lead quente que não foi atendido ao vivo, e lead morno.
+      // Quem pediu ligação não recebe mensagem — o consultor vai ligar.
+      const liveTransfer = outcome === 'quente' && session.handoffStatus === 'conectada';
+      if (agent.leadWhatsappMessage && lead.phone && !liveTransfer && preferred !== 'call' && ['quente', 'morno'].includes(outcome)) {
+        const text = fillVars(agent.leadWhatsappMessage, { leadName: lead.name, agent });
+        const sent = await sendWhatsapp(lead.userId, lead.phone, text, { leadId: lead.id }).catch((error) => ({
+          sent: false,
+          reason: error.message
+        }));
+        effects.leadWhatsapp = !!sent?.sent;
+        if (!sent?.sent) console.warn(`⚠️ WhatsApp para ${lead.name} não enviado: ${sent?.reason}`);
+      }
     }
-    return result;
-  }
-  if (!['quente', 'morno', 'retorno_agendado'].includes(outcome)) return result;
-
-  let followUpAt = null;
-  let followUpNote = null;
-  let overrideFollowUp = false;
-
-  if (outcome === 'quente') {
-    await prisma.lead.update({ where: { id: lead.id }, data: { status: 'qualificado' } });
-    // Se o vendedor não atendeu ao vivo, o card já nasce com retorno para AGORA (vermelho no CRM).
-    if (session.handoffStatus !== 'conectada') {
-      followUpAt = new Date();
-      followUpNote = 'Lead quente passado pela IA — fechar a venda.';
-      overrideFollowUp = true;
-    }
-  } else if (outcome === 'retorno_agendado') {
-    followUpAt = session.callbackAt || businessDayAt(10, 1);
-    followUpNote = session.callbackNote || 'Retorno combinado durante a ligação com a IA.';
-    overrideFollowUp = true;
-  } else {
-    followUpAt = businessDayAt(10, 2);
-    followUpNote = 'Lead morno — retomar o contato.';
+  } catch (error) {
+    console.error(`⚠️ Erro ao aplicar o resultado da ligação ${session.callId}: ${error.message}`);
+    effects.remark = `Erro ao aplicar no CRM: ${error.message}`;
   }
 
-  const column = await resolveColumn(lead.userId, agent, outcome === 'quente' ? 'hot' : 'warm');
-  if (column) {
-    await upsertCrmCard({ userId: lead.userId, lead, column, note, followUpAt, followUpNote, overrideFollowUp });
-    result.crm = true;
-    emitToAccount(lead.userId, 'crm:card_moved', { leadName: lead.name, toColumnId: column.id });
-  }
-
-  // WhatsApp para o lead: lead quente que não foi atendido ao vivo, e lead morno.
-  const liveTransfer = outcome === 'quente' && session.handoffStatus === 'conectada';
-  if (agent.leadWhatsappMessage && lead.phone && !liveTransfer && ['quente', 'morno'].includes(outcome)) {
-    const text = fillVars(agent.leadWhatsappMessage, { leadName: lead.name, agent });
-    sendWhatsapp(lead.userId, lead.phone, text, { leadId: lead.id }).catch((error) =>
-      console.warn(`⚠️ WhatsApp para ${lead.name} não enviado: ${error.message}`)
-    );
-  }
+  // Relatório (nota no chat + WhatsApp do consultor). Falha aqui nunca derruba o fechamento.
+  await deliverCallReport({ session, agent, lead, outcome, isTest, effects }).catch((error) =>
+    console.error(`⚠️ Relatório da ligação falhou: ${error.message}`)
+  );
 
   emitToAccount(lead.userId, 'aicall:result', { leadId: lead.id, leadName: lead.name, outcome, campaignId: session.campaignId });
-  return result;
+  return { outcome, crm: effects.crmAdded };
 }
 
 /**
@@ -709,10 +809,17 @@ async function finalizeAiCall(callId) {
 
   let outcome = call.aiSession?.outcome || null;
 
+  // "Atendida" = a Twilio avisou que atendeu OU já houve conversa. Antes só valia o aviso da Twilio; quando
+  // ele não chegava, a ligação era tratada como "sem resposta" e o resultado nunca ia para o CRM.
+  const answered = !!call.answeredAt || (call.aiSession?.turnCount || 0) > 0;
+
   if (call.aiSession) {
-    if (!call.answeredAt) {
+    if (!answered) {
       outcome = 'sem_resposta';
     } else {
+      if (!call.answeredAt) {
+        await prisma.call.update({ where: { id: call.id }, data: { answeredAt: new Date() } }).catch(() => {});
+      }
       if (!outcome) outcome = call.aiSession.turnCount > 0 ? 'sem_conclusao' : 'sem_resposta';
       await applyOutcomeEffects(call.aiSession.id).catch((error) => console.error('Erro ao aplicar resultado da IA:', error.message));
     }
@@ -721,7 +828,7 @@ async function finalizeAiCall(callId) {
 
   if (call.aiCallCampaignId) {
     const inc = { calledCount: { increment: 1 } };
-    if (!call.answeredAt) {
+    if (!answered) {
       inc.noAnswerCount = { increment: 1 };
     } else {
       inc.answeredCount = { increment: 1 };
