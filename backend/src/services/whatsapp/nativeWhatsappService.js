@@ -935,6 +935,14 @@ class NativeWhatsappService {
         const mediaSendOptions = { ...sendOptions, caption: text || '' };
         // Documentos (PDF, Word, Excel...) precisam ir como arquivo, não como foto.
         if (options.asDocument) mediaSendOptions.sendMediaAsDocument = true;
+        if (options.asVoice) {
+          // Mensagem de voz (balãozinho com onda). Se o WhatsApp recusar, reenvia como arquivo de áudio.
+          try {
+            return await client.sendMessage(chatId, media, { ...mediaSendOptions, sendAudioAsVoice: true });
+          } catch (voiceError) {
+            console.warn(`⚠️ [${connectionId}] Envio como mensagem de voz falhou (${voiceError.message}); reenviando como áudio.`);
+          }
+        }
         return client.sendMessage(chatId, media, mediaSendOptions);
       }
       return client.sendMessage(chatId, text || '', sendOptions);

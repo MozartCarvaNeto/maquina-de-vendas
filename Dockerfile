@@ -18,8 +18,9 @@ FROM node:20-bookworm-slim
 # Chromium do próprio Debian (funciona em servidores Intel/AMD e ARM) + utilitários:
 #  - procps: o sistema usa "pkill" para limpar navegadores órfãos do WhatsApp
 #  - tini:   encerra corretamente os processos filhos (evita navegadores "zumbis")
+#  - ffmpeg: converte o áudio gravado no Chat para o formato de mensagem de voz do WhatsApp
 RUN apt-get update \
- && apt-get install -y --no-install-recommends chromium procps tini openssl ca-certificates fonts-liberation \
+ && apt-get install -y --no-install-recommends chromium procps tini openssl ca-certificates fonts-liberation ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \

@@ -51,6 +51,7 @@ export default function ChatMedia({ message }) {
   const type = message.mediaType;
   const auto = type === 'image' || type === 'audio';
   const { url, loading, error, load } = useMediaUrl(message.id, auto);
+  const [viewerOpen, setViewerOpen] = useState(false);
 
   if (!type) return null;
 
@@ -84,17 +85,50 @@ export default function ChatMedia({ message }) {
   }
 
   // documento
+  const isPdf = /pdf/i.test(message.mediaMime || '') || /\.pdf$/i.test(message.mediaName || '');
+
   async function handleDownload() {
     const target = url || (await load());
     if (target) downloadBlobUrl(target, message.mediaName);
   }
+
+  // PDF abre aqui mesmo, numa janela dentro do sistema (sem precisar baixar).
+  async function handleOpen() {
+    const target = url || (await load());
+    if (target) setViewerOpen(true);
+  }
+
   return (
-    <button type="button" className="chat-media-file" onClick={handleDownload} disabled={loading}>
-      <span className="chat-media-icon">📄</span>
-      <span className="chat-media-meta">
-        <strong>{message.mediaName || 'Documento'}</strong>
-        <small>{loading ? 'Baixando…' : `Baixar ${formatBytes(message.mediaSize)}`}</small>
-      </span>
-    </button>
+    <>
+      <div className="chat-media-file chat-media-doc">
+        <span className="chat-media-icon">{isPdf ? '📕' : '📄'}</span>
+        <span className="chat-media-meta">
+          <strong>{message.mediaName || 'Documento'}</strong>
+          <small>{loading ? 'Carregando…' : formatBytes(message.mediaSize)}</small>
+        </span>
+        <span className="chat-media-actions">
+          {isPdf && (
+            <button type="button" className="chat-media-btn" onClick={handleOpen} disabled={loading}>Abrir</button>
+          )}
+          <button type="button" className="chat-media-btn" onClick={handleDownload} disabled={loading}>Baixar</button>
+        </span>
+      </div>
+
+      {viewerOpen && url && (
+        <div className="chat-viewer-overlay" onClick={() => setViewerOpen(false)}>
+          <div className="chat-viewer" onClick={(e) => e.stopPropagation()}>
+            <div className="chat-viewer-bar">
+              <strong>{message.mediaName || 'Documento'}</strong>
+              <span>
+                <a href={url} target="_blank" rel="noreferrer">Abrir em nova aba</a>
+                <button type="button" className="chat-media-btn" onClick={handleDownload}>Baixar</button>
+                <button type="button" className="chat-media-btn" onClick={() => setViewerOpen(false)} aria-label="Fechar">✕</button>
+              </span>
+            </div>
+            <iframe className="chat-viewer-frame" title={message.mediaName || 'Documento'} src={url} />
+          </div>
+        </div>
+      )}
+    </>
   );
 }

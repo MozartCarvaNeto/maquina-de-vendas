@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import api from '../services/api';
 import { useSocket } from '../hooks/useSocket';
 import ChatMedia from '../components/ChatMedia';
-import { ATTACHMENT_REGEX, BLOCKED_EXT_REGEX, ATTACHMENT_ACCEPT, formatBytes } from '../utils/attachments';
+import { CHAT_ATTACHMENT_ACCEPT, normalizeChatFile, formatBytes } from '../utils/attachments';
 import './Chat.css';
 
 function previewLabel(message, aiReport) {
@@ -25,6 +25,15 @@ export default function Chat() {
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const [pendingFile, setPendingFile] = useState(null);
+  const [pendingVoice, setPendingVoice] = useState(false); // true = áudio gravado aqui (vai como mensagem de voz)
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [recording, setRecording] = useState(false);
+  const [recSeconds, setRecSeconds] = useState(0);
+  const recorderRef = useRef(null);
+  const recChunksRef = useRef([]);
+  const recStreamRef = useRef(null);
+  const recTimerRef = useRef(null);
+  const recCancelledRef = useRef(false);
   const [sending, setSending] = useState(false);
   const [onlyAwaiting, setOnlyAwaiting] = useState(false);
 
@@ -104,12 +113,81 @@ export default function Chat() {
       alert('O arquivo ultrapassa o limite de 100 MB do WhatsApp.');
       return;
     }
-    if (!ATTACHMENT_REGEX.test(file.type || '') || BLOCKED_EXT_REGEX.test(file.name || '')) {
-      alert('Formato não permitido. Envie foto (JPG, PNG, WebP), vídeo MP4, PDF, Word, Excel, PowerPoint, TXT, CSV ou ZIP.');
+    const checked = normalizeChatFile(file);
+    if (checked.error) {
+      alert(checked.error);
       return;
     }
-    setPendingFile(file);
+    setPendingVoice(false);
+    setPendingFile(checked.file);
   }
+
+  // Pré-visualização (foto/áudio) do arquivo que está para ser enviado.
+  useEffect(() => {
+    if (!pendingFile || !/^(image|audio)\//.test(pendingFile.type || '')) {
+      setPreviewUrl(null);
+      return undefined;
+    }
+    const url = URL.createObjectURL(pendingFile);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [pendingFile]);
+
+  // ---------- gravação de áudio pelo microfone ----------
+  async function startRecording() {
+    if (recording) return;
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      alert('Este navegador não permite gravar áudio. Use o Chrome, Edge ou Safari atualizado (e abra o sistema em https).');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const candidates = ['audio/ogg;codecs=opus', 'audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'];
+      const mimeType = candidates.find((t) => MediaRecorder.isTypeSupported?.(t)) || '';
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      recChunksRef.current = [];
+      recCancelledRef.current = false;
+      recorder.ondataavailable = (ev) => { if (ev.data?.size) recChunksRef.current.push(ev.data); };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        clearInterval(recTimerRef.current);
+        setRecording(false);
+        if (recCancelledRef.current || recChunksRef.current.length === 0) return;
+        const type = (recorder.mimeType || mimeType || 'audio/webm').split(';')[0];
+        const ext = type.includes('ogg') ? 'ogg' : type.includes('mp4') ? 'm4a' : 'webm';
+        const blob = new Blob(recChunksRef.current, { type: recorder.mimeType || type });
+        setPendingFile(new File([blob], `audio-${Date.now()}.${ext}`, { type }));
+        setPendingVoice(true);
+      };
+      recorderRef.current = recorder;
+      recStreamRef.current = stream;
+      recorder.start();
+      setRecSeconds(0);
+      setRecording(true);
+      recTimerRef.current = setInterval(() => setRecSeconds((s) => s + 1), 1000);
+    } catch (error) {
+      alert(error?.name === 'NotAllowedError'
+        ? 'O navegador bloqueou o microfone. Clique no cadeado ao lado do endereço do site e permita o microfone.'
+        : 'Não foi possível acessar o microfone.');
+    }
+  }
+
+  function stopRecording() {
+    if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();
+  }
+
+  function cancelRecording() {
+    recCancelledRef.current = true;
+    stopRecording();
+  }
+
+  // Ao sair da conversa/página, solta o microfone.
+  useEffect(() => () => {
+    recCancelledRef.current = true;
+    clearInterval(recTimerRef.current);
+    if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();
+    recStreamRef.current?.getTracks().forEach((t) => t.stop());
+  }, []);
 
   function handlePaste(e) {
     const item = Array.from(e.clipboardData?.items || []).find((i) => i.kind === 'file' && i.type.startsWith('image/'));
@@ -143,6 +221,7 @@ export default function Chat() {
         payload.append('instanceId', selectedInstance);
         payload.append('text', inputText);
         payload.append('file', pendingFile);
+        if (pendingVoice) payload.append('voice', '1');
       } else {
         payload = { leadId: activeLead.id, text: inputText, instanceId: selectedInstance };
       }
@@ -150,6 +229,7 @@ export default function Chat() {
       setMessages((prev) => (prev.some((m) => m.id === data.message.id) ? prev : [...prev, data.message]));
       setInputText('');
       setPendingFile(null);
+      setPendingVoice(false);
       loadConversations(); // atualiza a lista à esquerda, inclusive se esta era a 1ª mensagem
     } catch (error) {
       const resp = error.response;
@@ -279,8 +359,20 @@ export default function Chat() {
 
             {pendingFile && (
               <div className="chat-pending-file">
-                <span>{pendingFile.type.startsWith('image/') ? '🖼️' : '📎'} <strong>{pendingFile.name}</strong> ({formatBytes(pendingFile.size)})</span>
-                <button type="button" className="btn-link-small" onClick={() => setPendingFile(null)}>remover</button>
+                <span>
+                  {pendingFile.type.startsWith('image/') ? '🖼️' : pendingFile.type.startsWith('audio/') ? '🎤' : '📎'}{' '}
+                  <strong>{pendingVoice ? 'Mensagem de voz' : pendingFile.name}</strong> ({formatBytes(pendingFile.size)})
+                </span>
+                {previewUrl && pendingFile.type.startsWith('audio/') && <audio className="chat-pending-audio" controls src={previewUrl} />}
+                {previewUrl && pendingFile.type.startsWith('image/') && <img className="chat-pending-thumb" src={previewUrl} alt="pré-visualização" />}
+                <button type="button" className="btn-link-small" onClick={() => { setPendingFile(null); setPendingVoice(false); }}>remover</button>
+              </div>
+            )}
+            {recording && (
+              <div className="chat-recording-bar">
+                <span className="chat-rec-dot" /> Gravando… {Math.floor(recSeconds / 60)}:{String(recSeconds % 60).padStart(2, '0')}
+                <button type="button" className="btn-primary" onClick={stopRecording}>⏹ Parar</button>
+                <button type="button" className="btn-link-small" onClick={cancelRecording}>cancelar</button>
               </div>
             )}
             <form className="chat-input-bar" onSubmit={handleSend}>
@@ -293,7 +385,7 @@ export default function Chat() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept={ATTACHMENT_ACCEPT}
+                accept={CHAT_ATTACHMENT_ACCEPT}
                 style={{ display: 'none' }}
                 onChange={(e) => { pickFile(e.target.files?.[0]); e.target.value = ''; }}
               />
@@ -306,6 +398,16 @@ export default function Chat() {
                 onClick={() => fileInputRef.current?.click()}
               >
                 📎
+              </button>
+              <button
+                type="button"
+                className="chat-attach-btn"
+                title="Gravar mensagem de voz"
+                aria-label="Gravar áudio"
+                disabled={!activeLead.phone || recording || !!pendingFile}
+                onClick={startRecording}
+              >
+                🎤
               </button>
               <input
                 placeholder={

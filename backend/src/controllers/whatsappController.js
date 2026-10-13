@@ -4,6 +4,7 @@ const nativeWhatsappService = require('../services/whatsapp/nativeWhatsappServic
 const whatsappDispatcher = require('../services/whatsapp/whatsappDispatcher');
 const { checkLimit } = require('../services/planService');
 const chatMediaService = require('../services/whatsapp/chatMediaService');
+const audioConvertService = require('../services/whatsapp/audioConvertService');
 const fs = require('fs');
 
 // ==================== CONEXÕES (SESSÕES NATIVAS) ====================
@@ -254,6 +255,27 @@ exports.sendMessage = async (req, res, next) => {
       return res.status(409).json({ error: 'Esta conexão de WhatsApp não está pronta para envio no momento.' });
     }
 
+    // Áudio: grava em formato que o WhatsApp aceita (OGG/Opus) quando o servidor tem ffmpeg.
+    const wantsVoice = ['1', 'true'].includes(String(req.body.voice || ''));
+    let asVoice = false;
+    if (file && file.path && String(file.mimetype || '').startsWith('audio/')) {
+      const friendly = audioConvertService.isWhatsappFriendlyAudio(file.mimetype);
+      if (wantsVoice || !friendly) {
+        const converted = await audioConvertService.convertToOggOpus(file.path);
+        if (converted) {
+          fs.rm(file.path, { force: true }, () => null);
+          file.path = converted;
+          file.size = fs.statSync(converted).size;
+          file.mimetype = 'audio/ogg';
+          file.originalname = `${String(file.originalname || 'audio').replace(/\.[a-z0-9]{1,5}$/i, '')}.ogg`;
+        } else if (!friendly && connection.provider === 'cloud_api') {
+          fs.rm(file.path, { force: true }, () => null);
+          return res.status(400).json({ error: 'Este formato de áudio não é aceito pela API oficial do WhatsApp e o servidor não consegue convertê-lo. Envie em MP3, M4A, OGG ou AAC.' });
+        }
+      }
+      asVoice = wantsVoice && /^audio\/ogg/.test(file.mimetype);
+    }
+
     let mediaFields = {};
     if (file) {
       mediaFields = file.path
@@ -266,7 +288,8 @@ exports.sendMessage = async (req, res, next) => {
           fileName: mediaFields.mediaName,
           mediaMime: mediaFields.mediaMime,
           mediaName: mediaFields.mediaName,
-          asDocument: mediaFields.mediaType === 'document' || mediaFields.mediaSize > chatMediaService.MAX_INLINE_MEDIA_BYTES
+          asDocument: mediaFields.mediaType === 'document' || mediaFields.mediaSize > chatMediaService.MAX_INLINE_MEDIA_BYTES,
+          asVoice
         });
       } catch (sendError) {
         fs.rm(absolute, { force: true }, () => null); // não deixa arquivo órfão se o envio falhou
