@@ -175,6 +175,36 @@ async function previewWav(userId, text, voice) {
   return wav;
 }
 
+/**
+ * Amostra das vozes Google Chirp 3 HD (as mesmas que a Twilio toca na ligação), pela API Cloud Text-to-Speech
+ * usando a mesma chave do Google/Gemini. Exige a "Cloud Text-to-Speech API" ativada nessa chave.
+ */
+async function previewGoogleWav(userId, text, voiceName) {
+  const apiKey = await getApiKey(userId);
+  if (!apiKey) throw new Error('Sem chave do Gemini/Google cadastrada (Configurações > Inteligência Artificial).');
+  const response = await fetch('https://texttospeech.googleapis.com/v1/text:synthesize', {
+    method: 'POST',
+    headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      input: { text },
+      voice: { languageCode: 'pt-BR', name: voiceName },
+      audioConfig: { audioEncoding: 'LINEAR16', sampleRateHertz: 24000 }
+    }),
+    signal: AbortSignal.timeout(12000)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.audioContent) {
+    const err = new Error(
+      response.status === 403
+        ? 'a chave não tem a "Cloud Text-to-Speech API" ativada (console.cloud.google.com > APIs > Cloud Text-to-Speech API > Ativar)'
+        : data?.error?.message || `HTTP ${response.status}`
+    );
+    err.status = 502;
+    throw err;
+  }
+  return Buffer.from(data.audioContent, 'base64');
+}
+
 /** Vozes da biblioteca ampliada do Gemini para um idioma (ex.: pt-BR). Falha = lista vazia. */
 async function listLibraryVoices(userId, languageCode = 'pt-BR') {
   const apiKey = await getApiKey(userId);
@@ -240,4 +270,4 @@ const cleanupTimer = setInterval(() => {
 }, 60 * 60 * 1000);
 cleanupTimer.unref();
 
-module.exports = { PREBUILT_VOICES, getSpeechUrl, previewWav, listLibraryVoices, resolveFile, speechify };
+module.exports = { PREBUILT_VOICES, getSpeechUrl, previewWav, previewGoogleWav, listLibraryVoices, resolveFile, speechify };

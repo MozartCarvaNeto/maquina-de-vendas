@@ -136,6 +136,22 @@ exports.handleGather = async (req, res) => {
       await prisma.lead.update({ where: { id: call.leadId }, data: { optOut: true } });
     }
 
+    // Recusou ("sem interesse"): vai para "Perdidos" no CRM e não é chamado de novo.
+    if (decision === 'sem_interesse') {
+      try {
+        const { markLeadLost } = require('../services/ai/voice/aiCallService');
+        const stamp = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+        await markLeadLost({
+          userId: campaign.userId,
+          lead: call.lead,
+          reason: optOut ? 'Pediu para não receber ligações (robô)' : 'Sem interesse (ligação robô)',
+          note: `📞 Ligação robô "${campaign.name}" em ${stamp}: sem interesse.`
+        });
+      } catch (error) {
+        console.error('Não foi possível mover o lead para Perdidos:', error.message);
+      }
+    }
+
     if (qualified) {
       await handleQualifiedLead(campaign, call, call.lead);
       return sendTwiml(res, buildInterestedTwiml(campaign));

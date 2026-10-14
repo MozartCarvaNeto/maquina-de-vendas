@@ -5,7 +5,7 @@
 const prisma = require('../config/db');
 const { countAudience } = require('../services/broadcastService');
 const { getAiTelephonyProvider } = require('../services/telephony/providerFactory');
-const { PREBUILT_VOICES, previewWav, listLibraryVoices } = require('../services/ai/voice/geminiTtsService');
+const { PREBUILT_VOICES, previewWav, previewGoogleWav, listLibraryVoices } = require('../services/ai/voice/geminiTtsService');
 const { applyPronunciation } = require('../services/ai/voice/pronunciation');
 const { AI_PROVIDER_REGISTRY } = require('../services/ai/aiProviderFactory');
 const { listPresets } = require('../services/ai/voice/aiVoicePresets');
@@ -177,8 +177,12 @@ exports.libraryVoices = async (req, res, next) => {
 exports.previewVoice = async (req, res, next) => {
   try {
     const voice = String(req.body.voice || '');
-    if (!/^gemini:/i.test(voice)) {
-      return res.status(400).json({ error: 'A amostra está disponível para as vozes do Gemini. As demais só dá para ouvir numa ligação de teste.' });
+    const isGemini = /^gemini:/i.test(voice);
+    const isChirp = /^Google\./i.test(voice);
+    if (!isGemini && !isChirp) {
+      return res.status(400).json({
+        error: 'As vozes Amazon Polly só existem dentro da ligação (a Twilio é quem as gera), então não há como tocar uma amostra aqui. Para ouvir esta voz use "Ligar para o meu celular" na aba Testar — ou escolha uma voz Gemini/Google Chirp, que têm amostra.'
+      });
     }
     let agent = { glossary: [] };
     if (req.body.agentId) {
@@ -187,7 +191,10 @@ exports.previewVoice = async (req, res, next) => {
     }
     if (Array.isArray(req.body.glossary)) agent = { glossary: req.body.glossary };
     const raw = String(req.body.text || 'Olá! Tudo bem? Aqui é a assistente virtual. Posso te contar rapidinho sobre nossos produtos?').slice(0, 300);
-    const wav = await previewWav(req.userId, applyPronunciation(raw, agent, { useBuiltIn: false }), voice.slice(7).trim() || 'Kore');
+    const spoken = applyPronunciation(raw, agent, { useBuiltIn: false });
+    const wav = isGemini
+      ? await previewWav(req.userId, spoken, voice.slice(7).trim() || 'Kore')
+      : await previewGoogleWav(req.userId, spoken, voice.replace(/^Google\./i, ''));
     res.set('Content-Type', 'audio/wav');
     res.send(wav);
   } catch (error) {

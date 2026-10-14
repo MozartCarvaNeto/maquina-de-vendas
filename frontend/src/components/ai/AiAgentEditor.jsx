@@ -105,7 +105,6 @@ export default function AiAgentEditor({ agentId, options, onClose, onSaved }) {
     (acc[g] = acc[g] || []).push(v);
     return acc;
   }, {});
-  const isGeminiVoice = String(form.voice || '').toLowerCase().startsWith('gemini:');
 
   async function loadLibraryVoices() {
     setVoiceMsg('Buscando vozes em português do Brasil…');
@@ -122,7 +121,7 @@ export default function AiAgentEditor({ agentId, options, onClose, onSaved }) {
     setPreviewing(true);
     setVoiceMsg('Gerando amostra…');
     try {
-      const { data } = await api.post('/ai-calls/voices/preview', { voice: form.voice, agentId: agentId || undefined, glossary: form.glossary }, { responseType: 'blob' });
+      const { data } = await api.post('/ai-calls/voices/preview', { voice: form.voice, agentId: agentId || undefined, glossary: form.glossary, text: (form.openingScript || '').slice(0, 300) || undefined }, { responseType: 'blob' });
       const url = URL.createObjectURL(data);
       const audio = new Audio(url);
       audio.onended = () => URL.revokeObjectURL(url);
@@ -239,7 +238,7 @@ export default function AiAgentEditor({ agentId, options, onClose, onSaved }) {
                   <input style={{ marginTop: 6 }} value={form.voice} onChange={(e) => set({ voice: e.target.value })} placeholder="Ex.: Google.pt-BR-Neural2-A ou gemini:Kore" />
                 )}
                 <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button type="button" className="ia-btn ia-btn-light" onClick={previewVoice} disabled={!isGeminiVoice || previewing} title={isGeminiVoice ? 'Ouvir a voz escolhida' : 'A amostra funciona para as vozes do Gemini'}>
+                  <button type="button" className="ia-btn ia-btn-light" onClick={previewVoice} disabled={previewing} title="Ouvir a voz escolhida">
                     ▶ Ouvir amostra
                   </button>
                   <button type="button" className="ia-btn ia-btn-light" onClick={loadLibraryVoices}>Mais vozes pt-BR (Gemini)</button>

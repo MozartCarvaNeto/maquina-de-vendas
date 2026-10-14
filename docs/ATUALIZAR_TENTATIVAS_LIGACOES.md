@@ -18,3 +18,8 @@
 - Campanhas **já criadas** passam a usar o padrão: 3 tentativas, intervalo de 180 min.
 - Quem foi chamado só uma vez em campanha anterior e não atendeu será chamado de novo ao retomar.
 - Para reativar um lead em Perdidos, use "Reativar" no CRM.
+
+## Também nesta atualização
+- **Abertura da ligação:** a fala inicial agora é exatamente a que está em "Roteiro da ligação" do agente (o sistema não acrescenta mais a frase fixa da Piercing Express). Para mudar, edite o roteiro do agente e salve.
+- **Ouvir amostra:** o botão agora fica ativo para todas as vozes e toca o início do seu roteiro. Vozes Gemini e Google Chirp 3 HD tocam; para o Chirp é preciso ativar a "Cloud Text-to-Speech API" na chave do Google (a tela avisa se faltar). As vozes Amazon Polly (ex.: Vitória) só existem dentro da ligação — para ouvi-las use "Ligar para o meu celular" na aba Testar.
+- **Sem interesse → Perdidos:** vale para a IA e também para o robô de ligações (quem diz "sem interesse" ou aperta a tecla correspondente).

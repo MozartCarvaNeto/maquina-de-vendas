@@ -23,7 +23,6 @@ const {
   looksLikeVoicemail
 } = require('./aiVoiceEngine');
 const { applyPronunciation } = require('./pronunciation');
-const { ensureCompanyPitch } = require('./aiVoicePresets');
 
 const TERMINAL_STATUSES = ['encerrada', 'ocupado', 'falhou', 'sem_resposta'];
 const RING_TIMEOUT_SECONDS = 25;
@@ -217,9 +216,8 @@ function buildDialTwiml({ agent, text, callId, fromNumber, toPhone }) {
 }
 
 function buildOpeningText(agent, leadName) {
-  // Garante que a apresentação da empresa (ex.: Piercing Express) sempre seja dita, mesmo em agentes
-  // criados antes desta regra.
-  let opening = sanitizeSpeech(ensureCompanyPitch(fillVars(agent.openingScript, { leadName, agent }), agent), 800);
+  // A abertura é exatamente o que está no "Roteiro da ligação" do agente (sem frase fixa do sistema).
+  let opening = sanitizeSpeech(fillVars(agent.openingScript, { leadName, agent }), 800);
   if (agent.recordCalls) opening = `${opening} Esta ligação pode ser gravada.`;
   return opening;
 }
