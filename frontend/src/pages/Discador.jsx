@@ -15,6 +15,10 @@ export default function Discador() {
   });
   const [autoDialEnabled, setAutoDialEnabled] = useState(false);
   const [recordCallsEnabled, setRecordCallsEnabled] = useState(false);
+  const [lists, setLists] = useState([]);
+  const [selectedListId, setSelectedListId] = useState('');
+  const [loadingList, setLoadingList] = useState(false);
+  const [listMessage, setListMessage] = useState('');
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [playingId, setPlayingId] = useState(null);
@@ -31,6 +35,16 @@ export default function Discador() {
     const { data } = await api.get('/calls/settings');
     setAutoDialEnabled(data.settings?.autoDialEnabled || false);
     setRecordCallsEnabled(data.settings?.recordCallsEnabled || false);
+    setSelectedListId(data.settings?.autoDialListId || '');
+  }, []);
+
+  const loadLists = useCallback(async () => {
+    try {
+      const { data } = await api.get('/call-queue/lists');
+      setLists(data.lists || []);
+    } catch (error) {
+      setLists([]);
+    }
   }, []);
 
   const loadHistory = useCallback(async () => {
@@ -42,7 +56,8 @@ export default function Discador() {
     loadQueue();
     loadSettings();
     loadHistory();
-  }, [loadQueue, loadSettings, loadHistory]);
+    loadLists();
+  }, [loadQueue, loadSettings, loadHistory, loadLists]);
 
   useEffect(() => {
     if (!socket) return undefined;
@@ -74,13 +89,45 @@ export default function Discador() {
   function handleToggleAutoDial(e) {
     const value = e.target.checked;
     setAutoDialEnabled(value);
-    persistSettings({ autoDialEnabled: value, recordCallsEnabled });
+    persistSettings({ autoDialEnabled: value, recordCallsEnabled, autoDialListId: selectedListId });
   }
 
   function handleToggleRecording(e) {
     const value = e.target.checked;
     setRecordCallsEnabled(value);
-    persistSettings({ autoDialEnabled, recordCallsEnabled: value });
+    persistSettings({ autoDialEnabled, recordCallsEnabled: value, autoDialListId: selectedListId });
+  }
+
+  function handleSelectList(e) {
+    const value = e.target.value;
+    setSelectedListId(value);
+    setListMessage('');
+    persistSettings({ autoDialEnabled, recordCallsEnabled, autoDialListId: value });
+  }
+
+  async function handleLoadList(replace) {
+    if (!selectedListId) {
+      setListMessage('Escolha uma lista primeiro.');
+      return;
+    }
+    setLoadingList(true);
+    setListMessage('');
+    try {
+      const { data } = await api.post('/calls/queue/load-list', { listId: selectedListId, replace });
+      const s = data.skipped || {};
+      const parts = [];
+      if (s.semTelefone) parts.push(`${s.semTelefone} sem telefone`);
+      if (s.optOut) parts.push(`${s.optOut} pediram para não receber`);
+      if (s.perdido) parts.push(`${s.perdido} perdidos`);
+      if (s.jaNaFila) parts.push(`${s.jaNaFila} já estavam na fila`);
+      if (s.ligadoRecentemente) parts.push(`${s.ligadoRecentemente} ligados nas últimas 12 h`);
+      setListMessage(`✅ ${data.enqueued} contato(s) da lista "${data.list.name}" entraram na fila.${parts.length ? ` Ignorados: ${parts.join(', ')}.` : ''}`);
+      loadQueue();
+    } catch (error) {
+      setListMessage(error.response?.data?.error || 'Não foi possível carregar a lista.');
+    } finally {
+      setLoadingList(false);
+    }
   }
 
   async function handleStartNext() {
@@ -152,6 +199,25 @@ export default function Discador() {
             <input type="checkbox" checked={recordCallsEnabled} onChange={handleToggleRecording} />
             🎙️ Gravar ligações automaticamente
           </label>
+
+          <label htmlFor="discador-lista"><strong>Lista para discagem automática</strong></label>
+          <select id="discador-lista" value={selectedListId} onChange={handleSelectList}>
+            <option value="">— Escolha uma lista de contatos —</option>
+            {lists.map((l) => (
+              <option key={l.id} value={l.id}>{l.name} ({l.totalContacts} contatos)</option>
+            ))}
+          </select>
+          {lists.length === 0 && <small className="secondary-text">Nenhuma lista criada ainda. Crie em Contatos &gt; Listas.</small>}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
+            <button type="button" className="btn-primary" onClick={() => handleLoadList(true)} disabled={loadingList || !selectedListId}>
+              {loadingList ? 'Carregando…' : '📥 Carregar lista na fila'}
+            </button>
+            <button type="button" className="btn-outline" onClick={() => handleLoadList(false)} disabled={loadingList || !selectedListId}>
+              ➕ Adicionar sem limpar a fila
+            </button>
+          </div>
+          {listMessage && <p className="secondary-text">{listMessage}</p>}
+          <small className="secondary-text">Com o modo automático ligado, depois de “Iniciar próxima ligação” o discador segue sozinho pela fila carregada.</small>
 
           <div className="discador-team-status">
             <span>👤 Vendedores disponíveis agora</span>

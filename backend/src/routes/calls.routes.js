@@ -18,6 +18,7 @@ router.post('/settings', callsController.saveDialerSettings);
 
 router.get('/queue', callsController.getQueue);
 router.post('/queue/next', callsController.startNext);
+router.post('/queue/load-list', callsController.loadList);
 
 router.post('/click-to-call', callsController.clickToCall);
 router.post('/:id/hangup', callsController.hangup);

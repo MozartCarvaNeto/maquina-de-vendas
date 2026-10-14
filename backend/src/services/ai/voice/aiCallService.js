@@ -20,7 +20,8 @@ const {
   fillVars,
   sanitizeSpeech,
   runAgentTurn,
-  looksLikeVoicemail
+  looksLikeVoicemail,
+  classifyCall
 } = require('./aiVoiceEngine');
 const { applyPronunciation } = require('./pronunciation');
 
@@ -530,7 +531,7 @@ async function processTurn({ callId, speech, confidence }) {
   }
 
   // ---- caixa postal ----
-  if (session.turnCount <= 1 && looksLikeVoicemail(heard)) {
+  if (session.turnCount <= 2 && looksLikeVoicemail(heard)) {
     await prisma.aiCallSession.update({
       where: { id: session.id },
       data: { outcome: 'caixa_postal', transcript: [...transcript, { role: 'lead', text: heard.slice(0, 500), at: nowIso }] }
@@ -569,6 +570,15 @@ async function processTurn({ callId, speech, confidence }) {
     return failed ? buildHangupTwiml(agent, say) : buildGatherTwiml({ agent, text: say, callId });
   }
 
+  // A IA percebeu que é caixa postal/secretária: só desliga (não é recusa; a campanha tenta de novo depois).
+  if (result.outcome === 'caixa_postal') {
+    await prisma.aiCallSession.update({
+      where: { id: session.id },
+      data: { outcome: 'caixa_postal', transcript: [...transcript, leadTurn] }
+    });
+    return '<Response><Hangup/></Response>';
+  }
+
   const turnCount = session.turnCount + 1;
   let { action, say } = result;
   const outcome = result.outcome || session.outcome || null;
@@ -599,7 +609,10 @@ async function processTurn({ callId, speech, confidence }) {
   }
   if (action === 'end') {
     // Despedida da IA: aplica o resultado já, sem esperar o aviso de "ligação encerrada" da Twilio.
-    applyOutcomeEffects(session.id).catch((error) => console.error('Erro ao aplicar resultado da IA:', error.message));
+    const pending = applyOutcomeEffects(session.id)
+      .catch((error) => console.error('Erro ao aplicar resultado da IA:', error.message))
+      .finally(() => effectsInFlight.delete(session.id));
+    effectsInFlight.set(session.id, pending);
     return buildHangupTwiml(agent, say);
   }
   return buildGatherTwiml({ agent, text: say, callId });
@@ -751,6 +764,39 @@ async function deliverCallReport({ session, agent, lead, outcome, isTest, effect
  *  - registra o relatório no chat e avisa o consultor por WhatsApp.
  * Na ligação de teste o "cliente" é o seu próprio celular, e tudo vem marcado com 🧪 TESTE.
  */
+const effectsInFlight = new Map(); // sessionId -> Promise (resultado sendo aplicado)
+
+/**
+ * Garante um resultado confiável antes de aplicar no CRM:
+ *  - se o "cliente" era uma gravação (caixa postal), vira caixa_postal — nunca recusa/Perdidos;
+ *  - se a IA terminou sem classificar (ou a pessoa desligou no meio), uma análise da transcrição decide.
+ */
+async function resolveFinalOutcome(session, agent, lead) {
+  const turns = asList(session.transcript);
+  const leadTurns = turns.filter((t) => t && t.role === 'lead' && t.text);
+  const data = {};
+
+  if (leadTurns.some((t) => looksLikeVoicemail(t.text)) && leadTurns.length <= 3) {
+    data.outcome = 'caixa_postal';
+  } else if (leadTurns.length > 0 && (!session.outcome || session.outcome === 'sem_conclusao')) {
+    try {
+      const verdict = await classifyCall({ agent, leadName: lead.name, transcript: turns });
+      if (verdict) {
+        data.outcome = verdict.outcome;
+        if (!session.summary && verdict.summary) data.summary = verdict.summary;
+        if (verdict.canal && !session.collected?.canal_preferido) {
+          data.collected = { ...(session.collected || {}), canal_preferido: verdict.canal };
+        }
+      }
+    } catch (error) {
+      console.warn(`⚠️ Não foi possível classificar a ligação ${session.callId}: ${error.message}`);
+    }
+  }
+
+  if (!Object.keys(data).length) return session;
+  return prisma.aiCallSession.update({ where: { id: session.id }, data });
+}
+
 async function applyOutcomeEffects(sessionId) {
   const claim = await prisma.aiCallSession.updateMany({
     where: { id: sessionId, effectsApplied: false },
@@ -758,12 +804,14 @@ async function applyOutcomeEffects(sessionId) {
   });
   if (claim.count === 0) return null;
 
-  const session = await prisma.aiCallSession.findUnique({ where: { id: sessionId } });
+  let session = await prisma.aiCallSession.findUnique({ where: { id: sessionId } });
   if (!session) return null;
 
   const agent = session.agentId ? await getAgentCached(session.agentId) : null;
   const lead = await prisma.lead.findUnique({ where: { id: session.leadId } });
   if (!agent || !lead) return null;
+
+  session = await resolveFinalOutcome(session, agent, lead);
 
   const isTest = !!session.isTest;
   const outcome = session.outcome || (session.turnCount > 0 ? 'sem_conclusao' : 'sem_resposta');
@@ -908,6 +956,10 @@ async function finalizeAiCall(callId) {
       if (!outcome) outcome = call.aiSession.turnCount > 0 ? 'sem_conclusao' : 'sem_resposta';
       await applyOutcomeEffects(call.aiSession.id).catch((error) => console.error('Erro ao aplicar resultado da IA:', error.message));
     }
+    // O resultado pode ter sido refinado dentro de applyOutcomeEffects (caixa postal, análise da transcrição).
+    await effectsInFlight.get(call.aiSession.id); // a despedida da IA pode ainda estar sendo analisada
+    const fresh = await prisma.aiCallSession.findUnique({ where: { id: call.aiSession.id }, select: { outcome: true } }).catch(() => null);
+    if (fresh?.outcome) outcome = fresh.outcome;
     await prisma.aiCallSession.update({ where: { id: call.aiSession.id }, data: { outcome } }).catch(() => {});
   }
 
@@ -920,8 +972,8 @@ async function finalizeAiCall(callId) {
 
 /** Ligação que realmente falou com alguém (e não caiu em caixa postal). */
 function isConnectedCall(call) {
-  const answered = !!call.answeredAt || (call.aiSession?.turnCount || 0) > 0;
-  return answered && call.aiSession?.outcome !== 'caixa_postal';
+  // Só conta como "atendeu" se houve conversa; atender e ficar mudo ou cair em gravação segue para nova tentativa.
+  return (call.aiSession?.turnCount || 0) > 0 && call.aiSession?.outcome !== 'caixa_postal';
 }
 
 /** Resume, por lead, o que já aconteceu na campanha: tentativas, última tentativa, se já atendeu e o resultado final. */
@@ -1289,6 +1341,8 @@ module.exports = {
   businessDayAt,
   nextWindowStart,
   planRound,
+  resolveFinalOutcome,
+  isConnectedCall,
   markLeadLost,
   recomputeCampaignStats,
   toE164,

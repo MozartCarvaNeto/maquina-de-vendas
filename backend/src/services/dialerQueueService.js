@@ -126,4 +126,66 @@ async function getQueueStatus(userId) {
   };
 }
 
-module.exports = { startNextCall, getQueueStatus, pickNextCallerNumber, pickAvailableAgent };
+/**
+ * Carrega os contatos de uma lista na fila do discador.
+ * Entram: contatos da lista com telefone, que não pediram opt-out, não estão "perdidos", não estão
+ * pausados na lista, ainda não foram resolvidos (interessado/não quer) e não receberam ligação do
+ * discador nas últimas 12 h. `replace` limpa antes os itens pendentes (troca de lista).
+ */
+async function loadListIntoQueue(userId, listId, { replace = false } = {}) {
+  const list = await prisma.leadList.findFirst({ where: { id: listId, userId }, select: { id: true, name: true } });
+  if (!list) {
+    const err = new Error('Lista não encontrada.');
+    err.status = 404;
+    throw err;
+  }
+
+  if (replace) {
+    await prisma.callQueueItem.updateMany({ where: { userId, status: 'pendente' }, data: { status: 'pulado' } });
+  }
+
+  const now = new Date();
+  const members = await prisma.leadListMembership.findMany({
+    where: {
+      listId,
+      lastOutcome: { in: ['novo', 'nao_atendeu'] },
+      OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: now } }]
+    },
+    orderBy: [{ queuePosition: 'asc' }, { addedAt: 'asc' }],
+    include: { lead: { select: { id: true, name: true, phone: true, optOut: true, status: true } } }
+  });
+
+  const leadIds = members.map((m) => m.leadId);
+  const [queued, recent] = await Promise.all([
+    prisma.callQueueItem.findMany({ where: { userId, leadId: { in: leadIds }, status: { in: ['pendente', 'discando'] } }, select: { leadId: true } }),
+    prisma.call.findMany({
+      where: {
+        userId,
+        leadId: { in: leadIds },
+        roboCallCampaignId: null,
+        aiCallCampaignId: null,
+        createdAt: { gt: new Date(now.getTime() - 12 * 60 * 60 * 1000) }
+      },
+      select: { leadId: true }
+    })
+  ]);
+  const queuedSet = new Set(queued.map((q) => q.leadId));
+  const recentSet = new Set(recent.map((c) => c.leadId));
+
+  const rows = [];
+  const skipped = { semTelefone: 0, optOut: 0, perdido: 0, jaNaFila: 0, ligadoRecentemente: 0 };
+  members.forEach((m) => {
+    const lead = m.lead;
+    if (!lead.phone) skipped.semTelefone += 1;
+    else if (lead.optOut) skipped.optOut += 1;
+    else if (lead.status === 'perdido') skipped.perdido += 1;
+    else if (queuedSet.has(lead.id)) skipped.jaNaFila += 1;
+    else if (recentSet.has(lead.id)) skipped.ligadoRecentemente += 1;
+    else rows.push({ userId, leadId: lead.id, status: 'pendente', scheduledAt: new Date(now.getTime() + rows.length) });
+  });
+
+  if (rows.length) await prisma.callQueueItem.createMany({ data: rows });
+  return { list, enqueued: rows.length, skipped };
+}
+
+module.exports = { loadListIntoQueue, startNextCall, getQueueStatus, pickNextCallerNumber, pickAvailableAgent };

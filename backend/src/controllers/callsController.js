@@ -6,6 +6,7 @@ const { getActiveTelephonyProvider } = require('../services/telephony/providerFa
 const { getCredentials, saveCredentials } = require('../services/integrationFactory');
 const {
   startNextCall,
+  loadListIntoQueue,
   getQueueStatus,
   pickNextCallerNumber,
   pickAvailableAgent
@@ -13,11 +14,12 @@ const {
 
 exports.saveDialerSettings = async (req, res, next) => {
   try {
-    const { autoDialEnabled, recordCallsEnabled } = req.body;
+    const { autoDialEnabled, recordCallsEnabled, autoDialListId } = req.body;
 
     await saveCredentials(req.userId, 'dialer', 'general', {
       autoDialEnabled: String(!!autoDialEnabled),
-      recordCallsEnabled: String(!!recordCallsEnabled)
+      recordCallsEnabled: String(!!recordCallsEnabled),
+      autoDialListId: autoDialListId ? String(autoDialListId) : 'none'
     });
 
     res.json({ success: true, message: 'Configurações do discador salvas' });
@@ -33,9 +35,10 @@ exports.getDialerSettings = async (req, res, next) => {
       settings: settings
         ? {
             autoDialEnabled: settings.autoDialEnabled === 'true',
-            recordCallsEnabled: settings.recordCallsEnabled === 'true'
+            recordCallsEnabled: settings.recordCallsEnabled === 'true',
+            autoDialListId: settings.autoDialListId && settings.autoDialListId !== 'none' ? settings.autoDialListId : ''
           }
-        : { autoDialEnabled: false, recordCallsEnabled: false }
+        : { autoDialEnabled: false, recordCallsEnabled: false, autoDialListId: '' }
     });
   } catch (error) {
     next(error);
@@ -46,6 +49,17 @@ exports.getQueue = async (req, res, next) => {
   try {
     const status = await getQueueStatus(req.userId);
     res.json(status);
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.loadList = async (req, res, next) => {
+  try {
+    const { listId, replace } = req.body || {};
+    if (!listId) return res.status(400).json({ error: 'Escolha uma lista.' });
+    const result = await loadListIntoQueue(req.userId, String(listId), { replace: !!replace });
+    res.json({ success: true, ...result });
   } catch (error) {
     next(error);
   }

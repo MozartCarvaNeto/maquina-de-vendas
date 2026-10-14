@@ -12,7 +12,7 @@ const LLM_TIMEOUT_MS = 8000;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 const ACTIONS = ['continue', 'handoff', 'end'];
-const OUTCOMES = ['quente', 'morno', 'frio', 'nao_interessado', 'optout', 'retorno_agendado', 'numero_errado'];
+const OUTCOMES = ['quente', 'morno', 'frio', 'nao_interessado', 'optout', 'retorno_agendado', 'numero_errado', 'caixa_postal'];
 
 // ------------------------------------------------------------------ caches
 // O agente (com catálogo) e a IA são lidos do banco no máximo 1x a cada 5 min:
@@ -116,7 +116,8 @@ COMO FALAR (é uma conversa por voz, ao telefone)
 - Se a pessoa pedir para não receber mais ligações ou demonstrar irritação: peça desculpas, confirme que não ligará de novo e encerre (outcome "optout", action "end").
 - Se for número errado ou a pessoa não for do negócio: peça desculpas e encerre (outcome "numero_errado", action "end").
 - Se pedir para ligar em outro momento: combine dia e hora, confirme em voz alta e use outcome "retorno_agendado" com "callbackAt" (data e hora combinadas, com fuso -03:00).
-- Se disser que não tem interesse, não insista mais de uma vez; agradeça e encerre (outcome "nao_interessado", action "end").
+- Se disser que não tem interesse, não insista mais de uma vez; agradeça e encerre (outcome "nao_interessado", action "end"). Use "nao_interessado" SOMENTE quando uma PESSOA real recusou.
+- CAIXA POSTAL / SECRETÁRIA ELETRÔNICA: se o que você ouvir for gravação (caixa postal, "deixe seu recado", "após o sinal", "não pode atender", "fora da área", "desligado", mensagem automática de operadora), NÃO converse e NÃO deixe recado: responda com "say" vazio, action "end" e outcome "caixa_postal". Isso NÃO é recusa.
 
 VOCABULÁRIO TÉCNICO DO MERCADO (${agent.market || 'geral'})
 Use estes termos corretamente e entenda quando o cliente falar deles, mesmo que a transcrição escreva diferente:
@@ -125,6 +126,11 @@ ${glossaryBlock}
 O QUE VOCÊ PRECISA DESCOBRIR (qualificação)
 ${fieldsBlock}
 Já coletado até agora: ${JSON.stringify(collected || {})}
+
+COMO CONCLUIR A LIGAÇÃO (obrigatório — seja breve)
+- Assim que o lead demonstrar interesse, não prolongue: em UMA fala curta ofereça o próximo passo — "nosso consultor pode te ligar ou prefere que eu envie o link/catálogo no WhatsApp?".
+- Quando ele responder que aceita (qualquer das duas opções, ou disser "pode ser", "sim", "pode chamar"): confirme em UMA frase curta ("Perfeito, o consultor te ligará em breve" ou "Perfeito, vou te enviar no WhatsApp"), agradeça, use action "end" e outcome "quente", com "canal_preferido" em "collected" ("ligacao" ou "whatsapp").
+- Nunca deixe a ligação terminar sem "outcome": depois da segunda fala do cliente o outcome nunca pode ser null (use quente, morno, frio, nao_interessado, etc.).
 
 CANAL PREFERIDO DE CONTATO
 - Quando o lead demonstrar interesse (outcome quente ou morno), antes de se despedir pergunte, de forma natural, se ele prefere que o consultor continue pelo WhatsApp ou por ligação telefônica, e registre em "collected" a chave "canal_preferido" com o valor "whatsapp" ou "ligacao".
@@ -143,7 +149,7 @@ FORMATO DA RESPOSTA — responda SOMENTE com um JSON válido, sem nenhum texto f
 {
   "say": "o que você vai falar agora",
   "action": "continue" | "handoff" | "end",
-  "outcome": "quente" | "morno" | "frio" | "nao_interessado" | "optout" | "retorno_agendado" | "numero_errado" | null,
+  "outcome": "quente" | "morno" | "frio" | "nao_interessado" | "optout" | "retorno_agendado" | "numero_errado" | "caixa_postal" | null,
   "collected": { "chave": "valor" },
   "callbackAt": "2026-01-15T15:00:00-03:00" | null,
   "callbackNote": "o que foi combinado" | null,
@@ -288,13 +294,57 @@ async function runAgentTurn({ agent, leadName, transcript, userText, collected =
 }
 
 // Frases que indicam caixa postal / secretária eletrônica.
-const VOICEMAIL_PHRASES = ['caixa postal', 'deixe sua mensagem', 'apos o sinal', 'nao esta disponivel', 'gravar sua mensagem', 'secretaria eletronica', 'mensagem apos'];
+const VOICEMAIL_PHRASES = [
+  'caixa postal', 'caixa de mensagens', 'deixe sua mensagem', 'deixe seu recado', 'deixe um recado', 'deixe uma mensagem',
+  'apos o sinal', 'apos o bip', 'depois do sinal', 'depois do bip', 'nao esta disponivel', 'nao pode atender', 'nao podemos atender',
+  'gravar sua mensagem', 'secretaria eletronica', 'mensagem apos', 'fora da area de cobertura', 'telefone desligado',
+  'esta desligado', 'nao atende', 'a pessoa que voce ligou', 'o numero chamado', 'correio de voz', 'voicemail'
+];
 function looksLikeVoicemail(speech) {
   const heard = normalize(speech);
   return VOICEMAIL_PHRASES.some((phrase) => heard.includes(phrase));
 }
 
+/**
+ * Rede de segurança: quando a IA terminou a ligação sem dar o resultado (ou a pessoa desligou no meio),
+ * uma análise rápida da transcrição define o resultado — assim lead interessado nunca fica "sem conclusão".
+ * Devolve { outcome, canal, summary } ou null se não houver como analisar.
+ */
+async function classifyCall({ agent, leadName, transcript }) {
+  const provider = await getProviderCached(agent.userId, agent.aiProvider);
+  if (!provider) return null;
+  const turns = asList(transcript)
+    .filter((t) => t && t.text)
+    .slice(-30)
+    .map((t) => `${t.role === 'agent' ? 'IA' : 'CLIENTE'}: ${String(t.text).slice(0, 300)}`)
+    .join('\n');
+  if (!turns) return null;
+
+  const system = `Você analisa a transcrição de uma ligação de vendas feita por uma assistente virtual da empresa ${agent.companyName} para ${leadName || 'um cliente'} e classifica o resultado. Responda SOMENTE com JSON:
+{"outcome":"quente|morno|frio|nao_interessado|optout|retorno_agendado|numero_errado|caixa_postal","canal_preferido":"whatsapp|ligacao|null","summary":"resumo em até 280 caracteres"}
+Regras:
+- quente: o cliente ACEITOU falar com o consultor, receber o contato/link/catálogo, ou demonstrou claramente que quer comprar/receber proposta.
+- morno: tem interesse mas sem aceitar um próximo passo, ou vai pensar.
+- frio: pouca abertura, sem recusar de forma explícita.
+- nao_interessado: uma PESSOA recusou claramente.
+- optout: pediu para não receber mais ligações.
+- retorno_agendado: pediu para ligar em outro momento.
+- numero_errado: não é do negócio / número errado.
+- caixa_postal: só havia gravação, secretária eletrônica ou mensagem automática (nunca é recusa).
+- canal_preferido: "whatsapp" se pediu/aceitou receber pelo WhatsApp; "ligacao" se aceitou que o consultor ligue; senão null.`;
+
+  const raw = await withTimeout(provider.generateReply(system, [], `TRANSCRIÇÃO:\n${turns}`), 15000);
+  const parsed = extractJson(raw);
+  if (!parsed || !OUTCOMES.includes(parsed.outcome)) return null;
+  return {
+    outcome: parsed.outcome,
+    canal: ['whatsapp', 'ligacao'].includes(parsed.canal_preferido) ? parsed.canal_preferido : null,
+    summary: parsed.summary ? String(parsed.summary).slice(0, 300) : null
+  };
+}
+
 module.exports = {
+  classifyCall,
   getAgentCached,
   invalidateAgent,
   getProviderCached,
