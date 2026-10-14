@@ -12,6 +12,7 @@ router.get('/providers', settingsController.listAvailableProviders);
 router.get('/env-status', settingsController.getEnvStatus);
 router.get('/', settingsController.listMySettings);
 router.post('/telephony', settingsController.saveTelephonySettings);
+router.post('/ai-telephony', settingsController.saveAiTelephonySettings);
 router.post('/email', settingsController.saveEmailSettings);
 router.delete('/:category/:provider', settingsController.deleteProviderSettings);
 router.delete('/:id', settingsController.deleteSetting);

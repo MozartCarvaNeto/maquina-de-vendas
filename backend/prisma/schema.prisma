@@ -854,6 +854,10 @@ model AiCallCampaign {
   windowEnd       String  @default("18:00")
   weekdaysOnly    Boolean @default(true)
 
+  // Novas tentativas para quem não atende
+  maxAttempts     Int     @default(3)
+  retryGapMinutes Int     @default(180)
+
   status          String    @default("rascunho") // rascunho | discando | pausado | concluido
   isRunning       Boolean   @default(false)
   lastHeartbeatAt DateTime?

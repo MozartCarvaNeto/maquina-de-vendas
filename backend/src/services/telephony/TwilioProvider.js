@@ -18,6 +18,8 @@ class TwilioProvider extends ITelephonyProvider {
     this.accountSid = credentials.accountSid;
     this.authToken = credentials.authToken;
     this.client = twilio(this.accountSid, this.authToken);
+    this.providerName = 'twilio';
+    this.dialect = 'twiml';
   }
 
   translateError(error) {

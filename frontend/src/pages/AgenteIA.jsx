@@ -28,6 +28,8 @@ function emptyCampaignForm(agentId = '') {
     windowStart: '09:00',
     windowEnd: '18:00',
     weekdaysOnly: true,
+    maxAttempts: 3,
+    retryGapMinutes: 180,
     concurrency: 1,
     minDelaySeconds: 20,
     maxDelaySeconds: 60
@@ -147,6 +149,8 @@ export default function AgenteIA() {
         windowStart: form.windowStart,
         windowEnd: form.windowEnd,
         weekdaysOnly: form.weekdaysOnly,
+        maxAttempts: Number(form.maxAttempts),
+        retryGapMinutes: Number(form.retryGapMinutes),
         concurrency: Number(form.concurrency),
         minDelaySeconds: Number(form.minDelaySeconds),
         maxDelaySeconds: Number(form.maxDelaySeconds)
@@ -300,7 +304,7 @@ export default function AgenteIA() {
                     <div>
                       <h3>{c.name}</h3>
                       <span className={`ia-status ia-status-${c.status}`}>{STATUS_LABEL[c.status] || c.status}</span>
-                      <span className="ia-muted"> Agente: {c.agent?.name} · {c.windowStart}–{c.windowEnd}{c.weekdaysOnly ? ' (seg a sex)' : ''}</span>
+                      <span className="ia-muted"> Agente: {c.agent?.name} · {c.windowStart}–{c.windowEnd}{c.weekdaysOnly ? ' (seg a sex)' : ''} · {c.maxAttempts || 1} tentativa(s) por número</span>
                       {c.runningNote && c.status !== 'concluido' && <div className="ia-note">{c.runningNote}</div>}
                     </div>
                     <div className="ia-row">
@@ -426,7 +430,14 @@ export default function AgenteIA() {
                 <div><label>Até</label><input type="time" value={form.windowEnd} onChange={(e) => setForm({ ...form, windowEnd: e.target.value })} required /></div>
               </div>
               <label className="ia-check"><input type="checkbox" checked={form.weekdaysOnly} onChange={(e) => setForm({ ...form, weekdaysOnly: e.target.checked })} /> Ligar somente de segunda a sexta</label>
-              <small className="ia-muted">Fora desse horário a campanha pausa sozinha. No dia seguinte, clique em “Retomar”: ela continua do próximo contato, sem repetir quem já foi ligado.</small>
+              <small className="ia-muted">Fora desse horário a campanha espera sozinha e volta a ligar quando a janela abrir de novo — não precisa clicar em nada.</small>
+
+              <h4>Quem não atende</h4>
+              <div className="ia-grid">
+                <div><label>Tentativas por número</label><input type="number" min="1" max="10" value={form.maxAttempts} onChange={(e) => setForm({ ...form, maxAttempts: e.target.value })} /></div>
+                <div><label>Intervalo entre tentativas (min)</label><input type="number" min="5" max="1440" value={form.retryGapMinutes} onChange={(e) => setForm({ ...form, retryGapMinutes: e.target.value })} /></div>
+              </div>
+              <small className="ia-muted">Quem não atender é chamado de novo depois do intervalo, até o limite de tentativas. Quem atende segue o fluxo normal. Quem recusar vai para “Perdidos” no CRM e não recebe mais ligações.</small>
 
               <h4>Ritmo</h4>
               <label>Número de saída</label>

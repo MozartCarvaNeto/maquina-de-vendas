@@ -6,6 +6,7 @@ import './Configuracoes.css';
 
 const CATEGORY_LABELS = {
   telephony: '📞 Telefonia',
+  ai_telephony: '☎️ Telefonia da IA',
   email: '📧 E-mail',
   ai: '🤖 Inteligência Artificial',
   leadsearch: '🔍 Busca de empresas',
@@ -14,6 +15,10 @@ const CATEGORY_LABELS = {
 
 export default function Configuracoes() {
   const [telephony, setTelephony] = useState({ accountSid: '', authToken: '' });
+  // Operadora das ligações do Agente de IA (alternativa à Twilio)
+  const [aiTelProvider, setAiTelProvider] = useState('twilio');
+  const [telnyx, setTelnyx] = useState({ apiKey: '', applicationSid: '', accountSid: '' });
+  const [jambonz, setJambonz] = useState({ apiKey: '', accountSid: '', baseUrl: 'https://api.jambonz.cloud', applicationSid: '' });
   const [telephonyEnvActive, setTelephonyEnvActive] = useState(false);
 
   const [emailProvider, setEmailProvider] = useState('smtp');
@@ -64,6 +69,14 @@ export default function Configuracoes() {
         prefilled.current = true;
         const tel = list.find((x) => x.category === 'telephony');
         if (tel?.values?.accountSid) setTelephony((t) => ({ ...t, accountSid: tel.values.accountSid }));
+
+        const aiTel = list.find((x) => x.category === 'ai_telephony');
+        if (aiTel && ['twilio', 'telnyx', 'jambonz'].includes(aiTel.provider)) {
+          setAiTelProvider(aiTel.provider);
+          const v = aiTel.values || {};
+          if (aiTel.provider === 'telnyx') setTelnyx((cur) => ({ ...cur, applicationSid: v.applicationSid || '', accountSid: v.accountSid || '' }));
+          if (aiTel.provider === 'jambonz') setJambonz((cur) => ({ ...cur, accountSid: v.accountSid || '', baseUrl: v.baseUrl || 'https://api.jambonz.cloud', applicationSid: v.applicationSid || '' }));
+        }
 
         const mail = list.find((x) => x.category === 'email');
         if (mail && ['smtp', 'resend', 'sendgrid', 'native'].includes(mail.provider)) {
@@ -157,6 +170,23 @@ export default function Configuracoes() {
       okText: 'Telefonia configurada e testada com sucesso',
       afterOk: () => {
         setTelephony((t) => ({ ...t, authToken: '' }));
+        loadConfiguredSettings();
+      }
+    });
+  }
+
+  async function saveAiTelephony(e) {
+    e.preventDefault();
+    const credentials = aiTelProvider === 'telnyx' ? telnyx : aiTelProvider === 'jambonz' ? jambonz : {};
+    setMessages((m) => ({ ...m, aitel: 'Testando a conexão…' }));
+    await submitSetting({
+      area: 'aitel',
+      url: '/settings/ai-telephony',
+      body: { provider: aiTelProvider, credentials },
+      okText: aiTelProvider === 'twilio' ? 'As ligações da IA voltaram a usar a Twilio' : 'Operadora da IA configurada — faça uma ligação de teste',
+      afterOk: () => {
+        setTelnyx((v) => ({ ...v, apiKey: '' }));
+        setJambonz((v) => ({ ...v, apiKey: '' }));
         loadConfiguredSettings();
       }
     });
@@ -368,6 +398,76 @@ export default function Configuracoes() {
           <p className="card-note">
             O número de telefone é cadastrado em Linhas → Números de Discagem — ou, se você preencheu
             <code> TWILIO_CALLER_NUMBER</code> no .env, já foi criado automaticamente lá.
+          </p>
+        </div>
+
+        <div className="card">
+          <h3>☎️ Telefonia das ligações da IA</h3>
+          <p className="card-desc">
+            Escolha por onde o <strong>Agente de IA</strong> faz as ligações. O padrão é a Twilio (nada muda se você
+            não mexer aqui). O discador manual com vendedor continua sempre na Twilio.
+          </p>
+
+          <form onSubmit={saveAiTelephony}>
+            <select value={aiTelProvider} onChange={(e) => setAiTelProvider(e.target.value)}>
+              <option value="twilio">Twilio (padrão — a mesma configurada acima)</option>
+              <option value="telnyx">Telnyx (TeXML) — alternativa mais barata</option>
+              <option value="jambonz">Jambonz + tronco SIP (operadora brasileira, minutos ilimitados)</option>
+            </select>
+
+            {aiTelProvider === 'twilio' && (
+              <p className="hint-text">As ligações da IA usam a Twilio configurada acima. Clique em Salvar para voltar ao padrão, se estava usando outra.</p>
+            )}
+
+            {aiTelProvider === 'telnyx' && (
+              <>
+                <p className="hint-text">
+                  (1) Crie conta em telnyx.com e gere uma <strong>API Key v2</strong> (Mission Control → Auth). (2) Crie um
+                  <strong> TeXML Application</strong> e, em "Voice Method", use qualquer endereço https (ex.: o do seu servidor) —
+                  o sistema informa o endereço correto a cada ligação. (3) Copie o <strong>ID</strong> do TeXML Application.
+                  (4) Compre/portabilize um número e cadastre-o em Linhas → Números de Discagem.
+                </p>
+                <input
+                  placeholder={hintOf('ai_telephony', 'telnyx', 'apiKey') ? `API Key da Telnyx (salva ${hintOf('ai_telephony', 'telnyx', 'apiKey')} — deixe vazio para manter)` : 'API Key da Telnyx (KEY...)'}
+                  type="password"
+                  value={telnyx.apiKey}
+                  onChange={(e) => setTelnyx({ ...telnyx, apiKey: e.target.value })}
+                  required={!hintOf('ai_telephony', 'telnyx', 'apiKey')}
+                />
+                <input placeholder="ID do TeXML Application" value={telnyx.applicationSid} onChange={(e) => setTelnyx({ ...telnyx, applicationSid: e.target.value })} required />
+                <input placeholder="Account SID (opcional)" value={telnyx.accountSid} onChange={(e) => setTelnyx({ ...telnyx, accountSid: e.target.value })} />
+              </>
+            )}
+
+            {aiTelProvider === 'jambonz' && (
+              <>
+                <p className="hint-text">
+                  O Jambonz é a ponte entre a IA e o <strong>seu tronco SIP</strong> (Vozio, Voiicr, Avoip, Vivo Empresas...).
+                  Use a nuvem jambonz.cloud ou instale no seu servidor. No painel do Jambonz: (1) cadastre o tronco da
+                  operadora em <em>Carriers</em>; (2) em <em>Speech</em>, ligue um reconhecimento de voz (Google, Deepgram...) —
+                  sem isso a IA não ouve o cliente; (3) gere um <em>API Key</em> e copie o <em>Account SID</em>.
+                </p>
+                <input
+                  placeholder={hintOf('ai_telephony', 'jambonz', 'apiKey') ? `Token da API (salvo ${hintOf('ai_telephony', 'jambonz', 'apiKey')} — deixe vazio para manter)` : 'Token da API do Jambonz'}
+                  type="password"
+                  value={jambonz.apiKey}
+                  onChange={(e) => setJambonz({ ...jambonz, apiKey: e.target.value })}
+                  required={!hintOf('ai_telephony', 'jambonz', 'apiKey')}
+                />
+                <input placeholder="Account SID" value={jambonz.accountSid} onChange={(e) => setJambonz({ ...jambonz, accountSid: e.target.value })} required />
+                <input placeholder="Endereço da API (https://api.jambonz.cloud ou o seu servidor)" value={jambonz.baseUrl} onChange={(e) => setJambonz({ ...jambonz, baseUrl: e.target.value })} />
+                <input placeholder="Application SID (opcional)" value={jambonz.applicationSid} onChange={(e) => setJambonz({ ...jambonz, applicationSid: e.target.value })} />
+              </>
+            )}
+
+            <button className="btn-primary" type="submit">Salvar</button>
+            {messages.aitel && <p className="config-msg">{messages.aitel}</p>}
+            {forceButton('aitel')}
+          </form>
+          <p className="card-note">
+            Atenção: planos "ilimitados" de operadoras costumam proibir discadores em massa (uso aceitável). Confirme com
+            a operadora que ligações de IA conversacional são permitidas no seu plano. Faça sempre uma ligação de teste
+            depois de trocar de operadora (Ligações → Agente de IA).
           </p>
         </div>
 

@@ -2,7 +2,7 @@
 const prisma = require('../config/db');
 const { decrypt } = require('../services/crypto/settingsCrypto');
 const { isSecretKey, maskSecret, mergeCredentials, persistCredentials } = require('../services/settingsHelpers');
-const { PROVIDER_REGISTRY, getActiveTelephonyProvider, isTelephonyConfiguredViaEnv } = require('../services/telephony/providerFactory');
+const { PROVIDER_REGISTRY, AI_TELEPHONY_REGISTRY, getActiveTelephonyProvider, isTelephonyConfiguredViaEnv } = require('../services/telephony/providerFactory');
 const { EMAIL_PROVIDER_REGISTRY, getEmailProvider } = require('../services/email/emailProviderFactory');
 const { getActiveDomainForSending } = require('../services/email/emailDomainService');
 
@@ -108,6 +108,58 @@ exports.saveTelephonySettings = async (req, res, next) => {
       validated: validation.valid,
       message: validation.valid
         ? 'Integração de telefonia configurada com sucesso'
+        : 'Credenciais salvas SEM validação (você escolheu salvar mesmo assim)',
+      warning: validation.valid ? undefined : validation.error
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Operadora das ligações do Agente de IA (alternativa à Twilio). Fica numa categoria própria
+ * ("ai_telephony"): o discador manual com vendedor continua usando a telefonia de sempre.
+ * Escolher "twilio" (ou apagar esta configuração) volta ao comportamento original.
+ */
+exports.saveAiTelephonySettings = async (req, res, next) => {
+  try {
+    const { provider, credentials, force } = req.body;
+    if (!provider || !AI_TELEPHONY_REGISTRY[provider]) {
+      return res.status(400).json({ error: 'Operadora inválida.' });
+    }
+
+    if (provider === 'twilio') {
+      await persistCredentials(req.userId, 'ai_telephony', 'twilio', { ativo: 'true' }, [], { exclusive: true });
+      return res.json({ success: true, validated: true, message: 'As ligações da IA vão usar a Twilio (configuração padrão).' });
+    }
+
+    if (!credentials || typeof credentials !== 'object') {
+      return res.status(400).json({ error: 'Credenciais não informadas' });
+    }
+    const { merged, toDelete } = await mergeCredentials(req.userId, 'ai_telephony', provider, credentials);
+
+    if (provider === 'telnyx' && (!merged.apiKey || !merged.applicationSid)) {
+      return res.status(400).json({ error: 'Informe a API Key da Telnyx e o ID do TeXML Application.' });
+    }
+    if (provider === 'jambonz' && (!merged.apiKey || !merged.accountSid)) {
+      return res.status(400).json({ error: 'Informe o token da API e o Account SID do Jambonz.' });
+    }
+
+    const validation = await validateWithRegistry(AI_TELEPHONY_REGISTRY, provider, merged);
+    if (!validation.valid && !force) {
+      return res.status(422).json({
+        error: 'A operadora recusou essas credenciais — nada foi alterado.',
+        details: validation.error,
+        canForce: true
+      });
+    }
+
+    await persistCredentials(req.userId, 'ai_telephony', provider, merged, toDelete, { exclusive: true });
+    res.json({
+      success: true,
+      validated: validation.valid,
+      message: validation.valid
+        ? 'Operadora das ligações da IA configurada. Faça uma ligação de teste para validar.'
         : 'Credenciais salvas SEM validação (você escolheu salvar mesmo assim)',
       warning: validation.valid ? undefined : validation.error
     });

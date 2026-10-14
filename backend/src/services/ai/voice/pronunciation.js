@@ -45,9 +45,9 @@ function escapeRegex(text) {
   return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function buildEntries(agent) {
+function buildEntries(agent, useBuiltIn = true) {
   const entries = new Map();
-  for (const [term, say] of Object.entries(BUILT_IN)) entries.set(term.toLowerCase(), say);
+  if (useBuiltIn) for (const [term, say] of Object.entries(BUILT_IN)) entries.set(term.toLowerCase(), say);
 
   const glossary = Array.isArray(agent?.glossary) ? agent.glossary : [];
   for (const item of glossary) {
@@ -59,12 +59,12 @@ function buildEntries(agent) {
 }
 
 /** Devolve o texto com os termos trocados pela grafia falada. */
-function applyPronunciation(text, agent) {
+function applyPronunciation(text, agent, { useBuiltIn = true } = {}) {
   let out = String(text || '');
   if (!out) return out;
 
   // Termos mais longos primeiro ("push pin" antes de "pin").
-  const entries = [...buildEntries(agent).entries()].sort((a, b) => b[0].length - a[0].length);
+  const entries = [...buildEntries(agent, useBuiltIn).entries()].sort((a, b) => b[0].length - a[0].length);
   for (const [term, say] of entries) {
     const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegex(term)}(?![\\p{L}\\p{N}])`, 'giu');
     out = out.replace(pattern, say);

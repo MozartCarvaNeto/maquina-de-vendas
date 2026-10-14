@@ -4,7 +4,9 @@
 // agentes (configuração), campanhas, simulador de conversa, ligação de teste.
 const prisma = require('../config/db');
 const { countAudience } = require('../services/broadcastService');
-const { getActiveTelephonyProvider } = require('../services/telephony/providerFactory');
+const { getAiTelephonyProvider } = require('../services/telephony/providerFactory');
+const { PREBUILT_VOICES, previewWav, listLibraryVoices } = require('../services/ai/voice/geminiTtsService');
+const { applyPronunciation } = require('../services/ai/voice/pronunciation');
 const { AI_PROVIDER_REGISTRY } = require('../services/ai/aiProviderFactory');
 const { listPresets } = require('../services/ai/voice/aiVoicePresets');
 const {
@@ -22,10 +24,23 @@ const {
 } = require('../services/ai/voice/aiCallService');
 
 const VOICES = [
-  { id: 'Polly.Camila-Neural', label: 'Camila (feminina, neural) — recomendada' },
-  { id: 'Polly.Vitoria-Neural', label: 'Vitória (feminina, neural)' },
-  { id: 'Polly.Thiago-Neural', label: 'Thiago (masculina, neural)' },
-  { id: 'Polly.Ricardo', label: 'Ricardo (masculina, padrão)' }
+  // Padrão (como sempre foi)
+  { id: 'Polly.Camila-Neural', label: 'Camila (feminina, neural) — recomendada', group: 'Amazon Polly (padrão)' },
+  { id: 'Polly.Vitoria-Neural', label: 'Vitória (feminina, neural)', group: 'Amazon Polly (padrão)' },
+  { id: 'Polly.Thiago-Neural', label: 'Thiago (masculina, neural)', group: 'Amazon Polly (padrão)' },
+  { id: 'Polly.Ricardo', label: 'Ricardo (masculina, padrão)', group: 'Amazon Polly (padrão)' },
+  // Vozes Google Chirp 3 HD: tocadas direto pela Twilio (mais naturais que a Polly, sem integração extra)
+  ...['Aoede', 'Kore', 'Leda', 'Zephyr', 'Puck', 'Charon', 'Fenrir', 'Orus'].map((n) => ({
+    id: `Google.pt-BR-Chirp3-HD-${n}`,
+    label: `${n} (Google Chirp 3 HD)`,
+    group: 'Google Chirp 3 HD (via Twilio — mais natural)'
+  })),
+  // Vozes do Gemini: as mais realistas (precisam da chave do Gemini em Configurações)
+  ...Object.entries(PREBUILT_VOICES).map(([name, trait]) => ({
+    id: `gemini:${name}`,
+    label: `${name} — ${trait}${['Achird', 'Sulafat', 'Kore'].includes(name) ? ' ⭐' : ''}`,
+    group: 'Gemini (mais realista — recomendada)'
+  }))
 ];
 
 const asList = (v) => (Array.isArray(v) ? v : []);
@@ -147,6 +162,38 @@ async function findOwnedAgent(req) {
 }
 
 // ------------------------------------------------------------------ opções para a tela
+
+/** Vozes da biblioteca ampliada do Gemini em português do Brasil (precisa da chave do Gemini). */
+exports.libraryVoices = async (req, res, next) => {
+  try {
+    const voices = await listLibraryVoices(req.userId, 'pt-BR');
+    res.json({ voices: voices.map((v) => ({ id: `gemini:${v.id}`, label: `${v.name}${v.description ? ` — ${v.description}` : ''}`, group: 'Gemini — biblioteca pt-BR' })) });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** "Ouvir amostra": gera um áudio curto com a voz Gemini escolhida (sem precisar ligar). */
+exports.previewVoice = async (req, res, next) => {
+  try {
+    const voice = String(req.body.voice || '');
+    if (!/^gemini:/i.test(voice)) {
+      return res.status(400).json({ error: 'A amostra está disponível para as vozes do Gemini. As demais só dá para ouvir numa ligação de teste.' });
+    }
+    let agent = { glossary: [] };
+    if (req.body.agentId) {
+      const found = await prisma.aiVoiceAgent.findFirst({ where: { id: String(req.body.agentId), userId: req.userId }, select: { glossary: true } });
+      if (found) agent = found;
+    }
+    if (Array.isArray(req.body.glossary)) agent = { glossary: req.body.glossary };
+    const raw = String(req.body.text || 'Olá! Tudo bem? Aqui é a assistente virtual. Posso te contar rapidinho sobre nossos produtos?').slice(0, 300);
+    const wav = await previewWav(req.userId, applyPronunciation(raw, agent, { useBuiltIn: false }), voice.slice(7).trim() || 'Kore');
+    res.set('Content-Type', 'audio/wav');
+    res.send(wav);
+  } catch (error) {
+    res.status(error.status || 502).json({ error: `Não foi possível gerar a amostra: ${error.message}` });
+  }
+};
 
 exports.options = async (req, res, next) => {
   try {
@@ -375,6 +422,8 @@ exports.createCampaign = async (req, res, next) => {
         windowStart,
         windowEnd,
         weekdaysOnly: toBool(body.weekdaysOnly, true),
+        maxAttempts: clamp(body.maxAttempts, 1, 10, 3),
+        retryGapMinutes: clamp(body.retryGapMinutes, 5, 1440, 180),
         totalLeads: total
       }
     });
@@ -390,7 +439,7 @@ exports.startCampaign = async (req, res, next) => {
     if (!campaign) return res.status(404).json({ error: 'Campanha não encontrada.' });
 
     validatePublicUrl();
-    await getActiveTelephonyProvider(req.userId);
+    await getAiTelephonyProvider(req.userId);
 
     const numbers = await prisma.callerNumber.count({ where: { userId: req.userId, isActive: true } });
     if (numbers === 0) return res.status(400).json({ error: 'Nenhum número de discagem ativo. Cadastre em Linhas > Números de Discagem.' });

@@ -56,6 +56,9 @@ export default function AiAgentEditor({ agentId, options, onClose, onSaved }) {
   const [catalogMsg, setCatalogMsg] = useState('');
   const [reading, setReading] = useState(false);
   const [catalogInfo, setCatalogInfo] = useState(null);
+  const [libraryVoices, setLibraryVoices] = useState([]);
+  const [voiceMsg, setVoiceMsg] = useState('');
+  const [previewing, setPreviewing] = useState(false);
 
   const set = (patch) => setForm((prev) => ({ ...prev, ...patch }));
 
@@ -94,6 +97,46 @@ export default function AiAgentEditor({ agentId, options, onClose, onSaved }) {
     if (!preset) return;
     if (!window.confirm('Aplicar este modelo vai substituir objetivo, abertura, glossário e qualificação. Continuar?')) return;
     set(fromPreset(preset));
+  }
+
+  const allVoices = [...options.voices, ...libraryVoices];
+  const groupedVoices = allVoices.reduce((acc, v) => {
+    const g = v.group || 'Outras';
+    (acc[g] = acc[g] || []).push(v);
+    return acc;
+  }, {});
+  const isGeminiVoice = String(form.voice || '').toLowerCase().startsWith('gemini:');
+
+  async function loadLibraryVoices() {
+    setVoiceMsg('Buscando vozes em português do Brasil…');
+    try {
+      const { data } = await api.get('/ai-calls/voices/library');
+      setLibraryVoices(data.voices || []);
+      setVoiceMsg(data.voices?.length ? `${data.voices.length} voz(es) pt-BR adicionada(s) à lista.` : 'Nenhuma voz encontrada (confira a chave do Gemini em Configurações).');
+    } catch (error) {
+      setVoiceMsg(error.response?.data?.error || 'Não foi possível buscar as vozes.');
+    }
+  }
+
+  async function previewVoice() {
+    setPreviewing(true);
+    setVoiceMsg('Gerando amostra…');
+    try {
+      const { data } = await api.post('/ai-calls/voices/preview', { voice: form.voice, agentId: agentId || undefined, glossary: form.glossary }, { responseType: 'blob' });
+      const url = URL.createObjectURL(data);
+      const audio = new Audio(url);
+      audio.onended = () => URL.revokeObjectURL(url);
+      await audio.play();
+      setVoiceMsg('');
+    } catch (error) {
+      let message = 'Não foi possível gerar a amostra.';
+      try {
+        const text = await error.response?.data?.text?.();
+        message = JSON.parse(text).error || message;
+      } catch (_) { /* mantém a mensagem padrão */ }
+      setVoiceMsg(message);
+    }
+    setPreviewing(false);
   }
 
   function importBulk() {
@@ -184,13 +227,28 @@ export default function AiAgentEditor({ agentId, options, onClose, onSaved }) {
               <div><label>Nome da assistente virtual</label><input value={form.agentName} onChange={(e) => set({ agentName: e.target.value })} placeholder="Júlia" /></div>
               <div>
                 <label>Voz</label>
-                <select value={options.voices.some((v) => v.id === form.voice) ? form.voice : '__custom'} onChange={(e) => e.target.value !== '__custom' && set({ voice: e.target.value })}>
-                  {options.voices.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+                <select value={allVoices.some((v) => v.id === form.voice) ? form.voice : '__custom'} onChange={(e) => e.target.value !== '__custom' && set({ voice: e.target.value })}>
+                  {Object.entries(groupedVoices).map(([group, list]) => (
+                    <optgroup key={group} label={group}>
+                      {list.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+                    </optgroup>
+                  ))}
                   <option value="__custom">Outra (digite abaixo)</option>
                 </select>
-                {!options.voices.some((v) => v.id === form.voice) && (
-                  <input style={{ marginTop: 6 }} value={form.voice} onChange={(e) => set({ voice: e.target.value })} placeholder="Ex.: Google.pt-BR-Neural2-A" />
+                {!allVoices.some((v) => v.id === form.voice) && (
+                  <input style={{ marginTop: 6 }} value={form.voice} onChange={(e) => set({ voice: e.target.value })} placeholder="Ex.: Google.pt-BR-Neural2-A ou gemini:Kore" />
                 )}
+                <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button type="button" className="ia-btn ia-btn-light" onClick={previewVoice} disabled={!isGeminiVoice || previewing} title={isGeminiVoice ? 'Ouvir a voz escolhida' : 'A amostra funciona para as vozes do Gemini'}>
+                    ▶ Ouvir amostra
+                  </button>
+                  <button type="button" className="ia-btn ia-btn-light" onClick={loadLibraryVoices}>Mais vozes pt-BR (Gemini)</button>
+                </div>
+                {voiceMsg && <p className="ia-muted">{voiceMsg}</p>}
+                <p className="ia-muted">
+                  As vozes do <strong>Gemini</strong> são as mais naturais (usam a chave do Gemini de Configurações; se falharem, a ligação
+                  segue com a voz Polly). As vozes <strong>Google Chirp 3 HD</strong> são tocadas direto pela Twilio.
+                </p>
               </div>
             </div>
           </details>

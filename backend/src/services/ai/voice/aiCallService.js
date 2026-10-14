@@ -8,7 +8,8 @@
 const crypto = require('crypto');
 const prisma = require('../../../config/db');
 const env = require('../../../config/env');
-const { getActiveTelephonyProvider } = require('../../telephony/providerFactory');
+const { getAiTelephonyProvider } = require('../../telephony/providerFactory');
+const { speechify } = require('./geminiTtsService');
 const { resolveAudience, HEARTBEAT_STALE_MS } = require('../../broadcastService');
 const whatsappDispatcher = require('../../whatsapp/whatsappDispatcher');
 const { fetchSiteCatalog } = require('./catalogService');
@@ -91,6 +92,19 @@ function businessDayAt(hour, daysAhead, now = new Date()) {
   return spWallToDate(sp.year, sp.month, sp.day, hour, 0);
 }
 
+/** Próximo instante em que a janela de ligação abre (hoje, se ainda não abriu; senão o próximo dia permitido). */
+function nextWindowStart(campaign, now = new Date()) {
+  const start = toMinutes(campaign.windowStart, 9 * 60);
+  for (let d = 0; d < 10; d += 1) {
+    const day = new Date(now.getTime() + d * 24 * 60 * 60 * 1000);
+    const sp = spParts(day);
+    if (campaign.weekdaysOnly && (sp.weekday === 0 || sp.weekday === 6)) continue;
+    const candidate = spWallToDate(sp.year, sp.month, sp.day, Math.floor(start / 60), start % 60);
+    if (candidate.getTime() > now.getTime()) return candidate;
+  }
+  return new Date(now.getTime() + 60 * 60 * 1000);
+}
+
 // ------------------------------------------------------------------ utilidades
 
 function toE164(raw) {
@@ -128,7 +142,16 @@ function validatePublicUrl() {
 
 // ------------------------------------------------------------------ TwiML
 
+const FALLBACK_VOICE = 'Polly.Camila-Neural';
+
 function sayTag(text, agent) {
+  // Voz do Gemini ("gemini:Kore"): o <Say> sai marcado e, antes de enviar à operadora, é trocado por um
+  // <Play> com o áudio gerado (ver speechify). Se o Gemini falhar, fica a voz padrão abaixo.
+  if (/^gemini:/i.test(String(agent.voice || ''))) {
+    const geminiVoice = String(agent.voice).slice(7).trim() || 'Kore';
+    const spokenGemini = applyPronunciation(text, agent, { useBuiltIn: false });
+    return `<Say voice="${FALLBACK_VOICE}" language="${escapeXml(agent.language || 'pt-BR')}" data-tts="gemini:${escapeXml(geminiVoice)}|${escapeXml(agent.userId || '')}">${escapeXml(spokenGemini)}</Say>`;
+  }
   const voice = agent.voice ? ` voice="${escapeXml(agent.voice)}"` : '';
   // Troca palavras em inglês (ex.: nome da empresa) pela grafia que a voz em português lê direito.
   const spoken = applyPronunciation(text, agent);
@@ -328,6 +351,48 @@ async function upsertCrmCard({ userId, lead, column, note, followUpAt, followUpN
   });
 }
 
+/**
+ * Cliente que RECUSOU: card vai para a coluna "Perdidos", o lead fica com status "perdido"
+ * e deixa de ser chamado nas campanhas. Cliente já "Fechado" não é mexido.
+ */
+async function markLeadLost({ userId, lead, reason, note }) {
+  await ensureDefaultBoard(userId);
+  const existing = await prisma.crmCard.findUnique({ where: { leadId: lead.id }, include: { column: true } });
+  if (existing && /fechad/i.test(existing.column.name)) return null;
+
+  let boardId = existing?.column?.boardId;
+  if (!boardId) {
+    const board = await prisma.crmBoard.findFirst({ where: { userId }, orderBy: { createdAt: 'asc' }, select: { id: true } });
+    boardId = board?.id;
+  }
+  if (!boardId) return null;
+
+  let lostColumn = await prisma.crmColumn.findFirst({
+    where: { boardId, name: { contains: 'perdid', mode: 'insensitive' } },
+    orderBy: { position: 'asc' }
+  });
+  if (!lostColumn) {
+    const total = await prisma.crmColumn.count({ where: { boardId } });
+    lostColumn = await prisma.crmColumn.create({ data: { boardId, name: 'Perdidos', color: '#ef4444', position: total } });
+  }
+
+  const position = await prisma.crmCard.count({ where: { columnId: lostColumn.id } });
+  const notes = existing?.notes ? `${existing.notes}\n\n${note}` : note;
+  const lostData = { columnId: lostColumn.id, position, notes, lostAt: existing?.lostAt || new Date(), lostReason: reason, followUpAt: null, followUpNote: null };
+
+  if (existing && existing.columnId !== lostColumn.id) {
+    await prisma.crmCard.updateMany({ where: { columnId: existing.columnId, position: { gt: existing.position } }, data: { position: { decrement: 1 } } });
+  }
+  await prisma.crmCard.upsert({
+    where: { leadId: lead.id },
+    update: lostData,
+    create: { leadId: lead.id, ...lostData }
+  });
+  await prisma.lead.update({ where: { id: lead.id }, data: { status: 'perdido' } });
+  emitToAccount(userId, 'crm:card_moved', { leadName: lead.name, toColumnId: lostColumn.id });
+  return lostColumn;
+}
+
 // ------------------------------------------------------------------ passagem ao vendedor
 
 async function resolveHandoffTarget(agent) {
@@ -409,6 +474,16 @@ async function handleDialResult({ callId, dialStatus }) {
     agent || { language: 'pt-BR' },
     'No momento nosso consultor não conseguiu atender, mas ele vai te chamar no WhatsApp em instantes. Muito obrigada pelo seu tempo!'
   );
+}
+
+/** Abertura da ligação para as operadoras que consultam um endereço quando o cliente atende (Telnyx, Jambonz). */
+async function handleAnswerCall(callId) {
+  const call = await prisma.call.findUnique({ where: { id: callId }, select: { id: true, aiSession: true } });
+  const session = call?.aiSession;
+  const agent = session?.agentId ? await getAgentCached(session.agentId) : null;
+  if (!session || !agent) return '<Response><Hangup/></Response>';
+  const opening = asList(session.transcript).find((t) => t.role === 'agent')?.text || buildOpeningText(agent, 'cliente');
+  return buildGatherTwiml({ agent, text: opening, callId, protect: true });
 }
 
 // ------------------------------------------------------------------ conversa (cada fala do lead)
@@ -612,7 +687,9 @@ function buildCallReport({ lead, session, agent, outcome, isTest, markdown, effe
 
   if (effects) {
     lines.push('');
-    if (effects.crmAdded) {
+    if (effects.lostColumn) {
+      lines.push(`📇 ${b('CRM:')} cliente recusou — movido para "${effects.lostColumn}" e não será chamado novamente.`);
+    } else if (effects.crmAdded) {
       lines.push(`📇 ${b('CRM:')} contato adicionado na coluna "${effects.crmColumn}" com este relatório na anotação.`);
     } else {
       lines.push(`📇 ${b('CRM:')} contato NÃO adicionado. ${effects.remark || ''}`.trim());
@@ -712,6 +789,16 @@ async function applyOutcomeEffects(sessionId) {
     if (outcome === 'optout') {
       await prisma.lead.update({ where: { id: lead.id }, data: { optOut: true } });
       effects.remark = 'Contato marcado para não receber mais ligações.';
+      const lost = await markLeadLost({ userId: lead.userId, lead, reason: 'Pediu para não receber ligações (IA)', note });
+      if (lost) effects.lostColumn = lost.name;
+    } else if (outcome === 'nao_interessado') {
+      const lost = await markLeadLost({ userId: lead.userId, lead, reason: 'Recusou na ligação com a IA', note });
+      if (lost) {
+        effects.lostColumn = lost.name;
+        effects.remark = `Cliente recusou: movido para "${lost.name}" e não receberá novas ligações.`;
+      } else {
+        effects.remark = 'Cliente recusou, mas não foi possível movê-lo para Perdidos.';
+      }
     } else if (outcome === 'numero_errado') {
       if (!lead.tags.includes('numero_errado')) {
         await prisma.lead.update({ where: { id: lead.id }, data: { tags: { push: 'numero_errado' } } });
@@ -827,20 +914,82 @@ async function finalizeAiCall(callId) {
   }
 
   if (call.aiCallCampaignId) {
-    const inc = { calledCount: { increment: 1 } };
-    if (!answered) {
-      inc.noAnswerCount = { increment: 1 };
-    } else {
-      inc.answeredCount = { increment: 1 };
-      if (outcome === 'quente') inc.hotCount = { increment: 1 };
-      else if (outcome === 'morno') inc.warmCount = { increment: 1 };
-      else if (outcome === 'retorno_agendado') inc.callbackCount = { increment: 1 };
-      else if (['nao_interessado', 'optout', 'frio', 'numero_errado'].includes(outcome)) inc.notInterestedCount = { increment: 1 };
-      else if (['sem_resposta', 'caixa_postal'].includes(outcome)) inc.noAnswerCount = { increment: 1 };
-      if (call.aiSession?.handoffStatus) inc.handoffCount = { increment: 1 };
-    }
-    await prisma.aiCallCampaign.update({ where: { id: call.aiCallCampaignId }, data: inc }).catch(() => {});
+    await recomputeCampaignStats(call.aiCallCampaignId).catch((error) => console.error('Erro ao atualizar contadores da campanha:', error.message));
   }
+}
+
+// ------------------------------------------------------------------ tentativas por lead
+
+/** Ligação que realmente falou com alguém (e não caiu em caixa postal). */
+function isConnectedCall(call) {
+  const answered = !!call.answeredAt || (call.aiSession?.turnCount || 0) > 0;
+  return answered && call.aiSession?.outcome !== 'caixa_postal';
+}
+
+/** Resume, por lead, o que já aconteceu na campanha: tentativas, última tentativa, se já atendeu e o resultado final. */
+async function loadLeadAttempts(campaignId) {
+  const calls = await prisma.call.findMany({
+    where: { aiCallCampaignId: campaignId },
+    orderBy: { createdAt: 'asc' },
+    select: { leadId: true, createdAt: true, answeredAt: true, aiSession: { select: { outcome: true, turnCount: true, handoffStatus: true } } }
+  });
+  const byLead = new Map();
+  for (const call of calls) {
+    const info = byLead.get(call.leadId) || { attempts: 0, lastAt: null, connected: false, outcome: null, handoff: false };
+    info.attempts += 1;
+    info.lastAt = call.createdAt;
+    if (isConnectedCall(call)) {
+      info.connected = true;
+      info.outcome = call.aiSession?.outcome || 'sem_conclusao';
+      if (call.aiSession?.handoffStatus) info.handoff = true;
+    }
+    byLead.set(call.leadId, info);
+  }
+  return byLead;
+}
+
+/** Contadores da campanha recalculados do zero a cada ligação (cada lead conta uma vez, mesmo com 3 tentativas). */
+async function recomputeCampaignStats(campaignId) {
+  const byLead = await loadLeadAttempts(campaignId);
+  const stats = { calledCount: byLead.size, answeredCount: 0, hotCount: 0, warmCount: 0, callbackCount: 0, handoffCount: 0, notInterestedCount: 0, noAnswerCount: 0 };
+  for (const info of byLead.values()) {
+    if (!info.connected) {
+      stats.noAnswerCount += 1;
+      continue;
+    }
+    stats.answeredCount += 1;
+    if (info.outcome === 'quente') stats.hotCount += 1;
+    else if (info.outcome === 'morno') stats.warmCount += 1;
+    else if (info.outcome === 'retorno_agendado') stats.callbackCount += 1;
+    else if (['nao_interessado', 'optout', 'frio', 'numero_errado'].includes(info.outcome)) stats.notInterestedCount += 1;
+    if (info.handoff) stats.handoffCount += 1;
+  }
+  await prisma.aiCallCampaign.update({ where: { id: campaignId }, data: stats });
+}
+
+/**
+ * Monta a próxima rodada: quem nunca foi chamado + quem não atendeu e ainda tem tentativas
+ * (já passou o intervalo entre tentativas). `nextAt` = quando o próximo "aguardando" libera.
+ */
+function planRound({ audience, byLead, maxAttempts, retryGapMs, blocked, now = Date.now() }) {
+  const queue = [];
+  let nextAt = null;
+  for (const lead of audience) {
+    if (blocked.has(lead.id)) continue;
+    const info = byLead.get(lead.id);
+    if (!info) {
+      queue.push({ ...lead, attempt: 1 });
+      continue;
+    }
+    if (info.connected) continue; // já atendeu: segue o fluxo normal, sem nova ligação
+    if (info.attempts >= maxAttempts) continue; // esgotou as tentativas
+    const readyAt = info.lastAt.getTime() + retryGapMs;
+    if (readyAt <= now) queue.push({ ...lead, attempt: info.attempts + 1 });
+    else if (nextAt === null || readyAt < nextAt) nextAt = readyAt;
+  }
+  // Primeiras tentativas antes das repetições.
+  queue.sort((a, b) => a.attempt - b.attempt);
+  return { queue, nextAt };
 }
 
 // ------------------------------------------------------------------ fazer a ligação
@@ -874,7 +1023,7 @@ async function placeAiCall({ campaign, agent, lead, provider, isTest = false }) 
       id: callId,
       userId: agent.userId,
       leadId: lead.id,
-      provider: 'twilio',
+      provider: provider.providerName || 'twilio',
       fromNumber: callerNumber.phoneNumber,
       toNumber: lead.phone,
       callerNumberId: callerNumber.id,
@@ -897,14 +1046,20 @@ async function placeAiCall({ campaign, agent, lead, provider, isTest = false }) 
   });
 
   try {
+    // Twilio recebe a abertura junto com o pedido da ligação (como sempre). As outras operadoras
+    // consultam o endereço "answer" quando o cliente atende (ver handleAnswerCall).
+    const dialect = provider.dialect || 'twiml';
+    const dialectParam = dialect === 'twiml' ? '' : `&dialect=${dialect}`;
     const { providerCallId } = await provider.startCall({
       to: lead.phone,
       from: callerNumber.phoneNumber,
-      statusCallbackUrl: `${baseUrl()}/api/ai-calls/webhook/status?callId=${callId}`,
-      twiml: buildGatherTwiml({ agent, text: opening, callId, protect: true }),
+      statusCallbackUrl: `${baseUrl()}/api/ai-calls/webhook/status?callId=${callId}${dialectParam}`,
+      ...(dialect === 'twiml'
+        ? { twiml: await speechify(buildGatherTwiml({ agent, text: opening, callId, protect: true })) }
+        : { answerUrl: `${baseUrl()}/api/ai-calls/webhook/answer?callId=${callId}${dialectParam}` }),
       ringTimeoutSeconds: RING_TIMEOUT_SECONDS,
       timeLimitSeconds: agent.maxCallSeconds || 420,
-      recordingStatusCallbackUrl: agent.recordCalls ? `${baseUrl()}/api/ai-calls/webhook/recording?callId=${callId}` : undefined
+      recordingStatusCallbackUrl: agent.recordCalls ? `${baseUrl()}/api/ai-calls/webhook/recording?callId=${callId}${dialectParam}` : undefined
     });
     await prisma.call.update({ where: { id: callId }, data: { providerCallId } });
     await prisma.callerNumber.update({ where: { id: callerNumber.id }, data: { lastUsedAt: new Date() } });
@@ -935,7 +1090,7 @@ async function startTestCall({ agent, phone }) {
     err.status = 400;
     throw err;
   }
-  const provider = await getActiveTelephonyProvider(agent.userId);
+  const provider = await getAiTelephonyProvider(agent.userId);
 
   const TEST_TAG = 'teste-agente-ia';
   // Um contato de teste POR NÚMERO: testar com outro celular abre outra conversa no Chat
@@ -1007,73 +1162,117 @@ async function executeAiCampaign(campaignId) {
     }
     const freshAgent = await getAgentCached(campaign.agentId);
 
-    const provider = await getActiveTelephonyProvider(campaign.userId);
-    const audience = await resolveAudience(campaign.userId, campaign.audienceFilter, 'sms', {
-      select: { id: true, name: true, phone: true }
-    });
-
-    // Retomada sem repetir: quem já recebeu ligação desta campanha fica de fora.
-    const already = await prisma.call.findMany({ where: { aiCallCampaignId: campaignId }, select: { leadId: true } });
-    const calledIds = new Set(already.map((c) => c.leadId));
-    const queue = audience.filter((lead) => !calledIds.has(lead.id));
-    await prisma.aiCallCampaign.update({ where: { id: campaignId }, data: { totalLeads: audience.length } });
+    const provider = await getAiTelephonyProvider(campaign.userId);
+    const maxAttempts = Math.max(1, Math.min(Number(campaign.maxAttempts) || 3, 10));
+    const retryGapMs = Math.max(5, Number(campaign.retryGapMinutes) || 180) * 60 * 1000;
+    const fmtTime = (d) => new Date(d).toLocaleString('pt-BR', { timeZone: SP_TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
     let fatalError = null;
-    let outsideWindow = false;
+    let stopped = false; // pausada/excluída pelo usuário
+    const failedToPlace = new Set(); // leads cuja ligação nem chegou a ser criada (evita laço infinito)
 
-    const worker = async () => {
-      while (queue.length > 0 && !fatalError && !outsideWindow) {
+    // Espera até `target`, em fatias curtas, mantendo o sinal de vida. Devolve false se a campanha deixou de estar "discando".
+    const waitUntil = async (target, note) => {
+      while (Date.now() < target.getTime()) {
         const fresh = await prisma.aiCallCampaign.findUnique({ where: { id: campaignId }, select: { status: true } });
-        if (!fresh || fresh.status !== 'discando') return;
-
-        if (!isWithinCallWindow(campaign)) {
-          outsideWindow = true;
-          return;
-        }
-
-        const lead = queue.shift();
-        const current = await prisma.lead.findUnique({ where: { id: lead.id }, select: { optOut: true } });
-        if (!current || current.optOut) continue;
-
-        try {
-          await heartbeat(campaignId, `Ligando para ${lead.name}…`);
-          const callId = await placeAiCall({ campaign, agent: freshAgent, lead, provider });
-          const finished = await waitForCallToFinish(callId, freshAgent.maxCallSeconds || 420);
-          if (!finished) {
-            const stuck = await prisma.call.findUnique({ where: { id: callId } });
-            if (stuck?.providerCallId) await provider.hangupCall({ providerCallId: stuck.providerCallId }).catch(() => {});
-            await prisma.call.update({ where: { id: callId }, data: { status: 'encerrada', endedAt: new Date() } }).catch(() => {});
-            await finalizeAiCall(callId);
-          }
-        } catch (error) {
-          console.error(`❌ Ligação do agente IA para ${lead.name}: ${error.message}`);
-          if (error.fatal || error.twilioCode === 20003) fatalError = error;
-        }
-
-        if (queue.length > 0 && !fatalError && !outsideWindow) {
-          const wait = randomBetween(campaign.minDelaySeconds, campaign.maxDelaySeconds);
-          await heartbeat(campaignId, `Próxima ligação em ${wait}s`);
-          await sleep(wait * 1000);
-        }
+        if (!fresh || fresh.status !== 'discando') return false;
+        await heartbeat(campaignId, note);
+        await sleep(Math.min(30000, Math.max(1000, target.getTime() - Date.now())));
       }
+      return true;
     };
 
-    const workers = Math.max(1, Math.min(campaign.concurrency || 1, 3));
-    await Promise.all(Array.from({ length: workers }, () => worker()));
+    while (!fatalError && !stopped) {
+      const status = await prisma.aiCallCampaign.findUnique({ where: { id: campaignId }, select: { status: true } });
+      if (!status || status.status !== 'discando') {
+        stopped = true;
+        break;
+      }
+
+      // Lista atualizada a cada rodada (quem recusou/pediu para sair já não entra).
+      const audience = await resolveAudience(campaign.userId, campaign.audienceFilter, 'sms', {
+        select: { id: true, name: true, phone: true }
+      });
+      await prisma.aiCallCampaign.update({ where: { id: campaignId }, data: { totalLeads: audience.length } });
+      const blockedRows = audience.length
+        ? await prisma.lead.findMany({
+            where: { id: { in: audience.map((l) => l.id) }, OR: [{ status: 'perdido' }, { optOut: true }, { tags: { has: 'numero_errado' } }] },
+            select: { id: true }
+          })
+        : [];
+      const byLead = await loadLeadAttempts(campaignId);
+      const plan = planRound({ audience, byLead, maxAttempts, retryGapMs, blocked: new Set([...blockedRows.map((l) => l.id), ...failedToPlace]) });
+
+      if (plan.queue.length === 0) {
+        if (plan.nextAt === null) break; // nada mais a fazer: concluída
+        const ok = await waitUntil(new Date(plan.nextAt), `Aguardando para tentar novamente quem não atendeu (próxima tentativa às ${fmtTime(plan.nextAt)})`);
+        if (!ok) stopped = true;
+        continue;
+      }
+
+      if (!isWithinCallWindow(campaign)) {
+        const open = nextWindowStart(campaign);
+        const ok = await waitUntil(open, `Fora do horário permitido (${campaign.windowStart}–${campaign.windowEnd}${campaign.weekdaysOnly ? ', seg a sex' : ''}). Retoma sozinha em ${fmtTime(open)}`);
+        if (!ok) stopped = true;
+        continue;
+      }
+
+      const queue = plan.queue;
+      let outsideWindow = false;
+
+      const worker = async () => {
+        while (queue.length > 0 && !fatalError && !outsideWindow) {
+          const fresh = await prisma.aiCallCampaign.findUnique({ where: { id: campaignId }, select: { status: true } });
+          if (!fresh || fresh.status !== 'discando') {
+            stopped = true;
+            return;
+          }
+
+          if (!isWithinCallWindow(campaign)) {
+            outsideWindow = true;
+            return;
+          }
+
+          const lead = queue.shift();
+          const current = await prisma.lead.findUnique({ where: { id: lead.id }, select: { optOut: true, status: true } });
+          if (!current || current.optOut || current.status === 'perdido') continue;
+
+          try {
+            await heartbeat(campaignId, `Ligando para ${lead.name}${lead.attempt > 1 ? ` (tentativa ${lead.attempt} de ${maxAttempts})` : ''}…`);
+            const callId = await placeAiCall({ campaign, agent: freshAgent, lead, provider });
+            const finished = await waitForCallToFinish(callId, freshAgent.maxCallSeconds || 420);
+            if (!finished) {
+              const stuck = await prisma.call.findUnique({ where: { id: callId } });
+              if (stuck?.providerCallId) await provider.hangupCall({ providerCallId: stuck.providerCallId }).catch(() => {});
+              await prisma.call.update({ where: { id: callId }, data: { status: 'encerrada', endedAt: new Date() } }).catch(() => {});
+              await finalizeAiCall(callId);
+            }
+          } catch (error) {
+            console.error(`❌ Ligação do agente IA para ${lead.name}: ${error.message}`);
+            if (error.fatal || error.twilioCode === 20003) fatalError = error;
+            else failedToPlace.add(lead.id);
+          }
+
+          if (queue.length > 0 && !fatalError && !outsideWindow) {
+            const wait = randomBetween(campaign.minDelaySeconds, campaign.maxDelaySeconds);
+            await heartbeat(campaignId, `Próxima ligação em ${wait}s`);
+            await sleep(wait * 1000);
+          }
+        }
+      };
+
+      const workers = Math.max(1, Math.min(campaign.concurrency || 1, 3));
+      await Promise.all(Array.from({ length: workers }, () => worker()));
+    }
 
     const finalState = await prisma.aiCallCampaign.findUnique({ where: { id: campaignId }, select: { status: true } });
     if (fatalError) {
       await prisma.aiCallCampaign.update({ where: { id: campaignId }, data: { status: 'pausado', runningNote: `Pausada: ${fatalError.message}` } });
-    } else if (outsideWindow && finalState?.status === 'discando') {
+    } else if (!stopped && finalState?.status === 'discando') {
       await prisma.aiCallCampaign.update({
         where: { id: campaignId },
-        data: {
-          status: 'pausado',
-          runningNote: `Fora do horário permitido (${campaign.windowStart}–${campaign.windowEnd}${campaign.weekdaysOnly ? ', seg a sex' : ''}). Clique em Retomar dentro da janela.`
-        }
+        data: { status: 'concluido', runningNote: `Concluída: todos atenderam, recusaram ou esgotaram as ${maxAttempts} tentativas.` }
       });
-    } else if (finalState?.status === 'discando') {
-      await prisma.aiCallCampaign.update({ where: { id: campaignId }, data: { status: 'concluido', runningNote: 'Todas as ligações foram concluídas.' } });
     }
   } catch (error) {
     console.error(`❌ Campanha do agente IA ${campaignId} falhou:`, error.message);
@@ -1090,6 +1289,10 @@ module.exports = {
   validatePublicUrl,
   isWithinCallWindow,
   businessDayAt,
+  nextWindowStart,
+  planRound,
+  markLeadLost,
+  recomputeCampaignStats,
   toE164,
   buildOpeningText,
   buildGatherTwiml,
@@ -1097,6 +1300,7 @@ module.exports = {
   buildDialTwiml,
   buildHints,
   processTurn,
+  handleAnswerCall,
   handleDialResult,
   finalizeAiCall,
   applyOutcomeEffects,

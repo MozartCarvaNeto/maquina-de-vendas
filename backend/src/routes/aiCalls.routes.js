@@ -9,6 +9,8 @@ const requireRole = require('../middlewares/requireRole');
 
 // Webhooks públicos (chamados pela Twilio, sem JWT)
 router.post('/webhook/status', aiCallWebhookController.handleStatus);
+router.post('/webhook/answer', aiCallWebhookController.handleAnswer);
+router.get('/tts/:name', aiCallWebhookController.serveTts);
 router.post('/webhook/turn', aiCallWebhookController.handleTurn);
 router.post('/webhook/dial-result', aiCallWebhookController.handleDialResult);
 router.post('/webhook/recording', aiCallWebhookController.handleRecording);
@@ -18,6 +20,8 @@ router.use(requireRole(['owner', 'admin']));
 router.use(requireFeature('agente_ia'));
 
 router.get('/options', aiCallController.options);
+router.get('/voices/library', aiCallController.libraryVoices);
+router.post('/voices/preview', aiCallController.previewVoice);
 
 router.get('/agents', aiCallController.listAgents);
 router.post('/agents', aiCallController.createAgent);

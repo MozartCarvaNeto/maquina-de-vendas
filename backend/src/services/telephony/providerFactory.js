@@ -1,5 +1,7 @@
 // backend/src/services/telephony/providerFactory.js
 const TwilioProvider = require('./TwilioProvider');
+const TelnyxProvider = require('./TelnyxProvider');
+const JambonzProvider = require('./JambonzProvider');
 const prisma = require('../../config/db');
 const env = require('../../config/env');
 const { decrypt } = require('../crypto/settingsCrypto');
@@ -59,4 +61,43 @@ function isTelephonyConfiguredViaEnv() {
   return !!(env.twilioAccountSid && env.twilioAuthToken);
 }
 
-module.exports = { getActiveTelephonyProvider, isTelephonyConfiguredViaEnv, PROVIDER_REGISTRY };
+/**
+ * Operadoras alternativas SÓ para as ligações do Agente de IA (categoria "ai_telephony").
+ * O discador manual (vendedor) continua usando getActiveTelephonyProvider (Twilio).
+ *  - twilio:  usa a mesma Twilio já configurada (padrão — nada muda se você não escolher outra)
+ *  - telnyx:  Telnyx (TeXML)
+ *  - jambonz: Jambonz + seu tronco SIP nacional
+ */
+const AI_TELEPHONY_REGISTRY = {
+  twilio: TwilioProvider,
+  telnyx: TelnyxProvider,
+  jambonz: JambonzProvider
+};
+
+async function getAiTelephonyProvider(userId) {
+  const settings = await prisma.setting.findMany({
+    where: { userId, category: 'ai_telephony', isActive: true }
+  });
+  const chosen = settings[0]?.provider;
+
+  // Sem escolha (ou escolheu "twilio"): comportamento de sempre.
+  if (!chosen || chosen === 'twilio') return getActiveTelephonyProvider(userId);
+
+  const ProviderClass = AI_TELEPHONY_REGISTRY[chosen];
+  if (!ProviderClass) {
+    const err = new Error(`Operadora da IA "${chosen}" não suportada.`);
+    err.status = 400;
+    throw err;
+  }
+  const credentials = {};
+  for (const setting of settings) credentials[setting.key] = decrypt(setting.value);
+  return new ProviderClass(credentials);
+}
+
+module.exports = {
+  getActiveTelephonyProvider,
+  getAiTelephonyProvider,
+  isTelephonyConfiguredViaEnv,
+  PROVIDER_REGISTRY,
+  AI_TELEPHONY_REGISTRY
+};
