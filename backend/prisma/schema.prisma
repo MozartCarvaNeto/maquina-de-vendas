@@ -433,8 +433,11 @@ model Agent {
   account     Account   @relation(fields: [userId], references: [id], onDelete: Cascade)
   name        String
   phoneNumber String
-  status      String    @default("disponivel")
+  status      String    @default("disponivel") // disponivel | em_ligacao
   isActive    Boolean   @default(true)
+  // Pausa individual do vendedor (o discador pula quem está pausado e segue com os outros)
+  isPaused    Boolean   @default(false)
+  pausedAt    DateTime?
   lastUsedAt  DateTime?
   createdAt   DateTime  @default(now())
 

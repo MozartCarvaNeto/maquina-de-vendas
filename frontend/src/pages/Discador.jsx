@@ -11,10 +11,14 @@ export default function Discador() {
     ongoingCall: null,
     availableAgents: 0,
     totalAgents: 0,
-    totalCallerNumbers: 0
+    totalCallerNumbers: 0,
+    ongoingCalls: [],
+    autoDialRunning: false,
+    lastError: null
   });
   const [autoDialEnabled, setAutoDialEnabled] = useState(false);
   const [recordCallsEnabled, setRecordCallsEnabled] = useState(false);
+  const [team, setTeam] = useState({ agents: [], myAgentId: null });
   const [lists, setLists] = useState([]);
   const [selectedListId, setSelectedListId] = useState('');
   const [loadingList, setLoadingList] = useState(false);
@@ -29,6 +33,15 @@ export default function Discador() {
   const loadQueue = useCallback(async () => {
     const { data } = await api.get('/calls/queue');
     setQueue(data);
+  }, []);
+
+  const loadTeam = useCallback(async () => {
+    try {
+      const { data } = await api.get('/calls/team');
+      setTeam({ agents: data.agents || [], myAgentId: data.myAgentId || null });
+    } catch (error) {
+      /* mantém o último estado */
+    }
   }, []);
 
   const loadSettings = useCallback(async () => {
@@ -57,7 +70,17 @@ export default function Discador() {
     loadSettings();
     loadHistory();
     loadLists();
-  }, [loadQueue, loadSettings, loadHistory, loadLists]);
+    loadTeam();
+  }, [loadQueue, loadSettings, loadHistory, loadLists, loadTeam]);
+
+  // Com o discador automático rodando, a tela se atualiza sozinha (fila, equipe e ligações em andamento).
+  useEffect(() => {
+    const timer = setInterval(() => {
+      loadQueue();
+      loadTeam();
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [loadQueue, loadTeam]);
 
   useEffect(() => {
     if (!socket) return undefined;
@@ -65,21 +88,27 @@ export default function Discador() {
     const refresh = () => {
       loadQueue();
       loadHistory();
+      loadTeam();
     };
 
     socket.on('call:answered', refresh);
     socket.on('call:ended', refresh);
     socket.on('call:recording_ready', refresh);
+    socket.on('dialer:team_changed', refresh);
+    socket.on('dialer:agent_auto_paused', refresh);
     return () => {
       socket.off('call:answered', refresh);
       socket.off('call:ended', refresh);
       socket.off('call:recording_ready', refresh);
+      socket.off('dialer:team_changed', refresh);
+      socket.off('dialer:agent_auto_paused', refresh);
     };
-  }, [socket, loadQueue, loadHistory]);
+  }, [socket, loadQueue, loadHistory, loadTeam]);
 
   async function persistSettings(next) {
     try {
       await api.post('/calls/settings', next);
+      loadQueue();
     } catch (error) {
       alert(error.response?.data?.error || 'Erro ao salvar configuração');
       loadSettings();
@@ -145,10 +174,20 @@ export default function Discador() {
     }
   }
 
-  async function handleHangup() {
-    if (!queue.ongoingCall) return;
-    await api.post(`/calls/${queue.ongoingCall.id}/hangup`);
+  async function handleHangup(callId) {
+    if (!callId) return;
+    await api.post(`/calls/${callId}/hangup`);
     loadQueue();
+  }
+
+  async function handleTogglePause(agent) {
+    try {
+      await api.post(`/calls/agents/${agent.id}/pause`, { paused: !agent.isPaused });
+      loadTeam();
+      loadQueue();
+    } catch (error) {
+      alert(error.response?.data?.error || 'Erro ao alterar a pausa');
+    }
   }
 
   async function handlePlayRecording(callId) {
@@ -166,6 +205,8 @@ export default function Discador() {
   }
 
   const ongoingLeadHasNoPhone = queue.ongoingCall && !queue.ongoingCall.lead?.phone;
+  const myAgent = team.agents.find((a) => a.isMine);
+  const STATE_LABEL = { livre: '🟢 Livre', em_ligacao: '📞 Em ligação', pausado: '⏸️ Pausado', inativo: '⚪ Inativo' };
 
   return (
     <div className="discador-page">
@@ -230,20 +271,65 @@ export default function Discador() {
         </div>
 
         <div className="card">
+          <h3>Equipe de vendedores</h3>
+          {myAgent && (
+            <div className={`discador-warning ${myAgent.isPaused ? 'discador-warning-danger' : ''}`} style={{ marginBottom: 8 }}>
+              {myAgent.isPaused
+                ? '⏸️ Você está em pausa: o discador não passa ligações para você. Os outros vendedores continuam.'
+                : '🟢 Você está disponível para receber ligações.'}
+              {myAgent.state !== 'em_ligacao' && (
+                <button type="button" className={myAgent.isPaused ? 'btn-primary' : 'btn-outline'} style={{ marginLeft: 8 }} onClick={() => handleTogglePause(myAgent)}>
+                  {myAgent.isPaused ? '▶ Voltar ao atendimento' : '⏸️ Pausar meu atendimento'}
+                </button>
+              )}
+            </div>
+          )}
+          <ul className="queue-preview-list">
+            {team.agents.map((a) => (
+              <li key={a.id}>
+                <span>
+                  <strong>{a.name}{a.isMine ? ' (você)' : ''}</strong>{' '}
+                  <span className="secondary-text">{STATE_LABEL[a.state] || a.state}{a.currentLead ? ` · ${a.currentLead}` : ''}</span>
+                </span>
+                {a.canControl && a.state !== 'inativo' && (
+                  <button type="button" className="btn-outline" disabled={a.state === 'em_ligacao'} onClick={() => handleTogglePause(a)}>
+                    {a.isPaused ? '▶ Retomar' : '⏸️ Pausar'}
+                  </button>
+                )}
+              </li>
+            ))}
+            {team.agents.length === 0 && <p className="empty-state">Nenhum vendedor cadastrado. Cadastre em <a href="/linhas">Linhas</a>.</p>}
+          </ul>
+          <small className="secondary-text">
+            O discador chama vários leads ao mesmo tempo, um para cada vendedor livre, e passa cada atendimento ao próximo da fila de vendedores.
+            Com um só vendedor, ele só volta a discar quando a linha estiver livre. A pausa vale só para quem pausou.
+          </small>
+        </div>
+
+        <div className="card">
           <h3>Fila de Discagem</h3>
           <p className="queue-count">{queue.pendingCount} leads aguardando</p>
 
-          {queue.ongoingCall ? (
-            <div className="ongoing-call">
-              <strong>Ligando para {queue.ongoingCall.lead.name}...</strong>
-              <span>{queue.ongoingCall.status}</span>
-              <button className="btn-danger" onClick={handleHangup}>Encerrar ligação</button>
-            </div>
-          ) : (
-            <button className="btn-primary" onClick={handleStartNext} disabled={loading}>
-              {loading ? 'Discando...' : '📞 Iniciar próxima ligação'}
-            </button>
+          {queue.autoDialRunning && (
+            <p className="secondary-text">
+              🤖 Discador automático ligado: o sistema liga sozinho enquanto houver vendedor livre.
+              {queue.pendingCount === 0 && ' A fila está vazia — carregue uma lista.'}
+            </p>
           )}
+          {queue.lastError && (
+            <div className="discador-warning discador-warning-danger">⚠️ {queue.lastError.message}</div>
+          )}
+
+          {(queue.ongoingCalls || []).map((call) => (
+            <div className="ongoing-call" key={call.id}>
+              <strong>{call.lead?.name} {call.status === 'atendida' ? '— em conversa' : '— chamando…'}</strong>
+              <span>Vendedor: {call.agent?.name || '-'} · {call.status}</span>
+              <button className="btn-danger" onClick={() => handleHangup(call.id)}>Encerrar ligação</button>
+            </div>
+          ))}
+          <button className="btn-primary" onClick={handleStartNext} disabled={loading}>
+            {loading ? 'Discando...' : '📞 Iniciar próxima ligação (manual)'}
+          </button>
         </div>
 
         <div className="card queue-preview-card">

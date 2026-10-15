@@ -3,7 +3,8 @@ const prisma = require('../config/db');
 const env = require('../config/env');
 const { getActiveTelephonyProvider } = require('../services/telephony/providerFactory');
 const { getCredentials } = require('../services/integrationFactory');
-const { startNextCall } = require('../services/dialerQueueService');
+const { MAX_QUEUE_ATTEMPTS, RETRY_DELAY_MINUTES, releaseAgent } = require('../services/dialerQueueService');
+const { toE164BR } = require('../utils/phone');
 
 const STATUS_MAP = {
   queued: 'iniciando',
@@ -30,6 +31,9 @@ exports.handleTwilioWebhook = async (req, res, next) => {
       if (CallStatus === 'completed') {
         const currentCall = await prisma.call.findUnique({ where: { id: agentLegCall.id } });
         await finalizeCall(currentCall);
+      } else if (['no-answer', 'busy', 'failed', 'canceled'].includes(CallStatus)) {
+        // O vendedor não atendeu o repasse: desliga o lead, devolve-o à fila e tira o vendedor de circulação.
+        await handleAgentMissed(agentLegCall);
       }
 
       res.set('Content-Type', 'text/xml');
@@ -80,18 +84,29 @@ exports.handleTwilioWebhook = async (req, res, next) => {
           const dialerSettings = await getCredentials(call.userId, 'dialer');
           const recordingEnabled = dialerSettings?.recordCallsEnabled === 'true';
 
-          const { agentCallSid } = await provider.bridgeToAgent({
-            providerCallId: call.providerCallId,
-            from: callerNumber.phoneNumber,
-            agentPhoneNumber: agent.phoneNumber,
-            conferenceRoomName: conferenceRoom,
-            statusCallbackUrl,
-            recordingEnabled,
-            recordingStatusCallbackUrl
-          });
+          try {
+            const { agentCallSid } = await provider.bridgeToAgent({
+              providerCallId: call.providerCallId,
+              from: callerNumber.phoneNumber,
+              agentPhoneNumber: toE164BR(agent.phoneNumber) || agent.phoneNumber,
+              conferenceRoomName: conferenceRoom,
+              statusCallbackUrl,
+              recordingEnabled,
+              recordingStatusCallbackUrl
+            });
 
-          updateData.agentProviderCallId = agentCallSid;
-          updateData.conferenceRoom = conferenceRoom;
+            updateData.agentProviderCallId = agentCallSid;
+            updateData.conferenceRoom = conferenceRoom;
+          } catch (bridgeError) {
+            console.error(`❌ Não foi possível ligar para o vendedor ${agent.name}: ${bridgeError.message}`);
+            await prisma.callEvent.create({
+              data: { callId: call.id, eventType: 'vendedor_falha_repasse', rawPayload: { error: bridgeError.message } }
+            }).catch(() => {});
+            await prisma.call.update({ where: { id: call.id }, data: updateData });
+            await handleAgentMissed({ ...call, ...updateData }, bridgeError.message);
+            res.set('Content-Type', 'text/xml');
+            return res.status(200).send('<Response></Response>');
+          }
         }
       }
     }
@@ -105,14 +120,19 @@ exports.handleTwilioWebhook = async (req, res, next) => {
     }
 
     if (['busy', 'failed', 'no-answer'].includes(CallStatus)) {
-      await prisma.callQueueItem.updateMany({
-        where: { leadId: call.leadId, status: 'discando' },
-        data: { status: 'falhou' }
-      });
-
-      if (call.agentId) {
-        await prisma.agent.update({ where: { id: call.agentId }, data: { status: 'disponivel' } });
+      // Lead não atendeu: volta para a fila (até MAX_QUEUE_ATTEMPTS vezes, com intervalo) e o vendedor é liberado.
+      const item = await prisma.callQueueItem.findFirst({ where: { leadId: call.leadId, status: 'discando' } });
+      if (item) {
+        const again = item.attempts < MAX_QUEUE_ATTEMPTS && CallStatus !== 'failed';
+        await prisma.callQueueItem.update({
+          where: { id: item.id },
+          data: again
+            ? { status: 'pendente', scheduledAt: new Date(Date.now() + RETRY_DELAY_MINUTES * 60 * 1000), lastError: `Não atendeu (${CallStatus})` }
+            : { status: 'falhou', lastError: CallStatus === 'failed' ? 'A ligação falhou' : `Não atendeu em ${item.attempts} tentativas` }
+        });
       }
+
+      await releaseAgent(call.agentId);
 
       const io = global.socketIoInstance;
       if (io) {
@@ -179,8 +199,17 @@ async function finalizeCall(call) {
     data: { status: 'concluido' }
   });
 
-  if (call.agentId) {
-    await prisma.agent.update({ where: { id: call.agentId }, data: { status: 'disponivel' } });
+  // Libera o vendedor: o motor automático (jobs/dialerAutoJob.js) já enxerga que ele ficou livre e segue discando.
+  await releaseAgent(call.agentId);
+
+  // Se a perna do vendedor ainda estiver tocando (o lead desligou antes), encerra-a.
+  if (call.agentProviderCallId) {
+    try {
+      const provider = await getActiveTelephonyProvider(call.userId);
+      await provider.hangupCall({ providerCallId: call.agentProviderCallId });
+    } catch (_) {
+      /* a perna já tinha terminado */
+    }
   }
 
   const io = global.socketIoInstance;
@@ -191,13 +220,29 @@ async function finalizeCall(call) {
       durationSeconds
     });
   }
+}
 
-  const dialerSettings = await getCredentials(call.userId, 'dialer');
-  if (dialerSettings?.autoDialEnabled === 'true') {
-    setTimeout(() => {
-      startNextCall(call.userId).catch((err) =>
-        console.error('Erro ao iniciar próxima ligação automática:', err.message)
-      );
-    }, 5000);
+/**
+ * O vendedor escolhido não atendeu (ou não foi possível ligar para ele) enquanto o lead já estava na linha:
+ * desliga o lead, devolve-o ao início da fila e pausa o vendedor para o discador não insistir nele.
+ */
+async function handleAgentMissed(call, reason) {
+  const provider = await getActiveTelephonyProvider(call.userId).catch(() => null);
+  if (provider && call.providerCallId) await provider.hangupCall({ providerCallId: call.providerCallId }).catch(() => {});
+
+  await prisma.call.update({ where: { id: call.id }, data: { status: 'encerrada', endedAt: new Date(), durationSeconds: 0 } }).catch(() => {});
+  await prisma.callQueueItem.updateMany({
+    where: { leadId: call.leadId, status: 'discando' },
+    data: { status: 'pendente', scheduledAt: new Date(), lastError: reason || 'O vendedor não atendeu o repasse' }
+  });
+
+  if (call.agentId) {
+    await prisma.agent.update({ where: { id: call.agentId }, data: { status: 'disponivel', isPaused: true, pausedAt: new Date() } });
+  }
+
+  const io = global.socketIoInstance;
+  if (io) {
+    io.to(`user:${call.userId}`).emit('call:ended', { callId: call.id, status: 'encerrada' });
+    io.to(`user:${call.userId}`).emit('dialer:agent_auto_paused', { agentId: call.agentId });
   }
 }

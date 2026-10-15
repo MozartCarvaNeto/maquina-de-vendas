@@ -9,6 +9,8 @@ const TWILIO_ERROR_MESSAGES = {
   21214:
     'Este destino não pode ser chamado com sua conta Twilio atual (restrição geográfica). Ative em Twilio Console → Voice → Settings → Geo Permissions.',
   21606: 'O número de origem (From) não pertence à sua conta Twilio ou não está habilitado para chamadas de voz.',
+  13224: 'Número de telefone inválido para a Twilio. Confira o DDD e o número do lead (o sistema já acrescenta o +55 quando falta).',
+  21215: 'Sua conta Twilio ainda não tem permissão para ligar para este país/região. Ative em Twilio Console → Voice → Settings → Geo Permissions (para o Brasil, marque Brazil).',
   20003: 'Falha de autenticação com a Twilio — verifique o Account SID e o Auth Token em Configurações.'
 };
 

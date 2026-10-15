@@ -5,6 +5,7 @@
 // falando), e — se houver interesse — avisa que a conversa continua no
 // WhatsApp, move o lead no CRM e dispara a mensagem de WhatsApp sozinho.
 const crypto = require('crypto');
+const { toE164BR } = require('../utils/phone');
 const prisma = require('../config/db');
 const env = require('../config/env');
 const { getActiveTelephonyProvider } = require('./telephony/providerFactory');
@@ -272,7 +273,7 @@ async function placeRoboCall(campaign, lead, provider) {
       leadId: lead.id,
       provider: 'twilio',
       fromNumber: callerNumber.phoneNumber,
-      toNumber: lead.phone,
+      toNumber: toE164BR(lead.phone) || lead.phone,
       callerNumberId: callerNumber.id,
       roboCallCampaignId: campaign.id,
       answeredBy: 'robo',
@@ -283,7 +284,7 @@ async function placeRoboCall(campaign, lead, provider) {
 
   try {
     const { providerCallId } = await provider.startCall({
-      to: lead.phone,
+      to: toE164BR(lead.phone) || lead.phone,
       from: callerNumber.phoneNumber,
       statusCallbackUrl: `${base}/api/robocalls/webhook/status?callId=${callId}`,
       twiml: buildIntroTwiml(campaign, callId),

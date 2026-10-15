@@ -29,6 +29,7 @@ const callQueueRoutes = require('./routes/callQueue.routes');
 const { startRoboCallWatchdogJob } = require('./jobs/roboCallWatchdogJob');
 const aiCallsRoutes = require('./routes/aiCalls.routes');
 const { startAiCallWatchdogJob } = require('./jobs/aiCallWatchdogJob');
+const { startDialerAutoJob } = require('./jobs/dialerAutoJob');
 
 const { startFollowUpNurtureJob } = require('./jobs/followUpNurtureJob');
 const { startBroadcastSchedulerJob } = require('./jobs/broadcastSchedulerJob');
@@ -141,6 +142,7 @@ server.listen(env.port, async () => {
   startBroadcastSchedulerJob();
   startRoboCallWatchdogJob();
   startAiCallWatchdogJob();
+  startDialerAutoJob();
   startAccessSweepJob();
   // Libera as contas dos administradores ANTES de restaurar as sessões de WhatsApp.
   await ensureAdminAccounts().catch((err) => console.error('Erro ao liberar administradores:', err.message));
