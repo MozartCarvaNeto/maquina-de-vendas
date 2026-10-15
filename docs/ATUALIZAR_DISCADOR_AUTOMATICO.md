@@ -27,3 +27,9 @@
 ## Limitações
 - Se o lead atender por caixa postal, a Twilio avisa "atendida" e o vendedor receberá a chamada (a detecção de secretária no discador humano não foi incluída).
 - O botão "Iniciar próxima ligação (manual)" continua existindo para discar um a um.
+
+## Correções adicionais (botões da tela)
+- **Encerrar ligação** agora funciona sempre: desliga o lead e o vendedor na Twilio (se já tinham terminado, o erro é ignorado) e fecha a ligação no sistema, liberando a fila e o vendedor. Ligações "presas" (a Twilio não avisou o fim) são fechadas sozinhas após 3 min chamando ou 90 min em conversa.
+- **Limpar fila**: esvazia os contatos pendentes. Para **trocar de lista**: escolha a outra lista e clique em "Carregar lista na fila" (substitui a fila); "Adicionar sem limpar" soma à fila.
+- **Parar discador**: desliga o modo automático e encerra todas as ligações do discador em andamento. (Desmarcar "Modo automático" só impede novas discagens.)
+- A tela mostra **por que não está discando** (sem vendedor cadastrado, fila vazia, todos pausados…). Atenção: se aparecer "Vendedores disponíveis 0 / 0", cadastre os vendedores em **Linhas > Vendedores** — sem eles o automático não liga.

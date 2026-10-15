@@ -176,8 +176,36 @@ export default function Discador() {
 
   async function handleHangup(callId) {
     if (!callId) return;
-    await api.post(`/calls/${callId}/hangup`);
+    try {
+      await api.post(`/calls/${callId}/hangup`);
+    } catch (error) {
+      alert(error.response?.data?.error || 'Não foi possível encerrar a ligação');
+    }
     loadQueue();
+    loadTeam();
+  }
+
+  async function handleClearQueue() {
+    if (!window.confirm('Esvaziar a fila de discagem? Quem já está em ligação não é afetado.')) return;
+    try {
+      const { data } = await api.post('/calls/queue/clear');
+      setListMessage(`🗑️ ${data.removed} contato(s) removidos da fila.`);
+    } catch (error) {
+      alert(error.response?.data?.error || 'Não foi possível limpar a fila');
+    }
+    loadQueue();
+  }
+
+  async function handleStopDialer() {
+    if (!window.confirm('Parar o discador? O modo automático é desligado e as ligações em andamento são encerradas.')) return;
+    try {
+      await api.post('/calls/dialer/stop');
+      setAutoDialEnabled(false);
+    } catch (error) {
+      alert(error.response?.data?.error || 'Não foi possível parar o discador');
+    }
+    loadQueue();
+    loadTeam();
   }
 
   async function handleTogglePause(agent) {
@@ -316,6 +344,9 @@ export default function Discador() {
               {queue.pendingCount === 0 && ' A fila está vazia — carregue uma lista.'}
             </p>
           )}
+          {queue.blockedReason && (
+            <div className="discador-warning">⏳ Não está discando agora: {queue.blockedReason}</div>
+          )}
           {queue.lastError && (
             <div className="discador-warning discador-warning-danger">⚠️ {queue.lastError.message}</div>
           )}
@@ -327,9 +358,13 @@ export default function Discador() {
               <button className="btn-danger" onClick={() => handleHangup(call.id)}>Encerrar ligação</button>
             </div>
           ))}
-          <button className="btn-primary" onClick={handleStartNext} disabled={loading}>
-            {loading ? 'Discando...' : '📞 Iniciar próxima ligação (manual)'}
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+            <button className="btn-primary" onClick={handleStartNext} disabled={loading}>
+              {loading ? 'Discando...' : '📞 Iniciar próxima ligação (manual)'}
+            </button>
+            <button className="btn-outline" onClick={handleClearQueue} disabled={queue.pendingCount === 0}>🗑️ Limpar fila</button>
+            <button className="btn-danger" onClick={handleStopDialer}>⏹️ Parar discador</button>
+          </div>
         </div>
 
         <div className="card queue-preview-card">

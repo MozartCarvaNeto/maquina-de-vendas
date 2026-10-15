@@ -19,6 +19,8 @@ router.post('/settings', callsController.saveDialerSettings);
 router.get('/queue', callsController.getQueue);
 router.post('/queue/next', callsController.startNext);
 router.post('/queue/load-list', callsController.loadList);
+router.post('/queue/clear', callsController.clearQueueHandler);
+router.post('/dialer/stop', callsController.stopDialerHandler);
 router.get('/team', callsController.getTeam);
 router.post('/agents/:id/pause', callsController.setAgentPause);
 

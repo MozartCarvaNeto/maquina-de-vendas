@@ -23,7 +23,8 @@ const ACTIVE_CALL_STATUSES = ['iniciando', 'tocando', 'atendida'];
 const MAX_QUEUE_ATTEMPTS = 3; // tentativas por lead quando não atende
 const RETRY_DELAY_MINUTES = 60; // intervalo entre tentativas de um mesmo lead
 const AGENT_STALE_MS = 3 * 60 * 1000; // vendedor "em ligação" sem nenhuma chamada ativa há mais que isso é liberado
-const CALL_STALE_MS = 20 * 60 * 1000; // chamada ativa há mais que isso (aviso da operadora perdido) é encerrada
+const RINGING_STALE_MS = 3 * 60 * 1000; // chamando há mais que isso (aviso da operadora perdido) é encerrada
+const TALKING_STALE_MS = 90 * 60 * 1000; // em conversa há mais que isso também
 
 const lastErrors = new Map(); // userId -> { message, at }
 const tickLocks = new Set();
@@ -77,9 +78,52 @@ async function claimFreeAgent(userId) {
   return null;
 }
 
+/** Libera o vendedor — a não ser que ele ainda tenha outra ligação ativa (aviso atrasado da operadora não pode liberar quem já está em outra chamada). */
 async function releaseAgent(agentId) {
   if (!agentId) return;
+  const stillBusy = await prisma.call.count({ where: { agentId, status: { in: ACTIVE_CALL_STATUSES } } });
+  if (stillBusy > 0) return;
   await prisma.agent.updateMany({ where: { id: agentId, status: 'em_ligacao' }, data: { status: 'disponivel' } });
+}
+
+/**
+ * Encerra uma ligação do discador de qualquer jeito: tenta desligar as duas pontas na operadora (se já tinham
+ * terminado, o erro é ignorado) e fecha a ligação no sistema, liberando fila e vendedor.
+ * É o que faz o botão "Encerrar ligação" funcionar mesmo com ligação "presa".
+ */
+async function forceCloseCall(call) {
+  try {
+    const provider = await getActiveTelephonyProvider(call.userId);
+    for (const sid of [call.providerCallId, call.agentProviderCallId]) {
+      if (sid) await provider.hangupCall({ providerCallId: sid }).catch(() => {});
+    }
+  } catch (_) {
+    /* sem provedor configurado: só fecha no sistema */
+  }
+  const endedAt = new Date();
+  const durationSeconds = call.answeredAt ? Math.round((endedAt.getTime() - new Date(call.answeredAt).getTime()) / 1000) : 0;
+  await prisma.call.update({ where: { id: call.id }, data: { status: 'encerrada', endedAt, durationSeconds } });
+  await prisma.callQueueItem.updateMany({ where: { leadId: call.leadId, status: 'discando' }, data: { status: 'concluido' } });
+  await releaseAgent(call.agentId);
+  const io = global.socketIoInstance;
+  if (io) io.to(`user:${call.userId}`).emit('call:ended', { callId: call.id, status: 'encerrada', durationSeconds });
+}
+
+/** Esvazia a fila de discagem (quem já está em ligação não é afetado). Devolve quantos saíram. */
+async function clearQueue(userId) {
+  const result = await prisma.callQueueItem.updateMany({
+    where: { userId, status: 'pendente' },
+    data: { status: 'pulado', lastError: 'Fila limpa manualmente' }
+  });
+  return result.count;
+}
+
+/** Para o discador: desliga o modo automático e encerra todas as ligações do discador em andamento. */
+async function stopDialer(userId) {
+  await updateDialerSettings(userId, { autoDialEnabled: 'false' });
+  const active = await prisma.call.findMany({ where: dialerCallWhere(userId) });
+  for (const call of active) await forceCloseCall(call);
+  return active.length;
 }
 
 /** Pega o próximo lead da fila que já pode ser chamado (respeita o intervalo entre tentativas). */
@@ -217,13 +261,15 @@ async function startNextCall(userId) {
 /** Libera reservas "esquecidas" (webhook perdido, servidor reiniciado) para o discador nunca travar. */
 async function reconcileStale(userId) {
   const staleCalls = await prisma.call.findMany({
-    where: { ...dialerCallWhere(userId), createdAt: { lt: new Date(Date.now() - CALL_STALE_MS) } },
-    select: { id: true, leadId: true, agentId: true }
+    where: {
+      ...dialerCallWhere(userId),
+      OR: [
+        { status: { in: ['iniciando', 'tocando'] }, createdAt: { lt: new Date(Date.now() - RINGING_STALE_MS) } },
+        { status: 'atendida', createdAt: { lt: new Date(Date.now() - TALKING_STALE_MS) } }
+      ]
+    }
   });
-  for (const call of staleCalls) {
-    await prisma.call.update({ where: { id: call.id }, data: { status: 'encerrada', endedAt: new Date() } });
-    await prisma.callQueueItem.updateMany({ where: { leadId: call.leadId, status: 'discando' }, data: { status: 'concluido' } });
-  }
+  for (const call of staleCalls) await forceCloseCall(call);
 
   const busy = await prisma.agent.findMany({
     where: { userId, status: 'em_ligacao', lastUsedAt: { lt: new Date(Date.now() - AGENT_STALE_MS) } },
@@ -281,6 +327,7 @@ async function updateDialerSettings(userId, patch) {
 }
 
 async function getQueueStatus(userId) {
+  await reconcileStale(userId).catch(() => {}); // fecha ligações "presas" antes de mostrar o painel
   const [pendingCount, pending, ongoingCalls, agents, callerNumbers, settings] = await Promise.all([
     prisma.callQueueItem.count({ where: { userId, status: 'pendente' } }),
     prisma.callQueueItem.findMany({
@@ -301,12 +348,22 @@ async function getQueueStatus(userId) {
 
   const activeAgents = agents.filter((a) => a.isActive);
   const lastError = lastErrors.get(userId) || null;
+  const available = activeAgents.filter((a) => a.status === 'disponivel' && !a.isPaused).length;
+  // Por que o automático não está discando agora (para a tela explicar).
+  let blockedReason = null;
+  if (settings?.autoDialEnabled === 'true') {
+    if (activeAgents.length === 0) blockedReason = 'Nenhum vendedor ativo cadastrado. Cadastre em Linhas > Vendedores (com o celular que vai receber as ligações) — sem vendedor o discador não liga.';
+    else if (callerNumbers.length === 0) blockedReason = 'Nenhum número de discagem ativo. Cadastre em Linhas > Números de Discagem.';
+    else if (pendingCount === 0 && ongoingCalls.length === 0) blockedReason = 'A fila está vazia. Carregue uma lista.';
+    else if (available === 0 && ongoingCalls.length === 0) blockedReason = 'Todos os vendedores estão em pausa ou inativos. Retome um vendedor para voltar a discar.';
+  }
   return {
     pendingCount,
     pending,
     ongoingCall: ongoingCalls[0] || null,
     ongoingCalls,
-    availableAgents: activeAgents.filter((a) => a.status === 'disponivel' && !a.isPaused).length,
+    availableAgents: available,
+    blockedReason,
     totalAgents: activeAgents.length,
     totalCallerNumbers: callerNumbers.length,
     autoDialRunning: settings?.autoDialEnabled === 'true',
@@ -383,6 +440,9 @@ module.exports = {
   runDialerTick,
   reconcileStale,
   releaseAgent,
+  forceCloseCall,
+  clearQueue,
+  stopDialer,
   claimFreeAgent,
   updateDialerSettings,
   getQueueStatus,

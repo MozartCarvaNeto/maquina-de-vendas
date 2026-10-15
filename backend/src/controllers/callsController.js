@@ -13,6 +13,9 @@ const {
   pickNextCallerNumber,
   claimFreeAgent,
   releaseAgent,
+  forceCloseCall,
+  clearQueue,
+  stopDialer,
   updateDialerSettings
 } = require('../services/dialerQueueService');
 
@@ -233,11 +236,28 @@ exports.hangup = async (req, res, next) => {
     if (!call) {
       return res.status(404).json({ error: 'Ligação não encontrada' });
     }
-
-    const provider = await getActiveTelephonyProvider(req.userId);
-    await provider.hangupCall({ providerCallId: call.providerCallId });
-
+    // Desliga na operadora e fecha no sistema mesmo se a operadora já tinha encerrado (ligação "presa").
+    await forceCloseCall(call);
     res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.clearQueueHandler = async (req, res, next) => {
+  try {
+    const removed = await clearQueue(req.userId);
+    res.json({ success: true, removed });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.stopDialerHandler = async (req, res, next) => {
+  try {
+    const closed = await stopDialer(req.userId);
+    markAccountAutoDial(req.userId, false);
+    res.json({ success: true, closed });
   } catch (error) {
     next(error);
   }
