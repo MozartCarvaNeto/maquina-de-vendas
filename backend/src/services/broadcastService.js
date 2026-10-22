@@ -559,13 +559,20 @@ async function executeBroadcast(broadcastId) {
           } else if (broadcast.channel === 'sms') {
             if (!lead.phone) throw new Error('Lead sem telefone cadastrado');
             const smsProvider = await getSmsProvider(broadcast.userId);
-            const callerNumber = await pickNextCallerNumber(broadcast.userId);
-            if (!callerNumber) {
-              throw new Error('Nenhum número cadastrado em Linhas > Números de Discagem para enviar SMS');
+            // Remetente: o definido em Configurações > SMS; senão um número de discagem da conta.
+            let smsFrom = smsProvider.sender;
+            if (!smsFrom) {
+              const callerNumber = await pickNextCallerNumber(broadcast.userId);
+              smsFrom = callerNumber?.phoneNumber || null;
+            }
+            if (!smsFrom) {
+              const noSender = new Error('Nenhum remetente de SMS: defina em Configurações > SMS (número da Twilio com SMS).');
+              noSender.configProblem = true;
+              throw noSender;
             }
             await smsProvider.sendSms({
               to: lead.phone,
-              from: callerNumber.phoneNumber,
+              from: smsFrom,
               body: renderTemplate(broadcast.message, lead)
             });
 
@@ -612,6 +619,14 @@ async function executeBroadcast(broadcastId) {
               broadcast.id,
               'Conexão do WhatsApp caiu durante o disparo. Reconecte o número e clique em Retomar. Os leads já enviados serão mantidos.'
             );
+            break;
+          }
+
+          // Problema da CONTA (chaves, país bloqueado, remetente sem SMS, conta Trial…): não adianta tentar os
+          // outros leads. Pausa o disparo com o motivo, sem marcar ninguém como falha — corrija e clique em Retomar.
+          if (error.configProblem && ['sms', 'email'].includes(broadcast.channel)) {
+            interrupted = true;
+            await markPausedForConnection(broadcast.id, `Disparo pausado: ${error.message} Corrija e clique em Retomar.`);
             break;
           }
 

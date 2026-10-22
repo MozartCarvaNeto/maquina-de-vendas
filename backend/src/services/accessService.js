@@ -128,6 +128,13 @@ async function getBlockedAccountIds() {
     .map((row) => row.id);
 }
 
+/** A conta pertence ao administrador da plataforma? (só ele pode usar as chaves globais do .env) */
+async function isPlatformAdminAccount(accountId) {
+  if (!accountId) return false;
+  const members = await prisma.member.findMany({ where: { accountId }, select: { email: true } });
+  return members.some((m) => isPlatformAdminEmail(m.email));
+}
+
 async function isAccountBlocked(accountId) {
   const account = await prisma.account.findUnique({
     where: { id: accountId },
@@ -226,6 +233,7 @@ module.exports = {
   isPaywallEligible,
   getBlockedAccountIds,
   isAccountBlocked,
+  isPlatformAdminAccount,
   addLog,
   suspendAccountSessions,
   resumeAccountSessions,

@@ -1,6 +1,7 @@
 // backend/src/controllers/lineController.js
 const prisma = require('../config/db');
 const env = require('../config/env');
+const { isPlatformAdminAccount } = require('../services/accessService');
 
 const MAX_ITEMS_PER_TYPE = 10;
 
@@ -19,7 +20,7 @@ exports.listCallerNumbers = async (req, res, next) => {
       orderBy: { createdAt: 'desc' }
     });
 
-    if (callerNumbers.length === 0 && env.twilioCallerNumber) {
+    if (callerNumbers.length === 0 && env.twilioCallerNumber && (await isPlatformAdminAccount(req.userId))) {
       const created = await prisma.callerNumber.create({
         data: {
           userId: req.userId,

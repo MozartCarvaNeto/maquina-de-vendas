@@ -76,5 +76,9 @@ module.exports = {
   twilioAuthToken: process.env.TWILIO_AUTH_TOKEN || null,
   // Número Twilio padrão, já cadastrado automaticamente em Linhas > Números
   // de Discagem na primeira vez que a tela é aberta, se ela estiver vazia.
-  twilioCallerNumber: process.env.TWILIO_CALLER_NUMBER || null
+  twilioCallerNumber: process.env.TWILIO_CALLER_NUMBER || null,
+  // Remetente padrão de SMS da plataforma (número da Twilio com SMS, ID alfanumérico ou Messaging Service MG…). Só o administrador usa.
+  twilioSmsFrom: process.env.TWILIO_SMS_FROM || null,
+  // Remetente do e-mail da Twilio (precisa estar verificado/autenticado na Twilio). Só o administrador usa.
+  twilioEmailFrom: process.env.TWILIO_EMAIL_FROM || null
 };

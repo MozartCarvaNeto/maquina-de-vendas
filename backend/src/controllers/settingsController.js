@@ -5,6 +5,10 @@ const { isSecretKey, maskSecret, mergeCredentials, persistCredentials } = requir
 const { PROVIDER_REGISTRY, AI_TELEPHONY_REGISTRY, getActiveTelephonyProvider, isTelephonyConfiguredViaEnv } = require('../services/telephony/providerFactory');
 const { EMAIL_PROVIDER_REGISTRY, getEmailProvider } = require('../services/email/emailProviderFactory');
 const { getActiveDomainForSending } = require('../services/email/emailDomainService');
+const TwilioEmailProvider = require('../services/email/TwilioEmailProvider');
+const { getTwilioCredentials } = require('../services/twilioCredentials');
+const { getSmsProvider, getSmsSender } = require('../services/sms/smsProviderFactory');
+const { toE164BR } = require('../utils/phone');
 
 exports.listAvailableProviders = async (req, res, next) => {
   try {
@@ -20,7 +24,7 @@ exports.listAvailableProviders = async (req, res, next) => {
 /** Diz ao frontend se o Twilio já está funcionando via .env, sem precisar configurar pela tela. */
 exports.getEnvStatus = async (req, res, next) => {
   try {
-    res.json({ telephonyConfiguredViaEnv: isTelephonyConfiguredViaEnv() });
+    res.json({ telephonyConfiguredViaEnv: await isTelephonyConfiguredViaEnv(req.userId) });
   } catch (error) {
     next(error);
   }
@@ -194,6 +198,27 @@ exports.saveEmailSettings = async (req, res, next) => {
         return res.status(400).json({ error: 'A chave do SendGrid começa com "SG.". O Account SID/Auth Token da Twilio não envia e-mails.' });
       }
     }
+    if (provider === 'twilio_email') {
+      if (!merged.fromEmail) {
+        return res.status(400).json({ error: 'Informe o e-mail remetente (precisa estar verificado na Twilio).' });
+      }
+      const twilioCreds = await getTwilioCredentials(req.userId);
+      if (!twilioCreds) {
+        return res.status(400).json({ error: 'Cadastre antes as chaves da Twilio (Account SID e Auth Token) em Configurações > Telefonia.' });
+      }
+      const validation = await new TwilioEmailProvider({ ...merged, ...twilioCreds }).validateCredentials();
+      if (!validation.valid && !force) {
+        return res.status(422).json({ error: 'A Twilio recusou as chaves para e-mail — nada foi alterado.', details: validation.error, canForce: true });
+      }
+      await persistCredentials(req.userId, 'email', provider, merged, toDelete, { exclusive: true });
+      return res.json({
+        success: true,
+        validated: validation.valid,
+        message: 'E-mail da Twilio configurado. Use "Enviar e-mail de teste" para confirmar o remetente.',
+        warning: validation.valid ? undefined : validation.error
+      });
+    }
+
     if (provider === 'smtp') {
       const requiredFields = ['host', 'port', 'user', 'pass', 'fromEmail'];
       const missing = requiredFields.filter((key) => !merged[key]);
@@ -243,6 +268,57 @@ exports.saveEmailSettings = async (req, res, next) => {
     });
   } catch (error) {
     next(error);
+  }
+};
+
+/** Remetente padrão de SMS (número da Twilio com SMS, ID alfanumérico ou Messaging Service MG…). */
+exports.saveSmsSettings = async (req, res, next) => {
+  try {
+    const sender = String((req.body || {}).sender || '').trim();
+    if (!sender) {
+      // Campo vazio = remove o remetente salvo (volta aos números de discagem).
+      await prisma.setting.deleteMany({ where: { userId: req.userId, category: 'sms' } });
+      return res.json({ success: true, message: 'Remetente de SMS removido.' });
+    }
+    if (!/^(\+\d{8,15}|MG[0-9a-fA-F]{32}|[A-Za-z0-9 ]{3,11})$/.test(sender)) {
+      return res.status(400).json({ error: 'Remetente inválido. Use o número com +país (ex.: +12025550123), o ID do Messaging Service (MG…) ou um nome de 3 a 11 letras/números.' });
+    }
+    const { merged, toDelete } = await mergeCredentials(req.userId, 'sms', 'twilio', { sender });
+    await persistCredentials(req.userId, 'sms', 'twilio', merged, toDelete, { exclusive: true });
+    res.json({ success: true, message: 'Remetente de SMS salvo.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** Envia um SMS de teste de verdade e devolve o erro da Twilio já traduzido (para diagnosticar). */
+exports.testSms = async (req, res, next) => {
+  try {
+    const to = toE164BR((req.body || {}).to);
+    if (!to) return res.status(400).json({ error: 'Informe o celular de destino com DDD.' });
+    const provider = await getSmsProvider(req.userId);
+    let from = provider.sender;
+    if (!from) {
+      const number = await prisma.callerNumber.findFirst({ where: { userId: req.userId, isActive: true } });
+      from = number?.phoneNumber || null;
+    }
+    await provider.sendSms({ to, from, body: 'Teste de SMS do Turbo Prospect: se você recebeu, está tudo certo!' });
+    res.json({ success: true, message: `SMS de teste enviado para ${to}.`, from });
+  } catch (error) {
+    res.status(422).json({ error: error.message });
+  }
+};
+
+/** Envia um e-mail de teste pelo provedor de e-mail ativo. */
+exports.testEmail = async (req, res, next) => {
+  try {
+    const to = String((req.body || {}).to || '').trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return res.status(400).json({ error: 'Informe um e-mail de destino válido.' });
+    const provider = await getEmailProvider(req.userId);
+    await provider.sendEmail({ to, subject: 'Teste do Turbo Prospect', html: '<p>Se você recebeu este e-mail, o envio está funcionando.</p>' });
+    res.json({ success: true, message: `E-mail de teste enviado para ${to}.` });
+  } catch (error) {
+    res.status(422).json({ error: error.message });
   }
 };
 

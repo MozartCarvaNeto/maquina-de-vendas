@@ -5,6 +5,7 @@ const JambonzProvider = require('./JambonzProvider');
 const prisma = require('../../config/db');
 const env = require('../../config/env');
 const { decrypt } = require('../crypto/settingsCrypto');
+const { isPlatformAdminAccount } = require('../accessService');
 
 /**
  * Registro de provedores disponíveis. Para adicionar um novo provedor
@@ -45,7 +46,8 @@ async function getActiveTelephonyProvider(userId) {
     return new ProviderClass(credentials);
   }
 
-  if (env.twilioAccountSid && env.twilioAuthToken) {
+  // Chaves globais do .env: só a conta do administrador da plataforma usa (clientes têm que cadastrar as suas).
+  if (env.twilioAccountSid && env.twilioAuthToken && (await isPlatformAdminAccount(userId))) {
     return new TwilioProvider({ accountSid: env.twilioAccountSid, authToken: env.twilioAuthToken });
   }
 
@@ -57,8 +59,8 @@ async function getActiveTelephonyProvider(userId) {
 }
 
 /** Usado pela tela de Configurações, para mostrar um aviso "já configurado via .env". */
-function isTelephonyConfiguredViaEnv() {
-  return !!(env.twilioAccountSid && env.twilioAuthToken);
+async function isTelephonyConfiguredViaEnv(userId) {
+  return !!(env.twilioAccountSid && env.twilioAuthToken) && (await isPlatformAdminAccount(userId));
 }
 
 /**

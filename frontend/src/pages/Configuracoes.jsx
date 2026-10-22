@@ -25,6 +25,10 @@ export default function Configuracoes() {
   const [smtp, setSmtp] = useState({ host: '', port: '587', user: '', pass: '', fromEmail: '', fromName: '' });
   const [resend, setResend] = useState({ apiKey: '', fromEmail: '', fromName: '' });
   const [sendgrid, setSendgrid] = useState({ apiKey: '', fromEmail: '', fromName: '' });
+  const [twilioEmail, setTwilioEmail] = useState({ fromEmail: '', fromName: '' });
+  const [smsSender, setSmsSender] = useState('');
+  const [testSmsTo, setTestSmsTo] = useState('');
+  const [testEmailTo, setTestEmailTo] = useState('');
   const [domains, setDomains] = useState([]);
   const [newDomain, setNewDomain] = useState('');
   const [dnsInfoByDomain, setDnsInfoByDomain] = useState({});
@@ -78,8 +82,11 @@ export default function Configuracoes() {
           if (aiTel.provider === 'jambonz') setJambonz((cur) => ({ ...cur, accountSid: v.accountSid || '', baseUrl: v.baseUrl || 'https://api.jambonz.cloud', applicationSid: v.applicationSid || '' }));
         }
 
+        const sms = list.find((x) => x.category === 'sms');
+        if (sms?.values?.sender) setSmsSender(sms.values.sender);
+
         const mail = list.find((x) => x.category === 'email');
-        if (mail && ['smtp', 'resend', 'sendgrid', 'native'].includes(mail.provider)) {
+        if (mail && ['smtp', 'resend', 'sendgrid', 'native', 'twilio_email'].includes(mail.provider)) {
           setEmailProvider(mail.provider);
           const v = mail.values || {};
           if (mail.provider === 'smtp') {
@@ -87,6 +94,9 @@ export default function Configuracoes() {
           }
           if (mail.provider === 'resend') {
             setResend((cur) => ({ ...cur, fromEmail: v.fromEmail || '', fromName: v.fromName || '' }));
+          }
+          if (mail.provider === 'twilio_email') {
+            setTwilioEmail((cur) => ({ ...cur, fromEmail: v.fromEmail || '', fromName: v.fromName || '' }));
           }
           if (mail.provider === 'sendgrid') {
             setSendgrid((cur) => ({ ...cur, fromEmail: v.fromEmail || '', fromName: v.fromName || '' }));
@@ -175,6 +185,28 @@ export default function Configuracoes() {
     });
   }
 
+  async function saveSms(e) {
+    e.preventDefault();
+    await submitSetting({
+      area: 'sms',
+      url: '/settings/sms',
+      body: { sender: smsSender },
+      okText: smsSender ? 'Remetente de SMS salvo' : 'Remetente removido (o sistema usará um número de Linhas)',
+      afterOk: loadConfiguredSettings
+    });
+  }
+
+  async function sendTest(kind) {
+    const isSms = kind === 'sms';
+    setMessages((m) => ({ ...m, [`${kind}Test`]: 'Enviando teste…' }));
+    try {
+      const { data } = await api.post(isSms ? '/settings/sms/test' : '/settings/email/test', { to: isSms ? testSmsTo : testEmailTo });
+      setMessages((m) => ({ ...m, [`${kind}Test`]: `✅ ${data.message}` }));
+    } catch (error) {
+      setMessages((m) => ({ ...m, [`${kind}Test`]: `❌ ${error.response?.data?.error || 'Erro ao enviar o teste'}` }));
+    }
+  }
+
   async function saveAiTelephony(e) {
     e.preventDefault();
     const credentials = aiTelProvider === 'telnyx' ? telnyx : aiTelProvider === 'jambonz' ? jambonz : {};
@@ -194,7 +226,7 @@ export default function Configuracoes() {
 
   async function saveEmail(e) {
     e.preventDefault();
-    const credentials = emailProvider === 'smtp' ? smtp : emailProvider === 'resend' ? resend : emailProvider === 'sendgrid' ? sendgrid : {};
+    const credentials = emailProvider === 'smtp' ? smtp : emailProvider === 'resend' ? resend : emailProvider === 'sendgrid' ? sendgrid : emailProvider === 'twilio_email' ? twilioEmail : {};
     setMessages((m) => ({ ...m, email: 'Testando a conexão…' }));
     await submitSetting({
       area: 'email',
@@ -402,6 +434,26 @@ export default function Configuracoes() {
         </div>
 
         <div className="card">
+          <h3>💬 SMS (Twilio)</h3>
+          <p className="card-desc">
+            Os disparos de SMS usam as mesmas chaves da Telefonia (Account SID / Auth Token). Defina abaixo o <strong>remetente</strong>:
+            um número da Twilio com SMS (ex.: <code>+12025550123</code>), o ID de um Messaging Service (<code>MG…</code>) ou um nome de
+            3 a 11 letras. O número brasileiro usado nas ligações costuma <strong>não</strong> ter SMS — se o disparo parar com
+            erro de remetente, use um número com SMS.
+          </p>
+          <form onSubmit={saveSms}>
+            <input placeholder="Remetente do SMS (+1202…, MG… ou nome)" value={smsSender} onChange={(e) => setSmsSender(e.target.value)} />
+            <button className="btn-primary" type="submit">Salvar remetente</button>
+            {messages.sms && <p className="config-msg">{messages.sms}</p>}
+          </form>
+          <h4 className="subsection-title">Testar agora</h4>
+          <input placeholder="Seu celular com DDD (ex.: 11 99999-8888)" value={testSmsTo} onChange={(e) => setTestSmsTo(e.target.value)} />
+          <button type="button" className="btn-secondary-small" onClick={() => sendTest('sms')} disabled={!testSmsTo}>Enviar SMS de teste</button>
+          {messages.smsTest && <p className="config-msg">{messages.smsTest}</p>}
+          <p className="card-note">Conta Twilio de teste (Trial): só envia para números verificados no console da Twilio. Para o Brasil, ative também Messaging &gt; Settings &gt; Geo permissions &gt; Brazil.</p>
+        </div>
+
+        <div className="card">
           <h3>☎️ Telefonia das ligações da IA</h3>
           <p className="card-desc">
             Escolha por onde o <strong>Agente de IA</strong> faz as ligações. O padrão é a Twilio (nada muda se você
@@ -482,9 +534,16 @@ export default function Configuracoes() {
           <select value={emailProvider} onChange={(e) => setEmailProvider(e.target.value)}>
             <option value="smtp">📮 E-mail próprio (SMTP)</option>
             <option value="resend">☁️ Resend (plataforma dedicada)</option>
-            <option value="sendgrid">📨 Twilio SendGrid (e-mail da Twilio)</option>
+            <option value="twilio_email">✉️ Twilio E-mail (mesmas chaves da Telefonia)</option>
+            <option value="sendgrid">📨 Twilio SendGrid (chave SG.)</option>
             <option value="native">🚀 E-mail Nativo (sem terceiros)</option>
           </select>
+
+          <div className="test-row">
+            <input placeholder="Seu e-mail para receber um teste" value={testEmailTo} onChange={(e) => setTestEmailTo(e.target.value)} />
+            <button type="button" className="btn-secondary-small" onClick={() => sendTest('email')} disabled={!testEmailTo}>Enviar e-mail de teste</button>
+            {messages.emailTest && <p className="config-msg">{messages.emailTest}</p>}
+          </div>
 
           {emailProvider === 'smtp' && (
             <form onSubmit={saveEmail}>
@@ -522,6 +581,21 @@ export default function Configuracoes() {
               />
               <input placeholder="E-mail remetente" value={resend.fromEmail} onChange={(e) => setResend({ ...resend, fromEmail: e.target.value })} required />
               <input placeholder="Nome do remetente" value={resend.fromName} onChange={(e) => setResend({ ...resend, fromName: e.target.value })} />
+              <button className="btn-primary" type="submit">Salvar</button>
+              {messages.email && <p className="config-msg">{messages.email}</p>}
+              {forceButton('email')}
+            </form>
+          )}
+
+          {emailProvider === 'twilio_email' && (
+            <form onSubmit={saveEmail}>
+              <p className="hint-text">
+                É o "Try out Email" do console da Twilio. Usa o <strong>Account SID e o Auth Token</strong> já salvos em
+                Telefonia (não precisa de chave SG.). O e-mail remetente precisa estar <strong>verificado/autenticado na
+                Twilio</strong> (Console → Email → Senders ou Domain Authentication). Esse envio não aceita anexos.
+              </p>
+              <input placeholder="E-mail remetente verificado na Twilio" value={twilioEmail.fromEmail} onChange={(e) => setTwilioEmail({ ...twilioEmail, fromEmail: e.target.value })} required />
+              <input placeholder="Nome do remetente" value={twilioEmail.fromName} onChange={(e) => setTwilioEmail({ ...twilioEmail, fromName: e.target.value })} />
               <button className="btn-primary" type="submit">Salvar</button>
               {messages.email && <p className="config-msg">{messages.email}</p>}
               {forceButton('email')}

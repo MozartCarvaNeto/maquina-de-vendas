@@ -5,6 +5,10 @@ const ResendEmailProvider = require('./ResendEmailProvider');
 const SmtpEmailProvider = require('./SmtpEmailProvider');
 const SendGridEmailProvider = require('./SendGridEmailProvider');
 const NativeEmailProvider = require('./NativeEmailProvider');
+const TwilioEmailProvider = require('./TwilioEmailProvider');
+const { getTwilioCredentials } = require('../twilioCredentials');
+const env = require('../../config/env');
+const { isPlatformAdminAccount } = require('../accessService');
 const { getActiveDomainForSending } = require('./emailDomainService');
 
 const EMAIL_PROVIDER_REGISTRY = {
@@ -18,13 +22,21 @@ const EMAIL_PROVIDER_REGISTRY = {
   // `saveEmailSettings` — a instância de verdade é sempre montada abaixo,
   // em getEmailProvider(), porque ela precisa buscar o domínio e a chave
   // DKIM cadastrados (algo que os outros provedores não têm).
-  native: NativeEmailProvider
+  native: NativeEmailProvider,
+  // Twilio Email (API nova do console, "Try out Email"): usa o Account SID/Auth Token já cadastrados na Telefonia.
+  twilio_email: TwilioEmailProvider
 };
 
 async function getEmailProvider(userId, options = {}) {
   const settings = await prisma.setting.findMany({
     where: { userId, category: 'email', isActive: true }
   });
+
+  // Administrador da plataforma sem e-mail configurado, mas com chaves e remetente da Twilio no .env: já funciona.
+  if (settings.length === 0 && env.twilioEmailFrom && (await isPlatformAdminAccount(userId))) {
+    const twilioCreds = await getTwilioCredentials(userId);
+    if (twilioCreds) return new TwilioEmailProvider({ ...twilioCreds, fromEmail: env.twilioEmailFrom, fromName: 'Turbo Prospect' });
+  }
 
   if (settings.length === 0) {
     const err = new Error('Nenhum provedor de e-mail configurado. Acesse Configurações > E-mail.');
@@ -71,6 +83,16 @@ async function getEmailProvider(userId, options = {}) {
   const credentials = {};
   for (const setting of settings) {
     credentials[setting.key] = decrypt(setting.value);
+  }
+
+  if (providerName === 'twilio_email') {
+    const twilioCreds = await getTwilioCredentials(userId);
+    if (!twilioCreds) {
+      const err = new Error('O e-mail da Twilio usa as chaves de Configurações > Telefonia (Account SID e Auth Token). Cadastre-as primeiro.');
+      err.status = 400;
+      throw err;
+    }
+    return new TwilioEmailProvider({ ...credentials, ...twilioCreds });
   }
 
   return new ProviderClass(credentials);

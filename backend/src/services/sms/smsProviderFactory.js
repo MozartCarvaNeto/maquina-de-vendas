@@ -1,37 +1,33 @@
 // backend/src/services/sms/smsProviderFactory.js
 const prisma = require('../../config/db');
+const env = require('../../config/env');
 const { decrypt } = require('../crypto/settingsCrypto');
 const TwilioSmsProvider = require('./TwilioSmsProvider');
+const { getTwilioCredentials } = require('../twilioCredentials');
+const { isPlatformAdminAccount } = require('../accessService');
 
-/**
- * Busca a credencial de telefonia já cadastrada (Fase 1) e monta um
- * provedor de SMS em cima dela. Se você troca de operadora de telefonia,
- * o SMS acompanha automaticamente.
- */
-async function getSmsProvider(userId) {
-  const settings = await prisma.setting.findMany({
-    where: { userId, category: 'telephony', isActive: true }
-  });
-
-  if (settings.length === 0) {
-    const err = new Error('Configure a telefonia (Twilio) antes de enviar SMS. Acesse Configurações > Telefonia.');
-    err.status = 400;
-    throw err;
-  }
-
-  const providerName = settings[0].provider;
-  if (providerName !== 'twilio') {
-    const err = new Error(`Envio de SMS via "${providerName}" ainda não suportado.`);
-    err.status = 400;
-    throw err;
-  }
-
-  const credentials = {};
-  for (const setting of settings) {
-    credentials[setting.key] = decrypt(setting.value);
-  }
-
-  return new TwilioSmsProvider(credentials);
+/** Remetente de SMS: o salvo em Configurações > SMS; senão (só administrador) o do .env (TWILIO_SMS_FROM). */
+async function getSmsSender(userId) {
+  const rows = await prisma.setting.findMany({ where: { userId, category: 'sms', isActive: true } });
+  const row = rows.find((r) => r.key === 'sender');
+  if (row) return decrypt(row.value);
+  if (env.twilioSmsFrom && (await isPlatformAdminAccount(userId))) return env.twilioSmsFrom;
+  return null;
 }
 
-module.exports = { getSmsProvider };
+/**
+ * SMS pela Twilio, com as mesmas chaves da Telefonia (da conta ou, para o administrador, as da plataforma no .env).
+ * `provider.sender` traz o remetente padrão (pode ser null: nesse caso quem chama escolhe um número de discagem).
+ */
+async function getSmsProvider(userId) {
+  const credentials = await getTwilioCredentials(userId);
+  if (!credentials) {
+    const err = new Error('Configure as chaves da Twilio (Account SID e Auth Token) em Configurações > Telefonia para enviar SMS.');
+    err.status = 400;
+    err.configProblem = true;
+    throw err;
+  }
+  return new TwilioSmsProvider(credentials, { sender: await getSmsSender(userId) });
+}
+
+module.exports = { getSmsProvider, getSmsSender };
