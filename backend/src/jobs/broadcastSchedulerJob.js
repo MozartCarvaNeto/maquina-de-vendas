@@ -1,7 +1,10 @@
 // backend/src/jobs/broadcastSchedulerJob.js
 const cron = require('node-cron');
 const prisma = require('../config/db');
-const { executeBroadcast, HEARTBEAT_STALE_MS } = require('../services/broadcastService');
+const { executeBroadcast, HEARTBEAT_STALE_MS, isRunActiveInProcess } = require('../services/broadcastService');
+
+// Execução viva neste servidor, só demorando (envio lento do WhatsApp): não abrir uma segunda.
+const ALIVE_GRACE_MS = 20 * 60 * 1000;
 const { getBlockedAccountIds } = require('../services/accessService');
 const { getAccountIdsWithoutFeature } = require('../services/featureService');
 
@@ -72,10 +75,12 @@ async function recoverOrphanedBroadcasts() {
       userId: { notIn: blocked },
       OR: [{ lastHeartbeatAt: { lt: staleBefore } }, { lastHeartbeatAt: null }]
     },
-    select: { id: true, name: true }
+    select: { id: true, name: true, lastHeartbeatAt: true }
   });
 
   for (const broadcast of orphaned) {
+    const age = broadcast.lastHeartbeatAt ? Date.now() - new Date(broadcast.lastHeartbeatAt).getTime() : Infinity;
+    if (isRunActiveInProcess(broadcast.id) && age < ALIVE_GRACE_MS) continue;
     console.log(`🔄 Retomando disparo órfão "${broadcast.name}" (${broadcast.id})...`);
     await executeBroadcast(broadcast.id).catch((err) =>
       console.error(`Erro ao retomar disparo órfão ${broadcast.id}:`, err.message)

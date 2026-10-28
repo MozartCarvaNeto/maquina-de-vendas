@@ -21,6 +21,29 @@ const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const MAX_CONSECUTIVE_CONNECTION_ERRORS = 12;
 const CONNECTION_RETRY_WAIT_MS = 15 * 1000;
 
+// ---------------------------------------------------------------------------
+// Controle de execução (um único "dono" por disparo)
+// Cada execução recebe um token. Só o token mais recente pode enviar; uma
+// execução antiga (pausada/retomada, ou travada num envio) percebe que foi
+// substituída e para sozinha — assim nunca há dois laços enviando em paralelo.
+// ---------------------------------------------------------------------------
+const activeRuns = new Map();
+
+function isRunActiveInProcess(broadcastId) {
+  return activeRuns.has(broadcastId);
+}
+
+/** Pedido de parada imediata (pausa do usuário): a execução em curso encerra no próximo ponto de checagem. */
+function stopBroadcastRun(broadcastId) {
+  activeRuns.delete(broadcastId);
+}
+
+function phoneKey(phone) {
+  let digits = String(phone || '').replace(/\D/g, '');
+  if (digits.startsWith('55') && digits.length > 11) digits = digits.slice(2);
+  return digits;
+}
+
 function renderTemplate(template, lead) {
   return (template || '')
     .replace(/{{\s*nome\s*}}/gi, lead.name || '')
@@ -169,6 +192,8 @@ async function getBroadcastProgress(broadcastId, userId) {
   if (!broadcast) return null;
 
   const audienceWhere = await buildAudienceWhere(broadcast.userId, broadcast.audienceFilter, broadcast.channel);
+  // Depois que o disparo começa, o público é a lista FIXADA (registros do disparo), não o filtro ao vivo.
+  const snapshot = Boolean(broadcast.audienceFilter?.snapshotTakenAt);
 
   const [grouped, audienceTotal, lastSent, nextPending] = await Promise.all([
     prisma.broadcastRecipient.groupBy({
@@ -176,7 +201,7 @@ async function getBroadcastProgress(broadcastId, userId) {
       where: { broadcastCampaignId: broadcastId },
       _count: { _all: true }
     }),
-    countAudienceWhere(audienceWhere, broadcastId),
+    snapshot ? prisma.broadcastRecipient.count({ where: { broadcastCampaignId: broadcastId } }) : countAudienceWhere(audienceWhere, broadcastId),
     prisma.broadcastRecipient.findFirst({
       where: { broadcastCampaignId: broadcastId, status: 'enviado' },
       orderBy: { sentAt: 'desc' },
@@ -184,11 +209,19 @@ async function getBroadcastProgress(broadcastId, userId) {
     }),
     broadcast.status === 'concluido'
       ? null
-      : prisma.lead.findFirst({
-          where: pendingLeadWhere(audienceWhere, broadcastId),
-          orderBy: { id: 'asc' },
-          select: { name: true, phone: true, email: true }
-        })
+      : snapshot
+        ? prisma.broadcastRecipient
+            .findFirst({
+              where: { broadcastCampaignId: broadcastId, status: { in: ['pendente', 'enviando'] } },
+              orderBy: { leadId: 'asc' },
+              select: { lead: { select: { name: true, phone: true, email: true } } }
+            })
+            .then((r) => r?.lead || null)
+        : prisma.lead.findFirst({
+            where: pendingLeadWhere(audienceWhere, broadcastId),
+            orderBy: { id: 'asc' },
+            select: { name: true, phone: true, email: true }
+          })
   ]);
 
   const countOf = (status) => grouped.find((g) => g.status === status)?._count._all || 0;
@@ -235,13 +268,15 @@ async function heartbeat(broadcastId, note = null) {
  * Aguarda sem deixar o heartbeat envelhecer. Isso é essencial porque os
  * disparos podem ficar 6–18 minutos em uma pausa de lote.
  */
-async function waitWithHeartbeat(broadcastId, ms, note) {
+async function waitWithHeartbeat(broadcastId, ms, note, token = null) {
   const end = Date.now() + ms;
   while (Date.now() < end) {
+    // Pausa do usuário ou nova execução assumiu: não fica dormindo até o fim da espera.
+    if (token && activeRuns.get(broadcastId) !== token) return;
     const remaining = end - Date.now();
     const chunk = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
     await delay(chunk);
-    if (Date.now() < end) await heartbeat(broadcastId, note);
+    if (Date.now() < end && (!token || activeRuns.get(broadcastId) === token)) await heartbeat(broadcastId, note);
   }
 }
 
@@ -262,14 +297,19 @@ async function refreshWhatsappConnections(userId) {
  * Após reiniciar o servidor as sessões demoram a ficar prontas. Em vez de
  * pausar o disparo na hora, aguarda (renovando o heartbeat) até `maxMs`.
  */
-async function waitForReadyConnections(broadcastId, userId, maxMs = 3 * 60 * 1000) {
+async function waitForReadyConnections(broadcastId, userId, maxMs = 3 * 60 * 1000, token = null) {
   const end = Date.now() + maxMs;
   let connections = await refreshWhatsappConnections(userId);
   while (connections.length === 0 && Date.now() < end) {
-    await waitWithHeartbeat(broadcastId, CONNECTION_RETRY_WAIT_MS, 'Aguardando o WhatsApp conectar…');
+    if (token && activeRuns.get(broadcastId) !== token) break;
+    await waitWithHeartbeat(broadcastId, CONNECTION_RETRY_WAIT_MS, 'Aguardando o WhatsApp conectar…', token);
     connections = await refreshWhatsappConnections(userId);
   }
   return connections;
+}
+
+async function markRecipient(recipientId, data) {
+  await prisma.broadcastRecipient.update({ where: { id: recipientId }, data });
 }
 
 async function markPausedForConnection(broadcastId, note) {
@@ -282,6 +322,59 @@ async function markPausedForConnection(broadcastId, note) {
       runningNote: note
     }
   });
+}
+
+/**
+ * FIXA o público do disparo no momento em que ele começa: grava um registro
+ * "pendente" para cada contato. Depois disso o disparo só envia para esses
+ * contatos — leads novos (ex.: quem respondeu e virou "novo") não entram no meio.
+ * Telefones/e-mails repetidos entram uma única vez (1 mensagem por pessoa).
+ * Campanhas recorrentes refazem a lista no início de cada rodada.
+ */
+async function ensureAudienceSnapshot(broadcast) {
+  const filter = broadcast.audienceFilter && typeof broadcast.audienceFilter === 'object' ? broadcast.audienceFilter : {};
+  const recurring = broadcast.scheduleType === 'recurring';
+  if (!recurring && filter.snapshotTakenAt) return;
+
+  if (recurring) {
+    await prisma.broadcastRecipient.deleteMany({ where: { broadcastCampaignId: broadcast.id } });
+  }
+
+  const leads = await resolveAudience(broadcast.userId, filter, broadcast.channel, {
+    select: { id: true, phone: true, email: true }
+  });
+
+  const seen = new Set();
+  const rows = [];
+  let duplicates = 0;
+  for (const lead of leads) {
+    const key = broadcast.channel === 'email' ? String(lead.email || '').trim().toLowerCase() : phoneKey(lead.phone);
+    if (!key) continue;
+    if (seen.has(key)) {
+      duplicates += 1;
+      continue;
+    }
+    seen.add(key);
+    rows.push({ broadcastCampaignId: broadcast.id, leadId: lead.id, status: 'pendente' });
+  }
+
+  for (let i = 0; i < rows.length; i += 1000) {
+    await prisma.broadcastRecipient.createMany({ data: rows.slice(i, i + 1000), skipDuplicates: true });
+  }
+
+  await prisma.broadcastCampaign.update({
+    where: { id: broadcast.id },
+    data: {
+      audienceFilter: {
+        ...filter,
+        snapshotTakenAt: new Date().toISOString(),
+        snapshotTotal: rows.length,
+        snapshotDuplicatesSkipped: duplicates
+      }
+    }
+  });
+  broadcast.audienceFilter = { ...filter, snapshotTakenAt: new Date().toISOString() };
+  console.log(`📋 Disparo "${broadcast.name}": público fixado em ${rows.length} contato(s)${duplicates ? ` (${duplicates} repetido(s) ignorado(s))` : ''}.`);
 }
 
 async function executeBroadcast(broadcastId) {
@@ -310,12 +403,20 @@ async function executeBroadcast(broadcastId) {
     return;
   }
 
+  // Esta execução passa a ser a ÚNICA dona do disparo (qualquer anterior para sozinha).
+  const runToken = Symbol(broadcastId);
+  activeRuns.set(broadcastId, runToken);
+  const ownsRun = () => activeRuns.get(broadcastId) === runToken;
+
   const broadcast = await prisma.broadcastCampaign.findUnique({
     where: { id: broadcastId },
     include: { variants: { orderBy: { position: 'asc' } } }
   });
 
-  if (!broadcast) return;
+  if (!broadcast) {
+    if (ownsRun()) activeRuns.delete(broadcastId);
+    return;
+  }
 
   const attachments = Array.isArray(broadcast.attachments) ? broadcast.attachments : [];
   const firstAttachment = attachments[0] || null;
@@ -340,6 +441,7 @@ async function executeBroadcast(broadcastId) {
       where: { id: broadcast.id },
       data: { status: 'falhou', isRunning: false, runningNote: 'O arquivo anexado não foi encontrado no servidor.' }
     });
+    if (ownsRun()) activeRuns.delete(broadcastId);
     return;
   }
 
@@ -351,9 +453,27 @@ async function executeBroadcast(broadcastId) {
   let sentCount = 0;
   let failedCount = 0;
   let interrupted = false;
+  let currentRec = null;
 
   try {
-    const leads = await resolveAudience(broadcast.userId, broadcast.audienceFilter, broadcast.channel, { select: AUDIENCE_SELECT });
+    // Sobras de uma execução que caiu no meio de um envio: não sabemos se aquela
+    // mensagem saiu, então NÃO reenviamos (evita mensagem em dobro).
+    await prisma.broadcastRecipient.updateMany({
+      where: { broadcastCampaignId: broadcast.id, status: 'enviando' },
+      data: {
+        status: 'falhou',
+        errorMessage: 'Envio interrompido por queda/reinício do sistema. Não foi reenviado automaticamente para evitar mensagem duplicada.'
+      }
+    });
+
+    await ensureAudienceSnapshot(broadcast);
+
+    const queue = await prisma.broadcastRecipient.findMany({
+      where: { broadcastCampaignId: broadcast.id, status: 'pendente' },
+      orderBy: { leadId: 'asc' },
+      select: { id: true, leadId: true, lead: { select: { ...AUDIENCE_SELECT, optOut: true } } }
+    });
+    const leads = queue.map((q) => q.lead);
 
     if (broadcast.channel === 'whatsapp' && broadcast.variants.length === 0) {
       await prisma.broadcastCampaign.update({
@@ -364,7 +484,7 @@ async function executeBroadcast(broadcastId) {
     }
 
     let whatsappConnections = broadcast.channel === 'whatsapp'
-      ? await waitForReadyConnections(broadcast.id, broadcast.userId)
+      ? await waitForReadyConnections(broadcast.id, broadcast.userId, undefined, runToken)
       : [];
 
     if (broadcast.channel === 'whatsapp' && whatsappConnections.length === 0) {
@@ -380,23 +500,17 @@ async function executeBroadcast(broadcastId) {
     let sentSinceBatchPause = broadcast.sentSinceBatchPause || 0;
     let consecutiveConnectionErrors = 0;
 
-    // Retomada sem repetir: carrega UMA vez quem já foi processado (enviado ou
-    // falha) e pula esses contatos em memória. Antes eram 2 consultas por lead
-    // do público inteiro a cada retomada. A ordem do público é fixa (por id),
-    // então o disparo continua do próximo contato ainda não processado.
-    // Em campanhas recorrentes cada rodada recomeça do início, como antes.
-    const doneLeadIds = new Set();
-    if (broadcast.scheduleType !== 'recurring') {
-      const done = await prisma.broadcastRecipient.findMany({
-        where: { broadcastCampaignId: broadcast.id, status: { in: ['enviado', 'falhou'] } },
-        select: { leadId: true }
-      });
-      done.forEach((r) => doneLeadIds.add(r.leadId));
-    }
-
+    // Retomada sem repetir: a fila acima contém só quem ainda está "pendente"
+    // (a lista foi fixada no início do disparo).
     for (let leadIndex = 0; leadIndex < leads.length; leadIndex += 1) {
       const lead = leads[leadIndex];
-      if (doneLeadIds.has(lead.id)) continue;
+      const rec = queue[leadIndex];
+
+      // Outra execução assumiu o disparo (ou o usuário pausou): esta para aqui.
+      if (!ownsRun()) {
+        interrupted = true;
+        break;
+      }
 
       const current = await prisma.broadcastCampaign.findUnique({
         where: { id: broadcast.id },
@@ -419,6 +533,21 @@ async function executeBroadcast(broadcastId) {
         break;
       }
 
+      if (!lead || lead.optOut) {
+        await markRecipient(rec.id, { status: 'falhou', errorMessage: 'Contato descadastrado (não receber mensagens).' });
+        failedCount += 1;
+        continue;
+      }
+
+      // "Reserva" atômica do contato: só quem conseguir trocar pendente -> enviando envia.
+      // Mesmo que existam duas execuções por engano, o segundo envio é bloqueado aqui.
+      const claim = await prisma.broadcastRecipient.updateMany({
+        where: { id: rec.id, status: 'pendente' },
+        data: { status: 'enviando' }
+      });
+      if (claim.count === 0) continue;
+      currentRec = rec;
+
       // Em caso de conexão perdida, tentamos algumas vezes o MESMO lead antes
       // de pausá-lo. Assim o próximo ciclo não avança silenciosamente pelo
       // público sem enviar aquele contato.
@@ -426,6 +555,10 @@ async function executeBroadcast(broadcastId) {
       let connectionAttemptsForLead = 0;
 
       while (!sentThisLead) {
+        if (!ownsRun()) {
+          interrupted = true;
+          break;
+        }
         try {
           if (broadcast.channel === 'whatsapp') {
             whatsappConnections = await refreshWhatsappConnections(broadcast.userId);
@@ -478,21 +611,8 @@ async function executeBroadcast(broadcastId) {
               }
             });
 
-            await prisma.broadcastRecipient.upsert({
-              where: {
-                broadcastCampaignId_leadId: {
-                  broadcastCampaignId: broadcast.id,
-                  leadId: lead.id
-                }
-              },
-              update: { status: 'enviado', sentAt: new Date(), errorMessage: null },
-              create: {
-                broadcastCampaignId: broadcast.id,
-                leadId: lead.id,
-                status: 'enviado',
-                sentAt: new Date()
-              }
-            });
+            await markRecipient(rec.id, { status: 'enviado', sentAt: new Date(), errorMessage: null });
+            currentRec = null;
 
             sentCount += 1;
             recordMessageSent(broadcast.userId);
@@ -507,7 +627,7 @@ async function executeBroadcast(broadcastId) {
               const note = `Pausa de ${minutes} min — retoma às ${resumeAt.toLocaleTimeString('pt-BR')}`;
               console.log(`⏸️ Disparo "${broadcast.name}": ${note}`);
               await heartbeat(broadcast.id, note);
-              await waitWithHeartbeat(broadcast.id, ms, note);
+              await waitWithHeartbeat(broadcast.id, ms, note, runToken);
               sentSinceBatchPause = 0;
               await prisma.broadcastCampaign.update({
                 where: { id: broadcast.id },
@@ -520,7 +640,7 @@ async function executeBroadcast(broadcastId) {
               );
               const note = `Aguardando ${seconds}s antes do próximo envio…`;
               await heartbeat(broadcast.id, note);
-              await waitWithHeartbeat(broadcast.id, seconds * 1000, note);
+              await waitWithHeartbeat(broadcast.id, seconds * 1000, note, runToken);
             }
           } else if (broadcast.channel === 'email') {
             if (!lead.email) throw new Error('Lead sem e-mail cadastrado');
@@ -537,21 +657,8 @@ async function executeBroadcast(broadcastId) {
               broadcastCampaignId: broadcast.id
             });
 
-            await prisma.broadcastRecipient.upsert({
-              where: {
-                broadcastCampaignId_leadId: {
-                  broadcastCampaignId: broadcast.id,
-                  leadId: lead.id
-                }
-              },
-              update: { status: 'enviado', sentAt: new Date(), errorMessage: null },
-              create: {
-                broadcastCampaignId: broadcast.id,
-                leadId: lead.id,
-                status: 'enviado',
-                sentAt: new Date()
-              }
-            });
+            await markRecipient(rec.id, { status: 'enviado', sentAt: new Date(), errorMessage: null });
+            currentRec = null;
             sentCount += 1;
             recordMessageSent(broadcast.userId);
             sentThisLead = true;
@@ -576,21 +683,8 @@ async function executeBroadcast(broadcastId) {
               body: renderTemplate(broadcast.message, lead)
             });
 
-            await prisma.broadcastRecipient.upsert({
-              where: {
-                broadcastCampaignId_leadId: {
-                  broadcastCampaignId: broadcast.id,
-                  leadId: lead.id
-                }
-              },
-              update: { status: 'enviado', sentAt: new Date(), errorMessage: null },
-              create: {
-                broadcastCampaignId: broadcast.id,
-                leadId: lead.id,
-                status: 'enviado',
-                sentAt: new Date()
-              }
-            });
+            await markRecipient(rec.id, { status: 'enviado', sentAt: new Date(), errorMessage: null });
+            currentRec = null;
             sentCount += 1;
             recordMessageSent(broadcast.userId);
             sentThisLead = true;
@@ -610,7 +704,7 @@ async function executeBroadcast(broadcastId) {
             // Se a conexão caiu, não marcamos o lead como falha e não avançamos
             // o cursor. Tentamos o mesmo contato novamente após alguns segundos.
             if (connectionAttemptsForLead < MAX_CONSECUTIVE_CONNECTION_ERRORS) {
-              await waitWithHeartbeat(broadcast.id, CONNECTION_RETRY_WAIT_MS, 'Aguardando reconexão do WhatsApp…');
+              await waitWithHeartbeat(broadcast.id, CONNECTION_RETRY_WAIT_MS, 'Aguardando reconexão do WhatsApp…', runToken);
               continue;
             }
 
@@ -630,21 +724,8 @@ async function executeBroadcast(broadcastId) {
             break;
           }
 
-          await prisma.broadcastRecipient.upsert({
-            where: {
-              broadcastCampaignId_leadId: {
-                broadcastCampaignId: broadcast.id,
-                leadId: lead.id
-              }
-            },
-            update: { status: 'falhou', errorMessage: error.message },
-            create: {
-              broadcastCampaignId: broadcast.id,
-              leadId: lead.id,
-              status: 'falhou',
-              errorMessage: error.message
-            }
-          });
+          await markRecipient(rec.id, { status: 'falhou', errorMessage: error.message });
+          currentRec = null;
           failedCount += 1;
           sentThisLead = true;
           await heartbeat(broadcast.id, `Falha em ${lead.name || lead.phone}: ${error.message}`);
@@ -661,6 +742,22 @@ async function executeBroadcast(broadcastId) {
       data: { status: 'pausado', runningNote: `Interrompido: ${error.message}` }
     }).catch(() => null);
   } finally {
+    // Contato reservado mas não enviado (pausa, queda de conexão, troca de dono): volta para "pendente".
+    if (currentRec) {
+      await prisma.broadcastRecipient
+        .updateMany({ where: { id: currentRec.id, status: 'enviando' }, data: { status: 'pendente' } })
+        .catch(() => null);
+      currentRec = null;
+    }
+
+    // Esta execução foi substituída (pausa/retomada ou nova execução): quem manda agora
+    // é a outra, então não mexemos no status do disparo.
+    if (!ownsRun()) {
+      console.log(`⏹️ Disparo "${broadcast.name}": execução encerrada (pausa ou substituída). ${sentCount} enviados nesta rodada.`);
+      return;
+    }
+    activeRuns.delete(broadcast.id);
+
     const current = await prisma.broadcastCampaign.findUnique({
       where: { id: broadcast.id },
       select: { status: true }
@@ -703,5 +800,7 @@ module.exports = {
   countAudience,
   getBroadcastProgress,
   isConnectionError,
+  isRunActiveInProcess,
+  stopBroadcastRun,
   HEARTBEAT_STALE_MS
 };

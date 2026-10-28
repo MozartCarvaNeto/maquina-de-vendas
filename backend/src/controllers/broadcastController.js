@@ -9,7 +9,8 @@ const {
   countAudience,
   buildAudienceWhere,
   pendingLeadWhere,
-  getBroadcastProgress
+  getBroadcastProgress,
+  stopBroadcastRun
 } = require('../services/broadcastService');
 
 const ATTACHMENTS_ROOT = path.join(__dirname, '../../uploads/broadcast-attachments');
@@ -243,6 +244,9 @@ exports.pauseResume = async (req, res, next) => {
     if (!broadcast) return res.status(404).json({ error: 'Disparo não encontrado' });
 
     const isPaused = broadcast.status === 'pausado';
+    // Ao pausar, derruba na hora a execução em curso (ela não fica "dormindo" e
+    // reaparecendo quando o usuário retomar — era isso que duplicava as mensagens).
+    if (!isPaused) stopBroadcastRun(broadcast.id);
     const newStatus = isPaused ? 'agendado' : 'pausado';
 
     const updated = await prisma.broadcastCampaign.update({
@@ -299,11 +303,41 @@ exports.getRecipients = async (req, res, next) => {
       select: { id: true, userId: true, channel: true, audienceFilter: true }
     });
     if (!broadcast) return res.status(404).json({ error: 'Disparo não encontrado' });
+    const snapshot = Boolean(broadcast.audienceFilter?.snapshotTakenAt);
 
     const status = ['enviado', 'falhou', 'pendente'].includes(req.query.status) ? req.query.status : 'enviado';
     const pageSize = clampInt(req.query.pageSize, 50, 10, 200);
     const page = clampInt(req.query.page, 1, 1, 100000);
     const skip = (page - 1) * pageSize;
+
+    if (status === 'pendente' && snapshot) {
+      const where = { broadcastCampaignId: broadcast.id, status: { in: ['pendente', 'enviando'] } };
+      const [total, rows] = await Promise.all([
+        prisma.broadcastRecipient.count({ where }),
+        prisma.broadcastRecipient.findMany({
+          where,
+          orderBy: { leadId: 'asc' },
+          skip,
+          take: pageSize,
+          select: { leadId: true, lead: { select: { name: true, phone: true, email: true } } }
+        })
+      ]);
+      return res.json({
+        status,
+        page,
+        pageSize,
+        total,
+        recipients: rows.map((r) => ({
+          leadId: r.leadId,
+          name: r.lead?.name || null,
+          phone: r.lead?.phone || null,
+          email: r.lead?.email || null,
+          status: 'pendente',
+          sentAt: null,
+          errorMessage: null
+        }))
+      });
+    }
 
     if (status === 'pendente') {
       const audienceWhere = await buildAudienceWhere(broadcast.userId, broadcast.audienceFilter, broadcast.channel);
