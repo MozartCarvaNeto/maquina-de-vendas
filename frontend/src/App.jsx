@@ -25,10 +25,12 @@ import Equipe from './pages/Equipe';
 import Contatos from './pages/Contatos';
 import Configuracoes from './pages/Configuracoes';
 import CallPopup from './components/calls/CallPopup';
+import PhoneProvider from './components/phone/PhoneProvider';
+import TelefoneWeb from './pages/TelefoneWeb';
 
 export default function App() {
   return (
-    <>
+    <PhoneProvider>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/registrar" element={<Register />} />
@@ -47,6 +49,7 @@ export default function App() {
         >
           <Route index element={<Dashboard />} />
           <Route path="chat" element={<FeatureRoute feature="chat"><Chat /></FeatureRoute>} />
+          <Route path="telefone" element={<FeatureRoute feature="chat"><TelefoneWeb /></FeatureRoute>} />
           <Route path="crm" element={<FeatureRoute feature="crm"><CRM /></FeatureRoute>} />
           <Route path="campanhas" element={<FeatureRoute feature="contatos"><Campanhas /></FeatureRoute>} />
           <Route path="buscar-empresas" element={<FeatureRoute feature="contatos"><BuscarEmpresas /></FeatureRoute>} />
@@ -74,6 +77,6 @@ export default function App() {
       </Routes>
 
       <CallPopup />
-    </>
+    </PhoneProvider>
   );
 }

@@ -78,6 +78,8 @@ module.exports = {
   // de Discagem na primeira vez que a tela é aberta, se ela estiver vazia.
   twilioCallerNumber: process.env.TWILIO_CALLER_NUMBER || null,
   // Remetente padrão de SMS da plataforma (número da Twilio com SMS, ID alfanumérico ou Messaging Service MG…). Só o administrador usa.
+  // Servidores STUN/TURN do telefone do navegador (chamadas de WhatsApp). JSON: [{"urls":"stun:..."},{"urls":"turn:...","username":"..","credential":".."}]
+  webrtcIceServers: process.env.WEBRTC_ICE_SERVERS,
   twilioSmsFrom: process.env.TWILIO_SMS_FROM || null,
   // Remetente do e-mail da Twilio (precisa estar verificado/autenticado na Twilio). Só o administrador usa.
   twilioEmailFrom: process.env.TWILIO_EMAIL_FROM || null

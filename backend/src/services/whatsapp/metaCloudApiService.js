@@ -259,6 +259,7 @@ function verifyWebhookSignature(rawBody, signatureHeader, appSecret) {
 }
 
 module.exports = {
+  graphRequest,
   normalizePhoneDigits,
   validateConnection,
   sendMessage,

@@ -800,11 +800,12 @@ class NativeWhatsappService {
   }
 
   /** Texto mostrado no chat quando o anexo chegou mas não pôde ser salvo (diz QUAL tipo de anexo era). */
-  mediaFailureLabel(message) {
+  mediaFailureLabel(message, reason) {
     const type = String(message.type || '').toLowerCase();
     const names = { ptt: 'Áudio', audio: 'Áudio', image: 'Foto', video: 'Vídeo', document: 'Documento', sticker: 'Figurinha' };
     const name = names[type] || 'Anexo';
-    return `[${name} recebido, mas não foi possível baixar — peça para o contato reenviar ou veja no WhatsApp do celular]`;
+    const why = reason ? ` Motivo: ${String(reason).slice(0, 140)}.` : '';
+    return `[${name} recebido, mas não foi possível baixar.${why} Use "Tentar baixar de novo" ou veja no WhatsApp do celular]`;
   }
 
   /**
@@ -831,6 +832,16 @@ class NativeWhatsappService {
       const client = this.clients.get(connectionId);
       const id = message.id?._serialized;
       if (client && id && i < attempts.length - 1) {
+        try {
+          // Abrir/atualizar a conversa faz o WhatsApp Web terminar de preparar o anexo (áudios são o caso típico).
+          if (i >= 1) {
+            const chat = await withTimeout(current.getChat(), 10000, 'abrir a conversa demorou demais');
+            await withTimeout(chat.fetchMessages({ limit: 15 }), 15000, 'atualizar a conversa demorou demais').catch(() => null);
+          }
+        } catch (_) {
+          /* tenta mesmo assim */
+        }
+        console.warn(`⚠️ [${connectionId}] Anexo ${message.type || ''} ainda não baixou (tentativa ${i + 1}/${attempts.length}): ${lastReason}`);
         try {
           const fresh = await withTimeout(client.getMessageById(id), 10000, 'busca da mensagem demorou demais');
           if (fresh) current = fresh;
@@ -865,7 +876,7 @@ class NativeWhatsappService {
           mediaFailReason = `não consegui gravar o arquivo no disco: ${err.message}`;
         }
       } else {
-        mediaFailReason = result.reason;
+        mediaFailReason = result.reason || 'o WhatsApp não liberou o arquivo';
       }
       if (mediaFailReason) {
         console.warn(`⚠️ [${connectionId}] Anexo (${message.type || 'mídia'}) não baixado: ${mediaFailReason}`);
@@ -901,7 +912,7 @@ class NativeWhatsappService {
         leadId: lead.id,
         direction: 'entrada',
         channel: 'whatsapp',
-        body: text || (message.hasMedia && !mediaFields.mediaPath ? this.mediaFailureLabel(message) : ''),
+        body: text || (message.hasMedia && !mediaFields.mediaPath ? this.mediaFailureLabel(message, mediaFailReason) : ''),
         ...mediaFields,
         // Anexo que não baixou: guarda o id da mensagem no WhatsApp para o botão "Tentar baixar de novo".
         ...(message.hasMedia && !mediaFields.mediaPath && message.id?._serialized

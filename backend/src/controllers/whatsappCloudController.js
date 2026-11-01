@@ -80,6 +80,14 @@ exports.handleWebhook = async (req, res) => {
           }
         }
 
+        // Chamadas de voz (campo "calls"), status de chamada e resposta ao pedido de permissão.
+        if (change.field === 'calls' || value.calls || (value.statuses || []).some((s) => s.type === 'call') ||
+            (value.messages || []).some((m) => m.interactive?.call_permission_reply)) {
+          await require('../services/whatsapp/metaCallingService')
+            .handleCallsWebhook(connection, value)
+            .catch((err) => console.error('Erro ao processar chamada do webhook:', err.message));
+        }
+
         for (const message of value.messages || []) {
           const MEDIA_TYPES = ['image', 'video', 'audio', 'document', 'sticker'];
           const isMedia = MEDIA_TYPES.includes(message.type);

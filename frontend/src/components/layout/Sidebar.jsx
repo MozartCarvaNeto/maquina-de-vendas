@@ -10,6 +10,7 @@ import './Sidebar.css';
 const MENU_ITEMS = [
   { path: '/', label: '📊 Dashboard', end: true, adminOnly: false },
   { path: '/chat', label: '💬 Chat', feature: ['chat'], adminOnly: false },
+  { path: '/telefone', label: '☎️ Telefone WhatsApp', feature: ['chat'], adminOnly: false },
   { path: '/crm', label: '📋 CRM', feature: ['crm'], adminOnly: false },
   { path: '/campanhas', label: '🎯 Campanhas', feature: ['contatos'], adminOnly: false },
   { path: '/buscar-empresas', label: '🔍 Buscar Empresas', feature: ['contatos'], adminOnly: false },

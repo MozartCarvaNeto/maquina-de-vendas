@@ -3,6 +3,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import api from '../services/api';
 import { useSocket } from '../hooks/useSocket';
 import ChatMedia from '../components/ChatMedia';
+import { usePhone } from '../components/phone/PhoneProvider';
+import { recordingToOggOpus, canEncodeOpus } from '../utils/oggOpusEncoder';
 import { CHAT_ATTACHMENT_ACCEPT, normalizeChatFile, formatBytes } from '../utils/attachments';
 import './Chat.css';
 
@@ -36,8 +38,11 @@ export default function Chat() {
   const recCancelledRef = useRef(false);
   const [sending, setSending] = useState(false);
   const [ffmpegOk, setFfmpegOk] = useState(true);
+  const [browserEncodes, setBrowserEncodes] = useState(true);
+  const [preparingAudio, setPreparingAudio] = useState(false);
   const [retryingId, setRetryingId] = useState(null);
   const [calling, setCalling] = useState(false);
+  const phone = usePhone();
   const [onlyAwaiting, setOnlyAwaiting] = useState(false);
 
   const [showNewChatModal, setShowNewChatModal] = useState(false);
@@ -60,6 +65,7 @@ export default function Chat() {
   useEffect(() => {
     loadConversations();
     loadConnections();
+    canEncodeOpus().then(setBrowserEncodes).catch(() => setBrowserEncodes(false));
     api.get('/whatsapp/audio-support').then(({ data }) => setFfmpegOk(data.ffmpeg !== false)).catch(() => null);
   }, [loadConversations, loadConnections]);
 
@@ -179,7 +185,7 @@ export default function Chat() {
       recChunksRef.current = [];
       recCancelledRef.current = false;
       recorder.ondataavailable = (ev) => { if (ev.data?.size) recChunksRef.current.push(ev.data); };
-      recorder.onstop = () => {
+      recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
         clearInterval(recTimerRef.current);
         setRecording(false);
@@ -187,7 +193,12 @@ export default function Chat() {
         const type = (recorder.mimeType || mimeType || 'audio/webm').split(';')[0];
         const ext = type.includes('ogg') ? 'ogg' : type.includes('mp4') ? 'm4a' : 'webm';
         const blob = new Blob(recChunksRef.current, { type: recorder.mimeType || type });
-        setPendingFile(new File([blob], `audio-${Date.now()}.${ext}`, { type }));
+        // Converte AQUI, no navegador, para OGG/Opus (formato da mensagem de voz do WhatsApp):
+        // assim o envio não depende do ffmpeg do servidor.
+        setPreparingAudio(true);
+        const ogg = type.includes('ogg') ? null : await recordingToOggOpus(blob, `audio-${Date.now()}.ogg`);
+        setPreparingAudio(false);
+        setPendingFile(ogg || new File([blob], `audio-${Date.now()}.${ext}`, { type }));
         setPendingVoice(true);
       };
       recorderRef.current = recorder;
@@ -350,6 +361,17 @@ export default function Chat() {
               </button>
               <strong>{activeLead.name}</strong>
               <span>{activeLead.phone || 'Sem telefone cadastrado'}</span>
+              {connections.find((c) => c.id === selectedInstance && c.provider === 'cloud_api') && (
+                <button
+                  type="button"
+                  className="btn-outline btn-small chat-call-btn"
+                  title="Chamada de voz pelo WhatsApp (API Oficial da Meta)"
+                  disabled={!activeLead.phone || phone.busy}
+                  onClick={() => phone.startCall({ lead: activeLead, connectionId: selectedInstance })}
+                >
+                  📞 WhatsApp
+                </button>
+              )}
               <button
                 type="button"
                 className="btn-outline btn-small chat-call-btn"
@@ -367,10 +389,10 @@ export default function Chat() {
                 Verifique o cadastro em Contatos.
               </div>
             )}
-            {!ffmpegOk && (
+            {!ffmpegOk && !browserEncodes && (
               <div className="chat-warning">
-                ⚠️ O servidor não tem o programa <strong>ffmpeg</strong>: o áudio gravado aqui não consegue ser enviado
-                ao WhatsApp. Peça a instalação (<code>sudo apt-get install -y ffmpeg</code> ou reconstruir o Docker) — veja o guia.
+                ⚠️ Este navegador não consegue preparar o áudio e o servidor não tem o programa <strong>ffmpeg</strong>.
+                Use o Chrome atualizado ou peça a instalação do ffmpeg (<code>sudo apt-get install -y ffmpeg</code>) — veja o guia.
               </div>
             )}
             {connections.length === 0 && (
@@ -419,6 +441,7 @@ export default function Chat() {
                 <button type="button" className="btn-link-small" onClick={() => { setPendingFile(null); setPendingVoice(false); }}>remover</button>
               </div>
             )}
+            {preparingAudio && <div className="chat-recording-bar">⏳ Preparando o áudio…</div>}
             {recording && (
               <div className="chat-recording-bar">
                 <span className="chat-rec-dot" /> Gravando… {Math.floor(recSeconds / 60)}:{String(recSeconds % 60).padStart(2, '0')}
@@ -455,7 +478,7 @@ export default function Chat() {
                 className="chat-attach-btn"
                 title="Gravar mensagem de voz"
                 aria-label="Gravar áudio"
-                disabled={!activeLead.phone || recording || !!pendingFile}
+                disabled={!activeLead.phone || recording || preparingAudio || !!pendingFile}
                 onClick={startRecording}
               >
                 🎤
