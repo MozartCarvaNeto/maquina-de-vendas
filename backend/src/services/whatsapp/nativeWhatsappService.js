@@ -8,6 +8,10 @@ const { execFile } = require('child_process');
 const prisma = require('../../config/db');
 const env = require('../../config/env');
 const chatMediaService = require('./chatMediaService');
+const audioConvertService = require('./audioConvertService');
+
+// Marca (em mediaMime) uma mensagem cujo anexo não baixou; mediaName guarda o id da mensagem no WhatsApp.
+const PENDING_MEDIA_MIME = 'pending/whatsapp';
 
 // Quando o WhatsApp está publicando uma versão nova do Web, a página recarrega
 // sozinha e a inicialização falha por alguns minutos. Mais tentativas, com
@@ -613,6 +617,11 @@ class NativeWhatsappService {
       });
     });
 
+    client.on('call', async (call) => {
+      if (!this.isCurrent(connectionId, client, generation)) return;
+      await this.handleIncomingCall(userId, connectionId, call);
+    });
+
     client.on('message', async (message) => {
       if (!this.isCurrent(connectionId, client, generation)) return;
       await this.handleIncomingMessage(userId, connectionId, message).catch((err) =>
@@ -685,6 +694,111 @@ class NativeWhatsappService {
     return null;
   }
 
+  /**
+   * Grava no disco o anexo baixado. Áudio do WhatsApp (OGG/Opus) é convertido para M4A quando há ffmpeg,
+   * para tocar também no Safari/iPhone. Devolve { fields } ou { reason }.
+   */
+  async saveIncomingMedia(userId, message, media) {
+    const buffer = Buffer.from(media.data, 'base64');
+    if (buffer.length > chatMediaService.MAX_RECEIVE_BYTES) {
+      return { reason: `arquivo muito grande (${buffer.length} bytes)` };
+    }
+    let fields = chatMediaService.saveBuffer(
+      userId,
+      buffer,
+      media.mimetype,
+      media.filename || (message.type === 'sticker' ? 'figurinha.webp' : null)
+    );
+
+    if (fields.mediaType === 'audio' && !/^audio\/(mp4|mpeg|aac)/.test(fields.mediaMime)) {
+      try {
+        const original = chatMediaService.resolvePath(fields.mediaPath);
+        const converted = await audioConvertService.convertToM4a(original);
+        if (converted) {
+          const relative = `${fields.mediaPath}.m4a`;
+          fs.renameSync(converted, chatMediaService.resolvePath(relative));
+          fs.rmSync(original, { force: true });
+          fields = {
+            ...fields,
+            mediaPath: relative,
+            mediaMime: 'audio/mp4',
+            mediaName: `${String(fields.mediaName || 'audio').replace(/\.[a-z0-9]{1,5}$/i, '')}.m4a`,
+            mediaSize: fs.statSync(chatMediaService.resolvePath(relative)).size
+          };
+        }
+      } catch (err) {
+        console.warn(`⚠️ Conversão do áudio recebido falhou (${err.message}); mantendo o original.`);
+      }
+    }
+    return { fields };
+  }
+
+  /**
+   * Botão "Tentar baixar de novo": busca a mensagem de novo no WhatsApp e baixa o anexo.
+   * Procura entre as conexões nativas da conta que estão ativas.
+   */
+  async retryMediaDownload(userId, waMessageId) {
+    const connections = await prisma.whatsappConnection.findMany({ where: { userId, status: 'conectado' } });
+    let lastReason = 'nenhuma conexão WhatsApp ativa encontrada';
+    for (const connection of connections) {
+      const client = this.clients.get(connection.id);
+      if (!client || !this.readyFlags.get(connection.id)) continue;
+      try {
+        const fresh = await withTimeout(client.getMessageById(waMessageId), 15000, 'busca da mensagem demorou demais');
+        if (!fresh || !fresh.hasMedia) {
+          lastReason = 'o WhatsApp não tem mais esta mensagem com anexo (muito antiga?)';
+          continue;
+        }
+        const result = await this.downloadIncomingMedia(connection.id, fresh);
+        if (!result.media?.data) {
+          lastReason = result.reason || 'o WhatsApp não liberou o arquivo';
+          continue;
+        }
+        const saved = await this.saveIncomingMedia(userId, fresh, result.media);
+        if (saved.fields) return { fields: saved.fields };
+        lastReason = saved.reason;
+      } catch (err) {
+        lastReason = err.message;
+      }
+    }
+    return { reason: lastReason };
+  }
+
+  /**
+   * Chamada de voz/vídeo recebida. O WhatsApp Web (QR Code) NÃO consegue atender — isso é uma limitação do
+   * próprio WhatsApp. O sistema registra a chamada na conversa para você ligar de volta pelo celular/telefone.
+   */
+  async handleIncomingCall(userId, connectionId, call) {
+    try {
+      if (call.isGroup) return;
+      const from = String(call.from || '');
+      let phone = from.endsWith('@c.us') ? from.replace('@c.us', '') : null;
+      if (!phone && from.endsWith('@lid')) {
+        const client = this.clients.get(connectionId);
+        const [info] = (client && (await client.getContactLidAndPhone([from]).catch(() => null))) || [];
+        if (info?.pn) phone = String(info.pn).replace(/@.*$/, '');
+      }
+      if (!phone) return;
+
+      const lead = await prisma.lead.findFirst({ where: { userId, phone: { contains: phone } } });
+      if (!lead) return;
+
+      const kind = call.isVideo ? 'vídeo' : 'voz';
+      const savedMessage = await prisma.message.create({
+        data: {
+          leadId: lead.id,
+          direction: 'entrada',
+          channel: 'whatsapp',
+          body: `📞 Chamada de ${kind} recebida pelo WhatsApp (não atendida). Ligue de volta pelo botão 📞 Ligar ou pelo celular.`
+        }
+      });
+      const io = global.socketIoInstance;
+      if (io) io.to(`user:${userId}`).emit('whatsapp:message', { leadId: lead.id, message: savedMessage });
+    } catch (err) {
+      console.warn(`⚠️ [${connectionId}] Não consegui registrar a chamada recebida: ${err.message}`);
+    }
+  }
+
   /** Texto mostrado no chat quando o anexo chegou mas não pôde ser salvo (diz QUAL tipo de anexo era). */
   mediaFailureLabel(message) {
     const type = String(message.type || '').toLowerCase();
@@ -699,7 +813,7 @@ class NativeWhatsappService {
    * tentativa devolve vazio. Esperamos um pouco, buscamos a mensagem de novo e tentamos outra vez.
    */
   async downloadIncomingMedia(connectionId, message) {
-    const attempts = [0, 2500, 6000];
+    const attempts = [0, 2500, 6000, 15000];
     let current = message;
     let lastReason = 'o WhatsApp não liberou o arquivo';
 
@@ -744,17 +858,9 @@ class NativeWhatsappService {
       const result = await this.downloadIncomingMedia(connectionId, message);
       if (result.media?.data) {
         try {
-          const buffer = Buffer.from(result.media.data, 'base64');
-          if (buffer.length <= chatMediaService.MAX_RECEIVE_BYTES) {
-            mediaFields = chatMediaService.saveBuffer(
-              userId,
-              buffer,
-              result.media.mimetype,
-              result.media.filename || (message.type === 'sticker' ? 'figurinha.webp' : null)
-            );
-          } else {
-            mediaFailReason = `arquivo muito grande (${buffer.length} bytes)`;
-          }
+          const saved = await this.saveIncomingMedia(userId, message, result.media);
+          if (saved.fields) mediaFields = saved.fields;
+          else mediaFailReason = saved.reason;
         } catch (err) {
           mediaFailReason = `não consegui gravar o arquivo no disco: ${err.message}`;
         }
@@ -796,7 +902,11 @@ class NativeWhatsappService {
         direction: 'entrada',
         channel: 'whatsapp',
         body: text || (message.hasMedia && !mediaFields.mediaPath ? this.mediaFailureLabel(message) : ''),
-        ...mediaFields
+        ...mediaFields,
+        // Anexo que não baixou: guarda o id da mensagem no WhatsApp para o botão "Tentar baixar de novo".
+        ...(message.hasMedia && !mediaFields.mediaPath && message.id?._serialized
+          ? { mediaMime: PENDING_MEDIA_MIME, mediaName: message.id._serialized }
+          : {})
       }
     });
 
@@ -925,9 +1035,12 @@ class NativeWhatsappService {
 
     const sendTo = async (chatId) => {
       if (mediaFilePath) {
-        const media = options.mediaMime
+        // Mensagem de voz precisa do tipo COMPLETO "audio/ogg; codecs=opus"; só "audio/ogg" faz o
+        // celular do contato mostrar o áudio como indisponível/sem tocar.
+        const sendMime = options.asVoice ? 'audio/ogg; codecs=opus' : options.mediaMime;
+        const media = sendMime
           ? new MessageMedia(
-              options.mediaMime,
+              sendMime,
               fs.readFileSync(mediaFilePath).toString('base64'),
               options.mediaName || path.basename(mediaFilePath)
             )

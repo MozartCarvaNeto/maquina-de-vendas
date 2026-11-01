@@ -35,6 +35,9 @@ export default function Chat() {
   const recTimerRef = useRef(null);
   const recCancelledRef = useRef(false);
   const [sending, setSending] = useState(false);
+  const [ffmpegOk, setFfmpegOk] = useState(true);
+  const [retryingId, setRetryingId] = useState(null);
+  const [calling, setCalling] = useState(false);
   const [onlyAwaiting, setOnlyAwaiting] = useState(false);
 
   const [showNewChatModal, setShowNewChatModal] = useState(false);
@@ -57,7 +60,35 @@ export default function Chat() {
   useEffect(() => {
     loadConversations();
     loadConnections();
+    api.get('/whatsapp/audio-support').then(({ data }) => setFfmpegOk(data.ffmpeg !== false)).catch(() => null);
   }, [loadConversations, loadConnections]);
+
+  // Anexo que tinha falhado ao baixar: tenta de novo.
+  async function retryMedia(messageId) {
+    setRetryingId(messageId);
+    try {
+      const { data } = await api.post(`/whatsapp/messages/${messageId}/retry-media`, {}, { timeout: 120000 });
+      setMessages((prev) => prev.map((m) => (m.id === messageId ? data.message : m)));
+    } catch (error) {
+      alert(error.response?.data?.error || 'Não foi possível baixar o anexo agora.');
+    } finally {
+      setRetryingId(null);
+    }
+  }
+
+  // Ligação comum (telefone) pelo sistema: a Twilio liga para o seu telefone e conecta ao cliente.
+  async function callLead() {
+    if (!activeLead?.phone || calling) return;
+    if (!window.confirm(`Ligar para ${activeLead.name || activeLead.phone} por telefone? (não é chamada de WhatsApp)`)) return;
+    setCalling(true);
+    try {
+      await api.post('/calls/click-to-call', { leadId: activeLead.id });
+    } catch (error) {
+      alert(error.response?.data?.error || 'Não foi possível iniciar a ligação.');
+    } finally {
+      setCalling(false);
+    }
+  }
 
   // Já deixa o número de WhatsApp escolhido: o mesmo que a IA usou com o contato, ou o único conectado.
   useEffect(() => {
@@ -319,12 +350,27 @@ export default function Chat() {
               </button>
               <strong>{activeLead.name}</strong>
               <span>{activeLead.phone || 'Sem telefone cadastrado'}</span>
+              <button
+                type="button"
+                className="btn-outline btn-small chat-call-btn"
+                title="Ligar por telefone (ligação comum, não é chamada de WhatsApp)"
+                disabled={!activeLead.phone || calling}
+                onClick={callLead}
+              >
+                {calling ? 'Ligando…' : '📞 Ligar'}
+              </button>
             </header>
 
             {!activeLead.phone && (
               <div className="chat-warning">
                 ⚠️ Este lead não tem telefone válido — não é possível enviar mensagens por WhatsApp para ele.
                 Verifique o cadastro em Contatos.
+              </div>
+            )}
+            {!ffmpegOk && (
+              <div className="chat-warning">
+                ⚠️ O servidor não tem o programa <strong>ffmpeg</strong>: o áudio gravado aqui não consegue ser enviado
+                ao WhatsApp. Peça a instalação (<code>sudo apt-get install -y ffmpeg</code> ou reconstruir o Docker) — veja o guia.
               </div>
             )}
             {connections.length === 0 && (
@@ -352,6 +398,11 @@ export default function Chat() {
                   {msg.mediaType && <ChatMedia message={msg} />}
                   {msg.direction === 'nota' && <div className="chat-note-label">📌 Nota interna — só a equipe vê (não foi enviada ao cliente)</div>}
                   {msg.body && <div className="chat-bubble-text">{msg.body}</div>}
+                  {!msg.mediaType && msg.mediaMime === 'pending/whatsapp' && (
+                    <button type="button" className="btn-outline btn-small" disabled={retryingId === msg.id} onClick={() => retryMedia(msg.id)}>
+                      {retryingId === msg.id ? 'Baixando…' : '🔁 Tentar baixar de novo'}
+                    </button>
+                  )}
                 </div>
               ))}
               <div ref={messagesEndRef} />

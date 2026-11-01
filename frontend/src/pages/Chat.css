@@ -55,6 +55,11 @@
   flex-direction: column;
 }
 
+.chat-area-header .chat-call-btn {
+  align-self: flex-start;
+  margin-top: 8px;
+}
+
 .chat-warning {
   background: var(--warning-bg);
   color: #92400e;

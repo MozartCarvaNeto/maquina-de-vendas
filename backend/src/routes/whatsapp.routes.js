@@ -37,6 +37,8 @@ router.delete('/connections/:id', requireFeature('conexoes'), whatsappController
 router.get('/conversations', requireFeature('chat'), whatsappController.listConversations);
 router.get('/conversations/:leadId', requireFeature('chat'), whatsappController.listConversation);
 router.post('/messages', requireFeature('chat'), handleChatUpload, whatsappController.sendMessage);
+router.get('/audio-support', requireFeature('chat'), whatsappController.audioSupport);
+router.post('/messages/:messageId/retry-media', requireFeature('chat'), whatsappController.retryMedia);
 router.get('/messages/:messageId/media', requireFeature('chat'), whatsappController.getMessageMedia);
 
 module.exports = router;

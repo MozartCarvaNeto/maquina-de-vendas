@@ -268,6 +268,16 @@ exports.sendMessage = async (req, res, next) => {
           file.size = fs.statSync(converted).size;
           file.mimetype = 'audio/ogg';
           file.originalname = `${String(file.originalname || 'audio').replace(/\.[a-z0-9]{1,5}$/i, '')}.ogg`;
+        } else if (!friendly) {
+          // Sem ffmpeg o áudio gravado no navegador (WEBM) sairia quebrado: o contato veria
+          // "áudio indisponível". Melhor avisar do que enviar um áudio que ninguém consegue ouvir.
+          fs.rm(file.path, { force: true }, () => null);
+          const hasFfmpeg = await audioConvertService.isFfmpegAvailable();
+          return res.status(400).json({
+            error: hasFfmpeg
+              ? 'Não foi possível converter este áudio para o formato do WhatsApp. Grave de novo ou envie um arquivo MP3/M4A/OGG.'
+              : 'O servidor ainda não tem o programa ffmpeg, necessário para enviar áudio gravado. Instale com: sudo apt-get install -y ffmpeg (ou reconstrua a imagem Docker) e reinicie o sistema.'
+          });
         } else if (!friendly && connection.provider === 'cloud_api') {
           fs.rm(file.path, { force: true }, () => null);
           return res.status(400).json({ error: 'Este formato de áudio não é aceito pela API oficial do WhatsApp e o servidor não consegue convertê-lo. Envie em MP3, M4A, OGG ou AAC.' });
@@ -307,6 +317,45 @@ exports.sendMessage = async (req, res, next) => {
     io.to(`user:${req.userId}`).emit('whatsapp:message', { leadId: lead.id, message });
 
     res.status(201).json({ message });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** Diz se o servidor consegue converter áudio (ffmpeg). A tela do Chat avisa quando não consegue. */
+exports.audioSupport = async (req, res, next) => {
+  try {
+    res.json({ ffmpeg: await audioConvertService.isFfmpegAvailable() });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** "Tentar baixar de novo": refaz o download de um anexo recebido que tinha falhado. */
+exports.retryMedia = async (req, res, next) => {
+  try {
+    const message = await prisma.message.findFirst({
+      where: { id: req.params.messageId, lead: { userId: req.userId }, direction: 'entrada' }
+    });
+    if (!message) return res.status(404).json({ error: 'Mensagem não encontrada' });
+    if (message.mediaPath) return res.json({ message });
+    if (message.mediaMime !== 'pending/whatsapp' || !message.mediaName) {
+      return res.status(400).json({ error: 'Esta mensagem é antiga e não dá para baixar o anexo de novo. Peça para o contato reenviar.' });
+    }
+
+    const nativeWhatsappService = require('../services/whatsapp/nativeWhatsappService');
+    const result = await nativeWhatsappService.retryMediaDownload(req.userId, message.mediaName);
+    if (!result.fields) {
+      return res.status(502).json({ error: `Não consegui baixar o anexo agora: ${result.reason}. Peça para o contato reenviar ou veja no celular.` });
+    }
+
+    const updated = await prisma.message.update({
+      where: { id: message.id },
+      data: { ...result.fields, body: '' }
+    });
+    const io = req.app.get('io');
+    io.to(`user:${req.userId}`).emit('whatsapp:message:updated', { leadId: message.leadId, message: updated });
+    res.json({ message: updated });
   } catch (error) {
     next(error);
   }

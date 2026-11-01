@@ -39,7 +39,7 @@ async function convertToOggOpus(inputPath) {
   if (!(await isFfmpegAvailable())) return null;
   const outputPath = `${inputPath}.ogg`;
   return new Promise((resolve) => {
-    const proc = spawn('ffmpeg', ['-y', '-i', inputPath, '-vn', '-c:a', 'libopus', '-b:a', '32k', '-ar', '48000', '-ac', '1', '-f', 'ogg', outputPath]);
+    const proc = spawn('ffmpeg', ['-y', '-i', inputPath, '-vn', '-map_metadata', '-1', '-c:a', 'libopus', '-b:a', '32k', '-application', 'voip', '-ar', '48000', '-ac', '1', '-f', 'ogg', outputPath]);
     const timer = setTimeout(() => proc.kill('SIGKILL'), 60000);
     proc.on('error', () => {
       clearTimeout(timer);
@@ -54,4 +54,28 @@ async function convertToOggOpus(inputPath) {
   });
 }
 
-module.exports = { isFfmpegAvailable, isWhatsappFriendlyAudio, convertToOggOpus };
+/**
+ * Converte para M4A (AAC), que toca em QUALQUER navegador (Chrome, Safari/iPhone, Firefox, Edge).
+ * Usado nos áudios RECEBIDOS: o WhatsApp manda OGG/Opus, que o Safari/iPhone não toca.
+ * Devolve o caminho do arquivo novo ou null.
+ */
+async function convertToM4a(inputPath) {
+  if (!(await isFfmpegAvailable())) return null;
+  const outputPath = `${inputPath}.m4a`;
+  return new Promise((resolve) => {
+    const proc = spawn('ffmpeg', ['-y', '-i', inputPath, '-vn', '-map_metadata', '-1', '-c:a', 'aac', '-b:a', '64k', '-ar', '44100', '-ac', '1', '-movflags', '+faststart', '-f', 'ipod', outputPath]);
+    const timer = setTimeout(() => proc.kill('SIGKILL'), 60000);
+    proc.on('error', () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0 && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) return resolve(outputPath);
+      fs.rm(outputPath, { force: true }, () => null);
+      resolve(null);
+    });
+  });
+}
+
+module.exports = { isFfmpegAvailable, isWhatsappFriendlyAudio, convertToOggOpus, convertToM4a };

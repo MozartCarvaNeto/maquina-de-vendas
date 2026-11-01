@@ -70,7 +70,25 @@ export default function ChatMedia({ message }) {
   }
 
   if (type === 'audio') {
-    return url ? <audio className="chat-media-audio" controls src={url} /> : <div className="chat-media-placeholder">{loading ? 'Carregando áudio…' : '🎤'}</div>;
+    return url ? (
+      <div>
+        <audio
+          className="chat-media-audio"
+          controls
+          preload="metadata"
+          src={url}
+          onError={(e) => { e.currentTarget.nextSibling && (e.currentTarget.nextSibling.style.display = 'block'); }}
+        />
+        <a
+          className="btn-link-small"
+          style={{ display: 'none' }}
+          href={url}
+          download={message.mediaName || 'audio'}
+        >
+          Este aparelho não toca o áudio — baixar o arquivo
+        </a>
+      </div>
+    ) : <div className="chat-media-placeholder">{loading ? 'Carregando áudio…' : '🎤'}</div>;
   }
 
   if (type === 'video') {
