@@ -285,7 +285,7 @@ exports.forgotPassword = async (req, res, next) => {
       });
     } catch (emailError) {
       // Não contamos ao visitante (seria revelar que o e-mail existe); o administrador vê no log.
-      console.warn(`Não foi possível enviar e-mail de redefinição para ${member.email}:`, emailError.message);
+      console.error(`❌ Não foi possível enviar e-mail de redefinição para ${member.email}: ${emailError.message}. Teste em Administração > E-mail do sistema.`);
     }
 
     res.json(genericResponse);

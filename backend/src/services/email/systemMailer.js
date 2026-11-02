@@ -52,19 +52,74 @@ function buildActionEmail({ greeting, intro, buttonText, url, footer }) {
   </div></body></html>`;
 }
 
-async function sendSystemEmail({ to, subject, html, accountId }) {
+/** Contas dos administradores da plataforma (SUPERADMIN_EMAILS): o e-mail delas serve de remetente do sistema. */
+async function getPlatformAdminAccountIds() {
+  const emails = env.superAdminEmails || [];
+  if (!emails.length) return [];
+  const prisma = require('../../config/db');
+  const members = await prisma.member.findMany({
+    where: { OR: emails.map((e) => ({ email: { equals: e, mode: 'insensitive' } })) },
+    select: { accountId: true }
+  });
+  return [...new Set(members.map((m) => m.accountId))];
+}
+
+/**
+ * Envia um e-mail do sistema tentando, em ordem:
+ *  1) SMTP do sistema (SYSTEM_SMTP_* no .env);
+ *  2) e-mail configurado na conta de quem está sendo avisado;
+ *  3) e-mail configurado na conta do ADMINISTRADOR da plataforma (Configurações > E-mail dele).
+ * Antes só havia 1 e 2: cliente novo não tem e-mail configurado, então "Esqueci minha senha" não chegava nunca.
+ * Devolve { via, attempts } com o resultado de cada tentativa (usado também no teste do painel Admin).
+ */
+async function sendSystemEmailDetailed({ to, subject, html, accountId }) {
+  const attempts = [];
+
   if (isConfigured()) {
-    const s = env.systemSmtp;
-    await getTransport().sendMail({ from: s.from || s.user, to, subject, html });
-    return { via: 'system' };
+    try {
+      const s = env.systemSmtp;
+      await getTransport().sendMail({ from: s.from || s.user, to, subject, html });
+      attempts.push({ via: 'SMTP do sistema', ok: true });
+      return { via: 'system', attempts };
+    } catch (error) {
+      attempts.push({ via: 'SMTP do sistema', ok: false, error: error.message });
+    }
+  } else {
+    attempts.push({ via: 'SMTP do sistema', ok: false, error: 'não configurado (SYSTEM_SMTP_HOST/USER/PASS no .env)' });
   }
-  if (accountId) {
-    const { getEmailProvider } = require('./emailProviderFactory');
-    const provider = await getEmailProvider(accountId);
-    await provider.sendEmail({ to, subject, html });
-    return { via: 'account' };
+
+  const accountIds = [];
+  if (accountId) accountIds.push({ id: accountId, label: 'e-mail da própria conta' });
+  try {
+    for (const id of await getPlatformAdminAccountIds()) {
+      if (id !== accountId) accountIds.push({ id, label: 'e-mail do administrador da plataforma' });
+    }
+  } catch (error) {
+    attempts.push({ via: 'administrador da plataforma', ok: false, error: error.message });
   }
-  throw new Error('Nenhum e-mail do sistema configurado (SYSTEM_SMTP_* no .env).');
+
+  const { getEmailProvider } = require('./emailProviderFactory');
+  for (const target of accountIds) {
+    try {
+      const provider = await getEmailProvider(target.id);
+      await provider.sendEmail({ to, subject, html });
+      attempts.push({ via: target.label, ok: true });
+      return { via: 'account', attempts };
+    } catch (error) {
+      attempts.push({ via: target.label, ok: false, error: error.message });
+    }
+  }
+
+  const err = new Error(
+    `Nenhum e-mail do sistema funcionou: ${attempts.map((a) => `${a.via} → ${a.error}`).join(' | ')}`
+  );
+  err.attempts = attempts;
+  throw err;
+}
+
+async function sendSystemEmail(args) {
+  const { via } = await sendSystemEmailDetailed(args);
+  return { via };
 }
 
 // Só para testes automatizados.
@@ -72,4 +127,4 @@ function _setTransportForTests(fake) {
   transport = fake;
 }
 
-module.exports = { sendSystemEmail, buildActionEmail, isConfigured, escapeHtml, _setTransportForTests };
+module.exports = { sendSystemEmail, sendSystemEmailDetailed, buildActionEmail, isConfigured, escapeHtml, _setTransportForTests };

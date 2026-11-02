@@ -615,3 +615,30 @@ exports.cancelBilling = async (req, res, next) => {
     next(error);
   }
 };
+
+/** Diagnóstico do e-mail do sistema (recuperar senha etc.): tenta enviar e mostra o resultado de cada caminho. */
+exports.testSystemEmail = async (req, res, next) => {
+  try {
+    const { sendSystemEmailDetailed } = require('../services/email/systemMailer');
+    const env = require('../config/env');
+    const to = String(req.body?.to || req.member?.email || '').trim();
+    if (!to) return res.status(400).json({ error: 'Informe o e-mail que vai receber o teste.' });
+    const base = {
+      frontendUrl: env.frontendUrl,
+      frontendUrlLooksLocal: /localhost|127\.0\.0\.1/.test(env.frontendUrl || '')
+    };
+    try {
+      const result = await sendSystemEmailDetailed({
+        to,
+        subject: `Teste de e-mail do sistema — ${env.appName}`,
+        html: `<p>Este é um teste do e-mail do sistema (recuperação de senha e avisos) do ${env.appName}. Se você recebeu, está funcionando.</p>`,
+        accountId: req.userId
+      });
+      res.json({ ok: true, via: result.via, attempts: result.attempts, ...base });
+    } catch (error) {
+      res.json({ ok: false, error: error.message, attempts: error.attempts || [], ...base });
+    }
+  } catch (error) {
+    next(error);
+  }
+};

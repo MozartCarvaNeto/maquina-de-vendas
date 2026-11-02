@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../services/api';
 import PlansPanel from '../components/admin/PlansPanel';
+import SystemEmailPanel from '../components/admin/SystemEmailPanel';
 import './Admin.css';
 
 const STATUS_LABEL = { pendente: 'Pendente', ativa: 'Ativa', expirada: 'Vencida', bloqueada: 'Bloqueada' };
@@ -551,9 +552,11 @@ export default function Admin() {
       <div className="admin-tabs">
         <button className={tab === 'clientes' ? 'is-active' : ''} onClick={() => setTab('clientes')}>👥 Clientes</button>
         <button className={tab === 'planos' ? 'is-active' : ''} onClick={() => setTab('planos')}>💼 Planos e preços</button>
+        <button className={tab === 'email' ? 'is-active' : ''} onClick={() => setTab('email')}>✉️ E-mail do sistema</button>
       </div>
 
       {tab === 'planos' && <PlansPanel />}
+      {tab === 'email' && <SystemEmailPanel />}
 
       {tab === 'clientes' && (
         <>

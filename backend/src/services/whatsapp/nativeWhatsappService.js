@@ -685,7 +685,7 @@ class NativeWhatsappService {
 
     try {
       const contact = await message.getContact();
-      const serialized = contact?.id?._serialized || '';
+      const serialized = contact?.id?._serialized || contact?.id?.$1 || '';
       if (serialized.endsWith('@c.us')) return serialized.replace('@c.us', '');
     } catch {
       // sem telefone resolvido
@@ -745,6 +745,7 @@ class NativeWhatsappService {
       if (!client || !this.readyFlags.get(connection.id)) continue;
       try {
         const fresh = await withTimeout(client.getMessageById(waMessageId), 15000, 'busca da mensagem demorou demais');
+        this.backfillMessageId(fresh);
         if (!fresh || !fresh.hasMedia) {
           lastReason = 'o WhatsApp não tem mais esta mensagem com anexo (muito antiga?)';
           continue;
@@ -809,6 +810,84 @@ class NativeWhatsappService {
   }
 
   /**
+   * Identificador da mensagem no WhatsApp. O WhatsApp Web (atualização de jul/2026) passou a expor o
+   * id como "$1" em vez de "_serialized"; sem ele o download falha com o erro opaco "r: r".
+   * Também reconstrói o id a partir de fromMe/remote/id quando necessário.
+   */
+  waMessageKey(message) {
+    const id = message?.id || message?._data?.id || {};
+    const remote = typeof id.remote === 'string' ? id.remote : id.remote?._serialized || id.remote?.$1;
+    return id._serialized || id.$1 || (remote && id.id ? `${id.fromMe ? 'true' : 'false'}_${remote}_${id.id}` : null);
+  }
+
+  /** Garante que message.id._serialized exista (a biblioteca whatsapp-web.js ainda lê esse campo). */
+  backfillMessageId(message) {
+    try {
+      const key = this.waMessageKey(message);
+      if (key && message.id && !message.id._serialized) message.id._serialized = key;
+      return key;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Plano B de download, direto na página do WhatsApp Web (sem passar pelo downloadMedia da biblioteca,
+   * que quebra quando o WhatsApp muda). Devolve { media } ou { reason } com o erro REAL da página.
+   */
+  async downloadViaPage(connectionId, message) {
+    const client = this.clients.get(connectionId);
+    const msgKey = this.waMessageKey(message);
+    if (!client?.pupPage) return { reason: 'sessão do WhatsApp indisponível' };
+    if (!msgKey) return { reason: 'a mensagem veio sem identificador' };
+    try {
+      const out = await withTimeout(
+        client.pupPage.evaluate(async (msgId) => {
+          try {
+            const msgs = window.require('WAWebCollections').Msg;
+            const msg = msgs.get(msgId) || (await msgs.getMessagesById([msgId]))?.messages?.[0];
+            if (!msg) return { error: 'mensagem não encontrada no WhatsApp Web' };
+            if (!msg.mediaData) return { error: 'mensagem sem dados de anexo' };
+            if (msg.mediaData.mediaStage !== 'RESOLVED') {
+              await msg.downloadMedia({ downloadEvenIfExpensive: true, rmrReason: 1 });
+            }
+            const stage = String(msg.mediaData.mediaStage || '');
+            if (stage.includes('ERROR') || stage === 'FETCHING') return { error: `anexo em estado ${stage}` };
+
+            let manager = null;
+            try { manager = window.require('WAWebDownloadManager').downloadManager; } catch (e) { /* tenta o outro caminho */ }
+            manager = manager || (window.Store && window.Store.DownloadManager);
+            if (!manager) return { error: 'gerenciador de download do WhatsApp Web não encontrado' };
+
+            const decrypted = await manager.downloadAndMaybeDecrypt({
+              directPath: msg.directPath,
+              encFilehash: msg.encFilehash,
+              filehash: msg.filehash,
+              mediaKey: msg.mediaKey,
+              mediaKeyTimestamp: msg.mediaKeyTimestamp,
+              type: msg.type,
+              mimetype: msg.mimetype,
+              signal: new AbortController().signal
+            });
+            const bytes = new Uint8Array(decrypted);
+            let binary = '';
+            for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+            return { data: btoa(binary), mimetype: msg.mimetype, filename: msg.filename || null };
+          } catch (e) {
+            return { error: String((e && (e.message || e.name)) || e) };
+          }
+        }, msgKey),
+        60000,
+        'download pela página demorou demais'
+      );
+      if (out?.data) return { media: { data: out.data, mimetype: out.mimetype, filename: out.filename } };
+      return { reason: out?.error || 'a página não devolveu o arquivo' };
+    } catch (err) {
+      return { reason: String(err.message || err) };
+    }
+  }
+
+  /**
    * Baixa a mídia recebida com até 3 tentativas. O WhatsApp Web às vezes ainda não terminou de
    * liberar o arquivo quando a mensagem chega (principalmente áudios e fotos grandes): a primeira
    * tentativa devolve vazio. Esperamos um pouco, buscamos a mensagem de novo e tentamos outra vez.
@@ -817,6 +896,7 @@ class NativeWhatsappService {
     const attempts = [0, 2500, 6000, 15000];
     let current = message;
     let lastReason = 'o WhatsApp não liberou o arquivo';
+    this.backfillMessageId(message);
 
     for (let i = 0; i < attempts.length; i += 1) {
       if (attempts[i] > 0) await new Promise((resolve) => setTimeout(resolve, attempts[i]));
@@ -830,7 +910,7 @@ class NativeWhatsappService {
 
       // Antes da próxima tentativa, busca a mensagem de novo (traz os dados de mídia atualizados).
       const client = this.clients.get(connectionId);
-      const id = message.id?._serialized;
+      const id = this.waMessageKey(message);
       if (client && id && i < attempts.length - 1) {
         try {
           // Abrir/atualizar a conversa faz o WhatsApp Web terminar de preparar o anexo (áudios são o caso típico).
@@ -850,7 +930,11 @@ class NativeWhatsappService {
         }
       }
     }
-    return { media: null, reason: lastReason };
+
+    // Plano B: baixa direto pela página do WhatsApp Web e traz o motivo real do erro.
+    const viaPage = await this.downloadViaPage(connectionId, message);
+    if (viaPage.media) return viaPage;
+    return { media: null, reason: `${lastReason}; pela página: ${viaPage.reason}` };
   }
 
   async handleIncomingMessage(userId, connectionId, message) {
@@ -915,8 +999,8 @@ class NativeWhatsappService {
         body: text || (message.hasMedia && !mediaFields.mediaPath ? this.mediaFailureLabel(message, mediaFailReason) : ''),
         ...mediaFields,
         // Anexo que não baixou: guarda o id da mensagem no WhatsApp para o botão "Tentar baixar de novo".
-        ...(message.hasMedia && !mediaFields.mediaPath && message.id?._serialized
-          ? { mediaMime: PENDING_MEDIA_MIME, mediaName: message.id._serialized }
+        ...(message.hasMedia && !mediaFields.mediaPath && this.waMessageKey(message)
+          ? { mediaMime: PENDING_MEDIA_MIME, mediaName: this.waMessageKey(message) }
           : {})
       }
     });

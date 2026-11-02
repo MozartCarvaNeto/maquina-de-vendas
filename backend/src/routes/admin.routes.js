@@ -21,6 +21,8 @@ router.post('/accounts/:id/plan', adminController.assignPlan);
 router.post('/accounts/:id/charge', adminController.charge);
 router.post('/accounts/:id/cancel-billing', adminController.cancelBilling);
 
+router.post('/system-email/test', adminController.testSystemEmail);
+
 router.get('/plans', adminController.listPlans);
 router.post('/plans', adminController.createPlan);
 router.patch('/plans/:id', adminController.updatePlan);
