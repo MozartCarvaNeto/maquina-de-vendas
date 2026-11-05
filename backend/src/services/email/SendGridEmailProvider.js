@@ -34,7 +34,8 @@ class SendGridEmailProvider extends IEmailProvider {
           return {
             content: fs.readFileSync(a.path).toString('base64'),
             filename: a.filename || path.basename(a.path),
-            disposition: 'attachment'
+            disposition: a.cid ? 'inline' : 'attachment',
+            ...(a.cid ? { content_id: a.cid } : {})
           };
         } catch (err) {
           console.error(`Não foi possível ler o anexo "${a.filename}" para envio por e-mail:`, err.message);

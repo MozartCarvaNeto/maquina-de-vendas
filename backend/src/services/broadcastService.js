@@ -52,6 +52,27 @@ function renderTemplate(template, lead) {
     .replace(/{{\s*endereco\s*}}/gi, lead.address || '');
 }
 
+// Monta o HTML do e-mail: texto + imagem (largura total, como os e-mails comerciais),
+// com o texto acima ou abaixo da imagem conforme o disparo.
+function buildEmailHtml(rendered, imageInfo, cid) {
+  let body = String(rendered || '');
+  if (!/<\s*(p|br|div|table|a|b|strong|h[1-6]|ul|ol|span|img)\b/i.test(body)) {
+    // Texto simples digitado no campo "Mensagem": preserva as quebras de linha.
+    body = body
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\r?\n/g, '<br>');
+  }
+  if (!imageInfo) return body;
+  const textBlock = body.trim()
+    ? `<div style="padding:16px 20px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#222;">${body}</div>`
+    : '';
+  const imageBlock = `<img src="cid:${cid}" alt="" width="640" style="display:block;width:100%;max-width:640px;height:auto;border:0;outline:none;">`;
+  const ordered = imageInfo.position === 'below' ? textBlock + imageBlock : imageBlock + textBlock;
+  return `<div style="max-width:640px;margin:0 auto;background:#ffffff;">${ordered}</div>`;
+}
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -445,10 +466,23 @@ async function executeBroadcast(broadcastId) {
     return;
   }
 
-  const emailAttachments = attachments.map((a) => ({
-    filename: a.originalName || a.filename,
-    path: path.join(ATTACHMENTS_ROOT, broadcastId, a.filename)
-  }));
+  // Anexos comuns (arquivos) x imagem do corpo do e-mail (banner, aparece dentro da mensagem).
+  const inlineImageInfo = broadcast.channel === 'email' ? attachments.find((a) => a.inlineImage) : null;
+  const emailAttachments = attachments
+    .filter((a) => !a.inlineImage)
+    .map((a) => ({
+      filename: a.originalName || a.filename,
+      path: path.join(ATTACHMENTS_ROOT, broadcastId, a.filename)
+    }));
+  const INLINE_CID = `banner-${broadcastId}@turboprospect`;
+  if (inlineImageInfo) {
+    emailAttachments.push({
+      filename: inlineImageInfo.originalName || inlineImageInfo.filename,
+      path: path.join(ATTACHMENTS_ROOT, broadcastId, inlineImageInfo.filename),
+      cid: INLINE_CID,
+      contentDisposition: 'inline'
+    });
+  }
 
   let sentCount = 0;
   let failedCount = 0;
@@ -648,7 +682,7 @@ async function executeBroadcast(broadcastId) {
             await emailProvider.sendEmail({
               to: lead.email,
               subject: renderTemplate(broadcast.subject || '', lead),
-              html: renderTemplate(broadcast.message, lead),
+              html: buildEmailHtml(renderTemplate(broadcast.message, lead), inlineImageInfo, INLINE_CID),
               attachments: emailAttachments,
               // Usados só pelo provedor "native", para casar cada envio com
               // a estatística de abertura/clique e com o disparo de origem.

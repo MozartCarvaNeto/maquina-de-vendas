@@ -215,8 +215,17 @@ exports.create = async (req, res, next) => {
       include: { variants: { orderBy: { position: 'asc' } } }
     });
 
-    if (req.files?.length) {
-      const attachments = saveAttachmentsToDisk(broadcast.id, req.files);
+    if (req.files?.length || (channel === 'email' && req.emailImageFile)) {
+      const attachments = saveAttachmentsToDisk(broadcast.id, req.files || []);
+      if (channel === 'email' && req.emailImageFile) {
+        // A imagem do corpo do e-mail fica na mesma lista, marcada como "inlineImage".
+        const [img] = saveAttachmentsToDisk(broadcast.id, [req.emailImageFile]);
+        attachments.unshift({
+          ...img,
+          inlineImage: true,
+          position: body.emailImagePosition === 'below' ? 'below' : 'above'
+        });
+      }
       await prisma.broadcastCampaign.update({
         where: { id: broadcast.id },
         data: { attachments }

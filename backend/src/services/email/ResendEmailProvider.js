@@ -18,7 +18,7 @@ class ResendEmailProvider extends IEmailProvider {
       .map((a) => {
         try {
           const content = fs.readFileSync(a.path).toString('base64');
-          return { filename: a.filename, content };
+          return a.cid ? { filename: a.filename, content, content_id: a.cid } : { filename: a.filename, content };
         } catch (err) {
           console.error(`Não foi possível ler o anexo "${a.filename}" para envio por e-mail:`, err.message);
           return null;

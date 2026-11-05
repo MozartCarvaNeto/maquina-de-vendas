@@ -1,7 +1,7 @@
 // frontend/src/pages/Disparos.jsx
 import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import api from '../services/api';
-import { ATTACHMENT_REGEX, BLOCKED_EXT_REGEX, ATTACHMENT_ACCEPT } from '../utils/attachments';
+import { ATTACHMENT_REGEX, BLOCKED_EXT_REGEX, ATTACHMENT_ACCEPT, formatBytes } from '../utils/attachments';
 import './Disparos.css';
 
 function emptyForm() {
@@ -19,6 +19,8 @@ function emptyForm() {
     scheduledAt: '',
     recurringInterval: 'semanal',
     attachments: [],
+    emailImage: null,
+    emailImagePosition: 'above',
     minDelaySeconds: 40,
     maxDelaySeconds: 100,
     batchSize: 15,
@@ -274,6 +276,43 @@ export default function Disparos() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
+  // Reduz a foto (largura máx. 1280 px, JPEG) para o e-mail ficar leve e o envio não ser recusado por tamanho.
+  async function shrinkImage(file) {
+    if (file.type === 'image/gif' || file.size < 250 * 1024) return file;
+    try {
+      const bmp = await createImageBitmap(file);
+      const scale = Math.min(1, 1280 / bmp.width);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(bmp.width * scale);
+      canvas.height = Math.round(bmp.height * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+      if (!blob || blob.size >= file.size) return file;
+      return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+    } catch {
+      return file;
+    }
+  }
+
+  async function handleEmailImageChange(e) {
+    const file = (e.target.files || [])[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!/^image\/(jpeg|png|gif|webp)$/.test(file.type || '')) {
+      alert('Use uma imagem JPG, PNG, GIF ou WebP.');
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      alert('A imagem ultrapassa 20 MB.');
+      return;
+    }
+    const finalFile = await shrinkImage(file);
+    setForm((prev) => ({ ...prev, emailImage: finalFile }));
+  }
+
   function removeAttachment(index) {
     setForm((prev) => ({ ...prev, attachments: prev.attachments.filter((_, i) => i !== index) }));
   }
@@ -310,6 +349,10 @@ export default function Disparos() {
     if (form.scheduleType === 'scheduled') formData.append('scheduledAt', form.scheduledAt);
     if (form.scheduleType === 'recurring') formData.append('recurringInterval', form.recurringInterval);
     form.attachments.forEach((file) => formData.append('attachments', file));
+    if (form.channel === 'email' && form.emailImage) {
+      formData.append('emailImage', form.emailImage);
+      formData.append('emailImagePosition', form.emailImagePosition);
+    }
 
     try {
       await api.post('/broadcasts', formData);
@@ -664,6 +707,27 @@ export default function Disparos() {
                   <input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} required />
                   <label>Mensagem</label>
                   <textarea rows={5} value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} required />
+
+                  <div className="image-upload-box">
+                    <label>Imagem do e-mail (aparece dentro da mensagem, em largura total)</label>
+                    <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" onChange={handleEmailImageChange} />
+                    <p className="hint-text">Ideal: arte com cerca de 640 a 1280 px de largura (JPG ou PNG). A foto é reduzida automaticamente.</p>
+                    {form.emailImage && (
+                      <>
+                        <ul className="attachments-list">
+                          <li>
+                            <span>🖼️ {form.emailImage.name} ({formatBytes(form.emailImage.size)})</span>
+                            <button type="button" className="btn-link-small" onClick={() => setForm({ ...form, emailImage: null })}>remover</button>
+                          </li>
+                        </ul>
+                        <label>Posição do texto</label>
+                        <select value={form.emailImagePosition} onChange={(e) => setForm({ ...form, emailImagePosition: e.target.value })}>
+                          <option value="above">Imagem em cima e texto embaixo</option>
+                          <option value="below">Texto em cima e imagem embaixo</option>
+                        </select>
+                      </>
+                    )}
+                  </div>
                 </>
               )}
 
@@ -676,7 +740,7 @@ export default function Disparos() {
 
               {(form.channel === 'whatsapp' || form.channel === 'email') && (
                 <div className="image-upload-box">
-                  <label>{form.channel === 'whatsapp' ? 'Foto, vídeo ou documento para acompanhar a mensagem (opcional)' : 'Anexos (opcional)'}</label>
+                  <label>{form.channel === 'whatsapp' ? 'Foto, vídeo ou documento para acompanhar a mensagem (opcional)' : 'Anexos em arquivo — PDF, Word etc. (opcional)'}</label>
                   <input
                     ref={fileInputRef}
                     type="file"

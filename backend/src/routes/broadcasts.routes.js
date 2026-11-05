@@ -22,8 +22,16 @@ router.use(auth);
 router.use(requireFeature('disparos'));
 
 function handleUpload(req, res, next) {
-  upload.array('attachments', 5)(req, res, (err) => {
+  upload.fields([{ name: 'attachments', maxCount: 5 }, { name: 'emailImage', maxCount: 1 }])(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message || 'Erro ao processar a imagem.' });
+
+    // Separa a imagem do corpo do e-mail (banner) dos anexos comuns.
+    const grouped = req.files || {};
+    req.emailImageFile = (grouped.emailImage || [])[0] || null;
+    req.files = grouped.attachments || [];
+    if (req.emailImageFile && !/^image\/(jpeg|png|gif|webp)$/i.test(req.emailImageFile.mimetype || '')) {
+      return res.status(400).json({ error: 'A imagem do e-mail deve ser JPG, PNG, GIF ou WebP.' });
+    }
 
     // O disparo de WhatsApp leva 1 anexo (foto, vídeo, PDF...). E-mail aceita até 10 MB por arquivo.
     if (req.body?.channel === 'whatsapp' && req.files?.length > 1) {

@@ -35,7 +35,7 @@ class TwilioEmailProvider extends IEmailProvider {
 
   async sendEmail({ to, subject, html, attachments }) {
     if (attachments && attachments.length > 0) {
-      throw new Error('O e-mail da Twilio (comms) não aceita anexos. Para disparos com anexo use SMTP, Resend ou SendGrid.');
+      throw new Error('O e-mail da Twilio (comms) não aceita anexos nem imagem no corpo do e-mail. Para disparos com imagem/anexo use SMTP, Resend ou SendGrid.');
     }
     if (!this.fromEmail) throw new Error('Informe o e-mail remetente em Configurações > E-mail.');
     // Texto simples gerado do HTML, para clientes de e-mail sem HTML.
