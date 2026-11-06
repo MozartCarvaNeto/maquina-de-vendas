@@ -1026,3 +1026,35 @@ model SipTrunk {
   @@index([userId])
   @@map("sip_trunks")
 }
+
+// Ramal SIP (WebRTC) de cada pessoa da equipe, usado pelo telefone no navegador ligado ao Asterisk.
+model SipExtension {
+  id          String   @id @default(uuid())
+  userId      String
+  memberId    String   @unique
+  extension   String
+  passwordEnc String
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, extension])
+  @@map("sip_extensions")
+}
+
+// Histórico das chamadas feitas/recebidas pelo telefone SIP do navegador.
+model SipCallLog {
+  id          String    @id @default(uuid())
+  userId      String
+  memberId    String
+  direction   String
+  number      String
+  contactName String?
+  status      String
+  startedAt   DateTime
+  answeredAt  DateTime?
+  endedAt     DateTime?
+  durationSec Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, startedAt])
+  @@map("sip_call_logs")
+}

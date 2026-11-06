@@ -1,0 +1,15 @@
+/* frontend/src/components/phone/SipPhone.css */
+.sip-card { position: fixed; left: 16px; bottom: 16px; z-index: 9999; width: 280px; background: #fff; border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,.25); border-top: 4px solid #2563eb; overflow: hidden; }
+.sip-card.tocando { animation: sipRing 1s ease-in-out infinite; }
+@keyframes sipRing { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+.sip-head { background: #eff6ff; color: #1e3a8a; padding: 10px 16px; font-weight: 700; font-size: 14px; }
+.sip-body { padding: 12px 16px 4px; display: flex; flex-direction: column; gap: 2px; }
+.sip-body strong { font-size: 18px; }
+.sip-body span { color: #6b7280; font-size: 13px; }
+.sip-status { margin: 8px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sip-status.connected { color: #16a34a; font-size: 22px; }
+.sip-actions { display: flex; gap: 8px; padding: 12px 16px 16px; }
+.sip-btn { flex: 1; padding: 10px; border-radius: 10px; border: 1px solid #d1d5db; background: #f9fafb; cursor: pointer; font-weight: 600; }
+.sip-btn.ok { background: #16a34a; color: #fff; border-color: transparent; }
+.sip-btn.bad { background: #dc2626; color: #fff; border-color: transparent; }
+@media (max-width: 600px) { .sip-card { left: 8px; right: 8px; width: auto; } }

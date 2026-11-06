@@ -14,9 +14,7 @@ Empresas como Twilio, Zenvia, Infobip, Sinch e Pontaltech fazem duas coisas: (1)
 - Opção "Usar este gateway nos Disparos de SMS" (no lugar da Twilio).
 - Menu **📡 Gateway de telecom** (módulo "gateway" nos planos; plano Completo já inclui).
 
-**Voz (infraestrutura, primeira etapa):**
-- Cadastro de troncos SIP e geração dos arquivos de configuração do **Asterisk** (PBX gratuito) para o seu servidor.
-- Ainda NÃO incluído: ligar/atender pelo navegador e as ligações da IA por esse caminho (próxima etapa; exige testes com um tronco real).
+**Voz:** veja `docs/ATUALIZAR_TELEFONE_SIP.md` (telefone no navegador, ramais e histórico).
 
 ## Instalar
 1. No Supabase > SQL Editor, rode `docs/atualizar_banco_gateway_telecom.sql` (cria 4 tabelas; pode repetir sem problema).

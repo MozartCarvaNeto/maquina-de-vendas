@@ -27,11 +27,14 @@ import Contatos from './pages/Contatos';
 import Configuracoes from './pages/Configuracoes';
 import CallPopup from './components/calls/CallPopup';
 import PhoneProvider from './components/phone/PhoneProvider';
+import SipPhoneProvider from './components/phone/SipPhoneProvider';
+import TelefoneSip from './pages/TelefoneSip';
 import TelefoneWeb from './pages/TelefoneWeb';
 
 export default function App() {
   return (
     <PhoneProvider>
+      <SipPhoneProvider>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/registrar" element={<Register />} />
@@ -56,6 +59,7 @@ export default function App() {
           <Route path="buscar-empresas" element={<FeatureRoute feature="contatos"><BuscarEmpresas /></FeatureRoute>} />
           <Route path="listas" element={<FeatureRoute feature="contatos"><Listas /></FeatureRoute>} />
           <Route path="disparos" element={<FeatureRoute feature="disparos"><Disparos /></FeatureRoute>} />
+          <Route path="telefone-sip" element={<FeatureRoute feature="gateway"><TelefoneSip /></FeatureRoute>} />
           <Route path="gateway" element={<FeatureRoute feature="gateway"><GatewayTelecom /></FeatureRoute>} />
           <Route path="conexoes" element={<FeatureRoute feature="conexoes"><Conexoes /></FeatureRoute>} />
           <Route path="discador" element={<FeatureRoute feature="discador"><Discador /></FeatureRoute>} />
@@ -79,6 +83,7 @@ export default function App() {
       </Routes>
 
       <CallPopup />
+      </SipPhoneProvider>
     </PhoneProvider>
   );
 }

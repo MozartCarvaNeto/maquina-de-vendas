@@ -1,0 +1,20 @@
+/* frontend/src/pages/TelefoneSip.css */
+.sipphone-page { padding: 32px; max-width: 560px; }
+.sip-reg { font-weight: 600; margin: 4px 0 16px; }
+.sip-dial { background: #fff; border-radius: 16px; padding: 20px; box-shadow: 0 2px 12px rgba(0,0,0,.08); display: flex; flex-direction: column; gap: 14px; }
+.sip-dial input { font-size: 22px; text-align: center; padding: 12px; border-radius: 10px; border: 1px solid #d1d5db; }
+.sip-live { text-align: center; padding: 8px; }
+.sip-live strong { display: block; font-size: 22px; }
+.sip-live span { color: #6b7280; }
+.sip-live p { font-size: 26px; font-variant-numeric: tabular-nums; margin: 8px 0 0; }
+.sip-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.sip-pad button, .sip-controls button { padding: 14px; font-size: 20px; border-radius: 12px; border: 1px solid #d1d5db; background: #f9fafb; cursor: pointer; }
+.sip-controls { display: flex; gap: 8px; }
+.sip-controls button { flex: 1; font-size: 16px; font-weight: 600; }
+.sip-controls .sip-call { background: #16a34a; color: #fff; border-color: transparent; flex: 3; }
+.sip-controls .sip-call:disabled { opacity: .5; }
+.sip-controls .sip-hang { background: #dc2626; color: #fff; border-color: transparent; }
+.sip-error { color: #b91c1c; margin: 0; }
+.sip-history { width: 100%; border-collapse: collapse; font-size: 14px; }
+.sip-history th, .sip-history td { text-align: left; padding: 6px; border-bottom: 1px solid #eee; }
+@media (max-width: 700px) { .sipphone-page { padding: 16px; } }

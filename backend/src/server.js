@@ -28,6 +28,7 @@ const emailTrackingRoutes = require('./routes/emailTracking.routes');
 const publicMediaRoutes = require('./routes/publicMedia.routes');
 const gatewayRoutes = require('./routes/gateway.routes');
 const smsApiV1Routes = require('./routes/smsApiV1.routes');
+const voiceRoutes = require('./routes/voice.routes');
 const smsGateway = require('./services/smsgw/gateway');
 const roboCallsRoutes = require('./routes/robocalls.routes');
 const callQueueRoutes = require('./routes/callQueue.routes');
@@ -118,6 +119,7 @@ app.use('/api/call-queue', callQueueRoutes);
 app.use('/api/email/t', emailTrackingRoutes);
 app.use('/api/public/broadcast-media', publicMediaRoutes);
 app.use('/api/gateway', gatewayRoutes);
+app.use('/api/voice', voiceRoutes);
 app.use('/api/v1/sms', smsApiV1Routes);
 
 // Serve as imagens anexadas aos disparos (usadas para pré-visualização na

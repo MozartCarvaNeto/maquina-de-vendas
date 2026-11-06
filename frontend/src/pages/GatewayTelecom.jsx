@@ -324,7 +324,7 @@ curl ${apiBase}/ID_DA_MENSAGEM -H "Authorization: Bearer SUA_CHAVE"`}</pre>
           <p className="card-desc">
             Para ligações pelo seu próprio sistema, o servidor usa o <strong>Asterisk</strong> (PBX gratuito) ligado a um fornecedor de voz por <strong>tronco SIP</strong>.
             Cadastre o tronco aqui e gere os arquivos de configuração. Veja o passo a passo no guia da atualização.
-            <br /><strong>Atenção:</strong> nesta versão o portal gera a configuração; ligar e atender pelo navegador será a próxima etapa.
+            <br />Cada pessoa da equipe ganha um <strong>ramal automático</strong> e liga/atende pelo menu <strong>📞 Telefone (ligações)</strong>. Ao gerar os arquivos abaixo, os ramais entram na configuração.
           </p>
           <table className="gw-table">
             <thead><tr><th>Tronco</th><th>Servidor</th><th>Usuário</th><th /></tr></thead>

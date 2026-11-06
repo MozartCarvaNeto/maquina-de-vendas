@@ -55,7 +55,8 @@ export class WebPhoneEngine {
    * @param {{iceServers?: RTCIceServer[], onState?: (state:string)=>void, onRemoteStream?: (s:MediaStream)=>void}} opts
    * state: 'new' | 'connecting' | 'connected' | 'disconnected' | 'failed' | 'closed'
    */
-  constructor({ iceServers = [], onState, onRemoteStream } = {}) {
+  constructor({ iceServers = [], onState, onRemoteStream, opusOnly = true } = {}) {
+    this.opusOnly = opusOnly; // WhatsApp exige só Opus; telefonia SIP aceita também G.711 (alaw/ulaw)
     this.iceServers = iceServers;
     this.onState = onState || (() => {});
     this.onRemoteStream = onRemoteStream || (() => {});
@@ -83,7 +84,7 @@ export class WebPhoneEngine {
     await this._open();
     const track = this.localStream.getAudioTracks()[0];
     const transceiver = this.pc.addTransceiver(track, { direction: 'sendrecv', streams: [this.localStream] });
-    restrictToOpus(transceiver);
+    if (this.opusOnly) restrictToOpus(transceiver);
     await this.pc.setLocalDescription(await this.pc.createOffer());
     await waitForIceComplete(this.pc);
     return this.pc.localDescription.sdp;
@@ -103,13 +104,21 @@ export class WebPhoneEngine {
     if (transceiver) {
       await transceiver.sender.replaceTrack(track);
       transceiver.direction = 'sendrecv';
-      restrictToOpus(transceiver);
+      if (this.opusOnly) restrictToOpus(transceiver);
     } else {
       this.pc.addTrack(track, this.localStream);
     }
     await this.pc.setLocalDescription(await this.pc.createAnswer());
     await waitForIceComplete(this.pc);
     return this.pc.localDescription.sdp;
+  }
+
+  /** Envia uma tecla (0-9, *, #) durante a chamada (RFC 4733). */
+  sendDtmf(tone) {
+    try {
+      const sender = this.pc?.getSenders().find((s) => s.track?.kind === 'audio');
+      sender?.dtmf?.insertDTMF(String(tone), 120, 70);
+    } catch { /* sem suporte */ }
   }
 
   setMuted(muted) {

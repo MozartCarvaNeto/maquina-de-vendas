@@ -6,6 +6,7 @@ const { encrypt } = require('../services/crypto/settingsCrypto');
 const gateway = require('../services/smsgw/gateway');
 const { countSegments } = require('../services/smsgw/gsm');
 const { buildAsteriskConfig } = require('../services/smsgw/asteriskConfig');
+const { ensureAllExtensions } = require('../services/smsgw/sipExtensions');
 
 const PRIVATE_HOST = /^(localhost|0\.0\.0\.0|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|::1|\[::1\]|fc|fd)/i;
 
@@ -290,7 +291,8 @@ exports.deleteTrunk = async (req, res, next) => {
 exports.asteriskConfig = async (req, res, next) => {
   try {
     const trunks = await prisma.sipTrunk.findMany({ where: { userId: req.userId }, orderBy: { createdAt: 'asc' } });
-    res.json(buildAsteriskConfig(trunks));
+    const extensions = await ensureAllExtensions(req.userId);
+    res.json(buildAsteriskConfig(trunks, extensions));
   } catch (error) {
     next(error);
   }
