@@ -16,6 +16,7 @@ const MENU_ITEMS = [
   { path: '/buscar-empresas', label: '🔍 Buscar Empresas', feature: ['contatos'], adminOnly: false },
   { path: '/listas', label: '🗂️ Listas', feature: ['contatos'], adminOnly: false },
   { path: '/disparos', label: '📣 Disparos', feature: ['disparos'], adminOnly: false },
+  { path: '/gateway', label: '📡 Gateway de telecom', feature: ['gateway'], adminOnly: true },
   { path: '/conexoes', label: '📱 Conexões', feature: ['conexoes'], adminOnly: false },
   { path: '/discador', label: '📞 Discador', feature: ['discador'], adminOnly: false },
   { path: '/ligacoes', label: '☎️ Ligações', feature: ['robo', 'discador', 'agente_ia'], adminOnly: false },

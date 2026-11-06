@@ -921,3 +921,108 @@ model AiCallSession {
   @@index([campaignId])
   @@map("ai_call_sessions")
 }
+
+// ==========================================================
+// GATEWAY DE TELECOM NATIVO (SMS por SMPP, API própria, troncos SIP de voz)
+// ==========================================================
+
+// Um fornecedor de SMS (operadora ou atacadista) ligado por SMPP.
+model SmsCarrier {
+  id            String    @id @default(uuid())
+  userId        String
+  name          String
+  protocol      String    @default("smpp")
+  host          String
+  port          Int       @default(2775)
+  useTls        Boolean   @default(false)
+  systemId      String
+  passwordEnc   String
+  systemType    String?
+  defaultSender String?
+  tps           Float     @default(10)
+  windowSize    Int       @default(10)
+  priority      Int       @default(1)
+  costPerPart   Float     @default(0)
+  normalize     String    @default("keep")
+  concatMode    String    @default("udh")
+  allowedPrefixes String?
+  enabled       Boolean   @default(true)
+  lastStatus    String?
+  lastError     String?
+  lastBoundAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("sms_carriers")
+}
+
+// Cada SMS enviado (out) ou recebido (in) pelo gateway.
+model SmsMessage {
+  id             String    @id @default(uuid())
+  userId         String
+  carrierId      String?
+  direction      String    @default("out")
+  fromAddr       String
+  toAddr         String
+  body           String
+  encoding       String?
+  parts          Int       @default(1)
+  status         String    @default("queued")
+  providerIds    String?
+  partsDelivered Int       @default(0)
+  errorCode      String?
+  errorMessage   String?
+  attempts       Int       @default(0)
+  nextAttemptAt  DateTime  @default(now())
+  costBrl        Float     @default(0)
+  priceBrl       Float     @default(0)
+  source         String    @default("app")
+  apiKeyId       String?
+  clientRef      String?
+  createdAt      DateTime  @default(now())
+  sentAt         DateTime?
+  deliveredAt    DateTime?
+
+  @@index([userId, createdAt])
+  @@index([status, nextAttemptAt])
+  @@map("sms_messages")
+}
+
+// Chaves da API própria (POST /api/v1/sms/messages). Só o hash fica no banco.
+model SmsApiKey {
+  id         String    @id @default(uuid())
+  userId     String
+  name       String
+  prefix     String
+  keyHash    String    @unique
+  active     Boolean   @default(true)
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@map("sms_api_keys")
+}
+
+// Tronco SIP (fornecedor de voz) para o Asterisk do próprio servidor.
+model SipTrunk {
+  id               String   @id @default(uuid())
+  userId           String
+  name             String
+  host             String
+  port             Int      @default(5060)
+  transport        String   @default("udp")
+  username         String?
+  passwordEnc      String?
+  register         Boolean  @default(true)
+  fromDomain       String?
+  outboundCallerId String?
+  dialPrefix       String?
+  codecs           String   @default("alaw,ulaw")
+  enabled          Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([userId])
+  @@map("sip_trunks")
+}

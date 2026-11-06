@@ -17,6 +17,7 @@ import Campanhas from './pages/Campanhas';
 import Listas from './pages/Listas';
 import BuscarEmpresas from './pages/BuscarEmpresas';
 import Disparos from './pages/Disparos';
+import GatewayTelecom from './pages/GatewayTelecom';
 import Conexoes from './pages/Conexoes';
 import Discador from './pages/Discador';
 import Ligacoes from './pages/Ligacoes';
@@ -55,6 +56,7 @@ export default function App() {
           <Route path="buscar-empresas" element={<FeatureRoute feature="contatos"><BuscarEmpresas /></FeatureRoute>} />
           <Route path="listas" element={<FeatureRoute feature="contatos"><Listas /></FeatureRoute>} />
           <Route path="disparos" element={<FeatureRoute feature="disparos"><Disparos /></FeatureRoute>} />
+          <Route path="gateway" element={<FeatureRoute feature="gateway"><GatewayTelecom /></FeatureRoute>} />
           <Route path="conexoes" element={<FeatureRoute feature="conexoes"><Conexoes /></FeatureRoute>} />
           <Route path="discador" element={<FeatureRoute feature="discador"><Discador /></FeatureRoute>} />
           <Route path="ligacoes" element={<FeatureRoute feature={['robo', 'discador', 'agente_ia']}><Ligacoes /></FeatureRoute>} />

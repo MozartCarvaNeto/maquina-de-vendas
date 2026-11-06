@@ -3,6 +3,8 @@ const prisma = require('../../config/db');
 const env = require('../../config/env');
 const { decrypt } = require('../crypto/settingsCrypto');
 const TwilioSmsProvider = require('./TwilioSmsProvider');
+const NativeSmsProvider = require('./NativeSmsProvider');
+const gateway = require('../smsgw/gateway');
 const { getTwilioCredentials } = require('../twilioCredentials');
 const { isPlatformAdminAccount } = require('../accessService');
 
@@ -20,6 +22,12 @@ async function getSmsSender(userId) {
  * `provider.sender` traz o remetente padrão (pode ser null: nesse caso quem chama escolhe um número de discagem).
  */
 async function getSmsProvider(userId) {
+  // Gateway nativo (SMPP próprio) ativado em "Gateway de telecom": tem prioridade sobre a Twilio.
+  const gw = await gateway.getGatewaySettings(userId);
+  if (gw.useInBroadcasts) {
+    const count = await prisma.smsCarrier.count({ where: { userId, enabled: true } });
+    if (count > 0) return new NativeSmsProvider(userId);
+  }
   const credentials = await getTwilioCredentials(userId);
   if (!credentials) {
     const err = new Error('Configure as chaves da Twilio (Account SID e Auth Token) em Configurações > Telefonia para enviar SMS.');

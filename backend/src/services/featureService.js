@@ -52,6 +52,13 @@ const FEATURES = [
     requires: ['contatos', 'conexoes']
   },
   {
+    key: 'gateway',
+    label: 'Gateway de telecom (SMS próprio, API e voz)',
+    icon: '📡',
+    description: 'Fornecedores de SMS por SMPP, API própria com chaves, consumo e troncos SIP de voz.',
+    requires: []
+  },
+  {
     key: 'discador',
     label: 'Discador para equipes de vendas',
     icon: '📞',

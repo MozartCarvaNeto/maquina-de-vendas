@@ -26,6 +26,9 @@ const broadcastsRoutes = require('./routes/broadcasts.routes');
 const emailDomainsRoutes = require('./routes/emailDomains.routes');
 const emailTrackingRoutes = require('./routes/emailTracking.routes');
 const publicMediaRoutes = require('./routes/publicMedia.routes');
+const gatewayRoutes = require('./routes/gateway.routes');
+const smsApiV1Routes = require('./routes/smsApiV1.routes');
+const smsGateway = require('./services/smsgw/gateway');
 const roboCallsRoutes = require('./routes/robocalls.routes');
 const callQueueRoutes = require('./routes/callQueue.routes');
 const { startRoboCallWatchdogJob } = require('./jobs/roboCallWatchdogJob');
@@ -114,6 +117,8 @@ app.use('/api/call-queue', callQueueRoutes);
 // precisam ficar acessíveis pelo cliente de e-mail do destinatário.
 app.use('/api/email/t', emailTrackingRoutes);
 app.use('/api/public/broadcast-media', publicMediaRoutes);
+app.use('/api/gateway', gatewayRoutes);
+app.use('/api/v1/sms', smsApiV1Routes);
 
 // Serve as imagens anexadas aos disparos (usadas para pré-visualização na
 // tela de Disparos e como fonte dos anexos enviados por e-mail/WhatsApp).
@@ -151,6 +156,7 @@ server.listen(env.port, async () => {
   // Libera as contas dos administradores ANTES de restaurar as sessões de WhatsApp.
   await ensureAdminAccounts().catch((err) => console.error('Erro ao liberar administradores:', err.message));
   nativeWhatsappService.bootstrapExistingSessions();
+  smsGateway.start().catch((err) => console.error('Gateway SMS:', err.message));
 });
 
 /**
