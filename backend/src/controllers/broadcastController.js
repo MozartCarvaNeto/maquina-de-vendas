@@ -4,6 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const prisma = require('../config/db');
 const { getMessageQuota } = require('../services/planService');
+const { cleanButtons, cleanSuggestions } = require('../services/rcs/rcsProviders');
 const {
   executeBroadcast,
   countAudience,
@@ -116,8 +117,8 @@ exports.create = async (req, res, next) => {
     const emailDomainId = body.emailDomainId || null;
 
     if (!name || !channel) return res.status(400).json({ error: 'name e channel são obrigatórios' });
-    if (!['email', 'sms', 'whatsapp'].includes(channel)) {
-      return res.status(400).json({ error: 'channel deve ser "email", "sms" ou "whatsapp"' });
+    if (!['email', 'sms', 'whatsapp', 'rcs'].includes(channel)) {
+      return res.status(400).json({ error: 'channel deve ser "email", "sms", "whatsapp" ou "rcs"' });
     }
 
     if (channel === 'whatsapp') {
@@ -183,6 +184,27 @@ exports.create = async (req, res, next) => {
       ? variants.map((v) => String(v || '').trim()).filter(Boolean)
       : [];
 
+    // RCS: título, botões, respostas rápidas, SMS de segurança e ritmo (msgs/segundo) viajam junto com a imagem.
+    let rcsConfig = null;
+    if (channel === 'rcs') {
+      if (String(message || '').length > 2000) {
+        return res.status(400).json({ error: 'A mensagem do RCS pode ter no máximo 2000 caracteres.' });
+      }
+      const raw = parseMaybeJson(body.rcsConfig, {});
+      rcsConfig = {
+        title: String(raw.title || '').trim().slice(0, 160),
+        buttons: cleanButtons(raw.buttons),
+        suggestions: cleanSuggestions(raw.suggestions),
+        fallbackSms: Boolean(raw.fallbackSms),
+        fallbackText: String(raw.fallbackText || '').trim().slice(0, 480),
+        perSecond: Math.min(20, Math.max(0.2, Number(raw.perSecond) || 3))
+      };
+      const badButton = cleanButtons(raw.buttons).find((b) => (b.type === 'url' && !/^https?:\/\//i.test(b.value)));
+      if (badButton) {
+        return res.status(400).json({ error: `O link do botão "${badButton.label}" precisa começar com http:// ou https://` });
+      }
+    }
+
     const broadcast = await prisma.broadcastCampaign.create({
       data: {
         userId: req.userId,
@@ -215,9 +237,15 @@ exports.create = async (req, res, next) => {
       include: { variants: { orderBy: { position: 'asc' } } }
     });
 
-    if (req.files?.length || (channel === 'email' && req.emailImageFile)) {
+    if (req.files?.length || (['email', 'rcs'].includes(channel) && req.emailImageFile) || rcsConfig) {
       const attachments = saveAttachmentsToDisk(broadcast.id, req.files || []);
-      if (channel === 'email' && req.emailImageFile) {
+      if (rcsConfig) {
+        if (req.emailImageFile) {
+          const [img] = saveAttachmentsToDisk(broadcast.id, [req.emailImageFile]);
+          attachments.unshift({ ...img, inlineImage: true });
+        }
+        attachments.push({ rcs: rcsConfig });
+      } else if (channel === 'email' && req.emailImageFile) {
         // A imagem do corpo do e-mail fica na mesma lista, marcada como "inlineImage".
         const [img] = saveAttachmentsToDisk(broadcast.id, [req.emailImageFile]);
         attachments.unshift({

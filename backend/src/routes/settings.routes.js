@@ -16,6 +16,8 @@ router.post('/ai-telephony', settingsController.saveAiTelephonySettings);
 router.post('/email', settingsController.saveEmailSettings);
 router.post('/sms', settingsController.saveSmsSettings);
 router.post('/sms/test', settingsController.testSms);
+router.post('/rcs', settingsController.saveRcsSettings);
+router.post('/rcs/test', settingsController.testRcs);
 router.post('/email/test', settingsController.testEmail);
 router.delete('/:category/:provider', settingsController.deleteProviderSettings);
 router.delete('/:id', settingsController.deleteSetting);

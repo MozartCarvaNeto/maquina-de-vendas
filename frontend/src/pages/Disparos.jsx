@@ -20,6 +20,12 @@ function emptyForm() {
     recurringInterval: 'semanal',
     attachments: [],
     emailImage: null,
+    rcsTitle: '',
+    rcsButtons: [],
+    rcsSuggestions: [],
+    rcsFallbackSms: false,
+    rcsFallbackText: '',
+    rcsPerSecond: 3,
     emailImagePosition: 'above',
     minDelaySeconds: 40,
     maxDelaySeconds: 100,
@@ -353,6 +359,17 @@ export default function Disparos() {
       formData.append('emailImage', form.emailImage);
       formData.append('emailImagePosition', form.emailImagePosition);
     }
+    if (form.channel === 'rcs') {
+      if (form.emailImage) formData.append('emailImage', form.emailImage);
+      formData.append('rcsConfig', JSON.stringify({
+        title: form.rcsTitle,
+        buttons: form.rcsButtons,
+        suggestions: form.rcsSuggestions.filter((s) => s.trim()),
+        fallbackSms: form.rcsFallbackSms,
+        fallbackText: form.rcsFallbackText,
+        perSecond: Number(form.rcsPerSecond) || 3
+      }));
+    }
 
     try {
       await api.post('/broadcasts', formData);
@@ -469,7 +486,7 @@ export default function Disparos() {
                       <strong>{b.name}</strong>
                       {Array.isArray(b.attachments) && b.attachments.length > 0 && <span className="attachment-badge">📎 anexo</span>}
                     </td>
-                    <td>{b.channel === 'email' ? '📧 E-mail' : b.channel === 'whatsapp' ? '💬 WhatsApp' : '📱 SMS'}</td>
+                    <td>{b.channel === 'email' ? '📧 E-mail' : b.channel === 'whatsapp' ? '💬 WhatsApp' : b.channel === 'rcs' ? '✨ RCS' : '📱 SMS'}</td>
                     <td>
                       {b.scheduleType === 'now' && 'Imediato'}
                       {b.scheduleType === 'scheduled' && `Em ${new Date(b.scheduledAt).toLocaleString('pt-BR')}`}
@@ -631,6 +648,7 @@ export default function Disparos() {
                 <option value="whatsapp">💬 WhatsApp</option>
                 <option value="email">📧 E-mail</option>
                 <option value="sms">📱 SMS</option>
+                <option value="rcs">✨ RCS (mensagem rica)</option>
               </select>
 
               {form.channel === 'whatsapp' && (
@@ -728,6 +746,99 @@ export default function Disparos() {
                       </>
                     )}
                   </div>
+                </>
+              )}
+
+              {form.channel === 'rcs' && (
+                <>
+                  <p className="hint-text">
+                    ✨ RCS é a mensagem "rica" do Android (Google Mensagens): cartão com imagem, botões e respostas rápidas.
+                    Não aceita código HTML (se colar, as marcas são removidas); o visual vem do cartão abaixo.
+                    Configure o provedor em Configurações &gt; RCS antes de enviar.
+                  </p>
+                  <label>Título do cartão (opcional, até 160 caracteres — aceita {'{{nome}}'})</label>
+                  <input maxLength={160} value={form.rcsTitle} onChange={(e) => setForm({ ...form, rcsTitle: e.target.value })} />
+                  <label>Mensagem (até 2000 caracteres — aceita {'{{nome}}'})</label>
+                  <textarea rows={5} maxLength={2000} value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} required />
+
+                  <div className="image-upload-box">
+                    <label>Imagem do cartão (opcional)</label>
+                    <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" onChange={handleEmailImageChange} />
+                    <p className="hint-text">JPG ou PNG, proporção horizontal (ex.: 1440×720). Precisa do endereço público (BACKEND_PUBLIC_URL com https) no servidor.</p>
+                    {form.emailImage && (
+                      <ul className="attachments-list">
+                        <li>
+                          <span>🖼️ {form.emailImage.name} ({formatBytes(form.emailImage.size)})</span>
+                          <button type="button" className="btn-link-small" onClick={() => setForm({ ...form, emailImage: null })}>remover</button>
+                        </li>
+                      </ul>
+                    )}
+                  </div>
+
+                  <div className="image-upload-box">
+                    <label>Botões (até 4)</label>
+                    {form.rcsButtons.map((b, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+                        <select value={b.type} onChange={(e) => setForm({ ...form, rcsButtons: form.rcsButtons.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)) })}>
+                          <option value="url">Abrir link</option>
+                          <option value="call">Ligar</option>
+                        </select>
+                        <input placeholder="Texto (até 25)" maxLength={25} value={b.label} onChange={(e) => setForm({ ...form, rcsButtons: form.rcsButtons.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) })} />
+                        <input placeholder={b.type === 'call' ? '11 4000-1234' : 'https://...'} value={b.value} onChange={(e) => setForm({ ...form, rcsButtons: form.rcsButtons.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)) })} />
+                        <button type="button" className="btn-link-small" onClick={() => setForm({ ...form, rcsButtons: form.rcsButtons.filter((_, j) => j !== i) })}>remover</button>
+                      </div>
+                    ))}
+                    {form.rcsButtons.length < 4 && (
+                      <button type="button" className="btn-secondary-small" onClick={() => setForm({ ...form, rcsButtons: [...form.rcsButtons, { type: 'url', label: '', value: '' }] })}>+ Adicionar botão</button>
+                    )}
+
+                    <label style={{ marginTop: 10 }}>Respostas rápidas (até 4, ex.: "Tenho interesse")</label>
+                    {form.rcsSuggestions.map((s, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                        <input maxLength={25} placeholder="Até 25 caracteres" value={s} onChange={(e) => setForm({ ...form, rcsSuggestions: form.rcsSuggestions.map((x, j) => (j === i ? e.target.value : x)) })} />
+                        <button type="button" className="btn-link-small" onClick={() => setForm({ ...form, rcsSuggestions: form.rcsSuggestions.filter((_, j) => j !== i) })}>remover</button>
+                      </div>
+                    ))}
+                    {form.rcsSuggestions.length < 4 && (
+                      <button type="button" className="btn-secondary-small" onClick={() => setForm({ ...form, rcsSuggestions: [...form.rcsSuggestions, ''] })}>+ Adicionar resposta rápida</button>
+                    )}
+                  </div>
+
+                  <label>
+                    <input type="checkbox" checked={form.rcsFallbackSms} onChange={(e) => setForm({ ...form, rcsFallbackSms: e.target.checked })} />{' '}
+                    Se o celular não tiver RCS, enviar SMS (texto abaixo)
+                  </label>
+                  {form.rcsFallbackSms && (
+                    <textarea rows={3} maxLength={480} placeholder="Texto do SMS (se vazio, usa a mensagem acima). Com Messaging Service da Twilio o SMS de segurança já é automático." value={form.rcsFallbackText} onChange={(e) => setForm({ ...form, rcsFallbackText: e.target.value })} />
+                  )}
+
+                  <label>Velocidade de envio</label>
+                  <select value={form.rcsPerSecond} onChange={(e) => setForm({ ...form, rcsPerSecond: e.target.value })}>
+                    <option value="0.5">Devagar (1 a cada 2 s)</option>
+                    <option value="1">1 por segundo</option>
+                    <option value="3">3 por segundo (padrão)</option>
+                    <option value="10">10 por segundo</option>
+                    <option value="20">20 por segundo (máximo)</option>
+                  </select>
+
+                  <label>Prévia</label>
+                  <div style={{ maxWidth: 280, border: '1px solid #ddd', borderRadius: 16, overflow: 'hidden', background: '#fff', color: '#222' }}>
+                    {form.emailImage && <img alt="" src={URL.createObjectURL(form.emailImage)} style={{ width: '100%', display: 'block' }} />}
+                    <div style={{ padding: 10, fontSize: 14 }}>
+                      {form.rcsTitle && <strong style={{ display: 'block', marginBottom: 4 }}>{form.rcsTitle}</strong>}
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{form.message || 'Sua mensagem aparece aqui.'}</div>
+                    </div>
+                    {form.rcsButtons.filter((b) => b.label).map((b, i) => (
+                      <div key={i} style={{ borderTop: '1px solid #eee', padding: 8, textAlign: 'center', color: '#1a73e8', fontSize: 14 }}>{b.label}</div>
+                    ))}
+                  </div>
+                  {form.rcsSuggestions.filter((s) => s.trim()).length > 0 && (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                      {form.rcsSuggestions.filter((s) => s.trim()).map((s, i) => (
+                        <span key={i} style={{ border: '1px solid #1a73e8', color: '#1a73e8', borderRadius: 16, padding: '4px 10px', fontSize: 13 }}>{s}</span>
+                      ))}
+                    </div>
+                  )}
                 </>
               )}
 

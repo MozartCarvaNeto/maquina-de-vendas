@@ -4,6 +4,9 @@ const fs = require('fs');
 const prisma = require('../config/db');
 const { getEmailProvider } = require('./email/emailProviderFactory');
 const { getSmsProvider } = require('./sms/smsProviderFactory');
+const { getRcsProvider } = require('./rcs/rcsProviderFactory');
+const { htmlToRcsText, cleanButtons, cleanSuggestions } = require('./rcs/rcsProviders');
+const env = require('../config/env');
 const { pickNextCallerNumber } = require('./dialerQueueService');
 const { buildListLeadWhere } = require('./leadListService');
 const whatsappDispatcher = require('./whatsapp/whatsappDispatcher');
@@ -142,7 +145,7 @@ async function buildAudienceWhere(userId, audienceFilter, channel) {
 
   const extra = [];
   if (channel === 'email') extra.push({ email: { not: null } }, { NOT: { email: '' } });
-  if (channel === 'sms' || channel === 'whatsapp') extra.push({ phone: { not: null } }, { NOT: { phone: '' } });
+  if (channel === 'sms' || channel === 'whatsapp' || channel === 'rcs') extra.push({ phone: { not: null } }, { NOT: { phone: '' } });
 
   return extra.length ? { AND: [base, ...extra] } : base;
 }
@@ -469,7 +472,7 @@ async function executeBroadcast(broadcastId) {
   // Anexos comuns (arquivos) x imagem do corpo do e-mail (banner, aparece dentro da mensagem).
   const inlineImageInfo = broadcast.channel === 'email' ? attachments.find((a) => a.inlineImage) : null;
   const emailAttachments = attachments
-    .filter((a) => !a.inlineImage)
+    .filter((a) => !a.inlineImage && !a.rcs)
     .map((a) => ({
       filename: a.originalName || a.filename,
       path: path.join(ATTACHMENTS_ROOT, broadcastId, a.filename)
@@ -482,6 +485,27 @@ async function executeBroadcast(broadcastId) {
       cid: INLINE_CID,
       contentDisposition: 'inline'
     });
+  }
+
+  // ---- RCS: configuração do cartão (título, botões, respostas rápidas, SMS de segurança) e imagem pública ----
+  const rcsCfg = broadcast.channel === 'rcs' ? (attachments.find((a) => a.rcs) || {}).rcs || {} : {};
+  const rcsImageInfo = broadcast.channel === 'rcs' ? attachments.find((a) => a.inlineImage) : null;
+  const rcsImageUrl = rcsImageInfo
+    ? `${String(env.backendPublicUrl || '').replace(/\/$/, '')}/api/public/broadcast-media/${broadcastId}/${rcsImageInfo.filename}`
+    : null;
+  const rcsThrottleMs = Math.round(1000 / Math.min(20, Math.max(0.2, Number(rcsCfg.perSecond) || 3)));
+
+  if (broadcast.channel === 'rcs' && rcsImageUrl && !/^https:\/\//i.test(rcsImageUrl)) {
+    await prisma.broadcastCampaign.update({
+      where: { id: broadcast.id },
+      data: {
+        status: 'pausado',
+        isRunning: false,
+        runningNote: 'Para enviar imagem por RCS o sistema precisa de um endereço público com https: preencha BACKEND_PUBLIC_URL no .env (ex.: https://seudominio.com.br) e reinicie. Depois clique em Retomar.'
+      }
+    });
+    if (ownsRun()) activeRuns.delete(broadcastId);
+    return;
   }
 
   let sentCount = 0;
@@ -723,6 +747,50 @@ async function executeBroadcast(broadcastId) {
             recordMessageSent(broadcast.userId);
             sentThisLead = true;
             await heartbeat(broadcast.id, `Enviando… (${sentCount} enviados nesta rodada)`);
+          } else if (broadcast.channel === 'rcs') {
+            if (!lead.phone) throw new Error('Lead sem telefone cadastrado');
+            const rcsProvider = await getRcsProvider(broadcast.userId);
+            const rcsMessage = {
+              to: lead.phone,
+              text: htmlToRcsText(renderTemplate(broadcast.message, lead)),
+              title: htmlToRcsText(renderTemplate(rcsCfg.title || '', lead)),
+              imageUrl: rcsImageUrl,
+              buttons: cleanButtons(rcsCfg.buttons),
+              suggestions: cleanSuggestions(rcsCfg.suggestions)
+            };
+            let channelUsed = 'rcs';
+            try {
+              await rcsProvider.send(rcsMessage);
+            } catch (rcsError) {
+              // Aparelho sem RCS (provedor avisou que não entregou): manda o SMS de segurança, se o usuário ativou.
+              if (rcsError.notRcsCapable && rcsCfg.fallbackSms) {
+                const smsProvider = await getSmsProvider(broadcast.userId);
+                let smsFrom = smsProvider.sender;
+                if (!smsFrom) smsFrom = (await pickNextCallerNumber(broadcast.userId))?.phoneNumber || null;
+                if (!smsFrom) throw rcsError;
+                await smsProvider.sendSms({
+                  to: lead.phone,
+                  from: smsFrom,
+                  body: htmlToRcsText(renderTemplate(rcsCfg.fallbackText || broadcast.message, lead))
+                });
+                channelUsed = 'sms (fallback)';
+              } else {
+                throw rcsError;
+              }
+            }
+
+            await markRecipient(rec.id, {
+              status: 'enviado',
+              sentAt: new Date(),
+              errorMessage: channelUsed === 'rcs' ? null : 'Aparelho sem RCS: enviado por SMS.'
+            });
+            currentRec = null;
+            sentCount += 1;
+            recordMessageSent(broadcast.userId);
+            sentThisLead = true;
+            await heartbeat(broadcast.id, `Enviando RCS… (${sentCount} enviados nesta rodada)`);
+            // Ritmo de envio (mensagens por segundo) definido no disparo.
+            await waitWithHeartbeat(broadcast.id, rcsThrottleMs, `Enviando RCS… (${sentCount} enviados nesta rodada)`, runToken);
           } else {
             throw new Error(`Canal "${broadcast.channel}" não suportado`);
           }
@@ -752,7 +820,7 @@ async function executeBroadcast(broadcastId) {
 
           // Problema da CONTA (chaves, país bloqueado, remetente sem SMS, conta Trial…): não adianta tentar os
           // outros leads. Pausa o disparo com o motivo, sem marcar ninguém como falha — corrija e clique em Retomar.
-          if (error.configProblem && ['sms', 'email'].includes(broadcast.channel)) {
+          if (error.configProblem && ['sms', 'email', 'rcs'].includes(broadcast.channel)) {
             interrupted = true;
             await markPausedForConnection(broadcast.id, `Disparo pausado: ${error.message} Corrija e clique em Retomar.`);
             break;

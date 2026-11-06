@@ -26,6 +26,12 @@ export default function Configuracoes() {
   const [resend, setResend] = useState({ apiKey: '', fromEmail: '', fromName: '' });
   const [sendgrid, setSendgrid] = useState({ apiKey: '', fromEmail: '', fromName: '' });
   const [twilioEmail, setTwilioEmail] = useState({ fromEmail: '', fromName: '' });
+  const RCS_PRESETS = {
+    generico: '{\n  "from": "{{sender}}",\n  "to": "{{toDigits}}",\n  "contents": [\n    { "type": "text", "text": "{{text}}" }\n  ]\n}',
+    cartao: '{\n  "from": "{{sender}}",\n  "to": "{{toDigits}}",\n  "card": {\n    "title": "{{title}}",\n    "text": "{{text}}",\n    "imageUrl": "{{imageUrl}}",\n    "buttons": {{buttons}},\n    "suggestions": {{suggestions}}\n  }\n}'
+  };
+  const [rcs, setRcs] = useState({ provider: 'twilio', sender: '', fallbackFrom: '', disableFallback: false, url: '', authHeader: 'Authorization', apiKey: '', apiKeyHint: '', bodyTemplate: RCS_PRESETS.generico });
+  const [testRcsTo, setTestRcsTo] = useState('');
   const [smsSender, setSmsSender] = useState('');
   const [testSmsTo, setTestSmsTo] = useState('');
   const [testEmailTo, setTestEmailTo] = useState('');
@@ -80,6 +86,22 @@ export default function Configuracoes() {
           const v = aiTel.values || {};
           if (aiTel.provider === 'telnyx') setTelnyx((cur) => ({ ...cur, applicationSid: v.applicationSid || '', accountSid: v.accountSid || '' }));
           if (aiTel.provider === 'jambonz') setJambonz((cur) => ({ ...cur, accountSid: v.accountSid || '', baseUrl: v.baseUrl || 'https://api.jambonz.cloud', applicationSid: v.applicationSid || '' }));
+        }
+
+        const rcsRow = list.find((x) => x.category === 'rcs');
+        if (rcsRow && ['twilio', 'custom'].includes(rcsRow.provider)) {
+          const v = rcsRow.values || {};
+          setRcs((cur) => ({
+            ...cur,
+            provider: rcsRow.provider,
+            sender: v.sender || '',
+            fallbackFrom: v.fallbackFrom || '',
+            disableFallback: v.disableFallback === 'true',
+            url: v.url || '',
+            authHeader: v.authHeader || 'Authorization',
+            apiKeyHint: rcsRow.hints?.apiKey || '',
+            bodyTemplate: v.bodyTemplate || cur.bodyTemplate
+          }));
         }
 
         const sms = list.find((x) => x.category === 'sms');
@@ -196,11 +218,32 @@ export default function Configuracoes() {
     });
   }
 
+  async function saveRcs(e) {
+    e.preventDefault();
+    const body = rcs.provider === 'twilio'
+      ? { provider: 'twilio', sender: rcs.sender, fallbackFrom: rcs.fallbackFrom, disableFallback: rcs.disableFallback }
+      : { provider: 'custom', url: rcs.url, authHeader: rcs.authHeader, apiKey: rcs.apiKey, sender: rcs.sender, bodyTemplate: rcs.bodyTemplate };
+    await submitSetting({
+      area: 'rcs',
+      url: '/settings/rcs',
+      body,
+      okText: 'Configuração de RCS salva',
+      afterOk: () => {
+        setRcs((r) => ({ ...r, apiKey: '' }));
+        loadConfiguredSettings();
+      }
+    });
+  }
+
   async function sendTest(kind) {
     const isSms = kind === 'sms';
+    const isRcs = kind === 'rcs';
     setMessages((m) => ({ ...m, [`${kind}Test`]: 'Enviando teste…' }));
     try {
-      const { data } = await api.post(isSms ? '/settings/sms/test' : '/settings/email/test', { to: isSms ? testSmsTo : testEmailTo });
+      const { data } = await api.post(
+        isRcs ? '/settings/rcs/test' : isSms ? '/settings/sms/test' : '/settings/email/test',
+        { to: isRcs ? testRcsTo : isSms ? testSmsTo : testEmailTo }
+      );
       setMessages((m) => ({ ...m, [`${kind}Test`]: `✅ ${data.message}` }));
     } catch (error) {
       setMessages((m) => ({ ...m, [`${kind}Test`]: `❌ ${error.response?.data?.error || 'Erro ao enviar o teste'}` }));
@@ -451,6 +494,48 @@ export default function Configuracoes() {
           <button type="button" className="btn-secondary-small" onClick={() => sendTest('sms')} disabled={!testSmsTo}>Enviar SMS de teste</button>
           {messages.smsTest && <p className="config-msg">{messages.smsTest}</p>}
           <p className="card-note">Conta Twilio de teste (Trial): só envia para números verificados no console da Twilio. Para o Brasil, ative também Messaging &gt; Settings &gt; Geo permissions &gt; Brazil.</p>
+        </div>
+
+        <div className="card">
+          <h3>✨ RCS (mensagem rica)</h3>
+          <p className="card-desc">
+            RCS é o "WhatsApp das operadoras" no Android: cartão com imagem, botões e respostas rápidas. Escolha por onde enviar:
+            pela <strong>Twilio</strong> ou por <strong>outra empresa</strong> (Zenvia, Infobip, Sinch, Pontaltech, Take Blip…) via API.
+            Todo provedor exige um <strong>agente RCS verificado</strong> (cadastro da sua marca no Google/operadoras), feito no painel dele.
+          </p>
+          <form onSubmit={saveRcs}>
+            <select value={rcs.provider} onChange={(e) => setRcs({ ...rcs, provider: e.target.value })}>
+              <option value="twilio">Twilio (usa as chaves da Telefonia)</option>
+              <option value="custom">Outra empresa (API HTTP)</option>
+            </select>
+            {rcs.provider === 'twilio' ? (
+              <>
+                <input placeholder="Messaging Service (MG…) — recomendado — ou rcs:nome_do_agente" value={rcs.sender} onChange={(e) => setRcs({ ...rcs, sender: e.target.value })} />
+                <input placeholder="Número de SMS para o fallback (opcional, +1202…)" value={rcs.fallbackFrom} onChange={(e) => setRcs({ ...rcs, fallbackFrom: e.target.value })} />
+                <label><input type="checkbox" checked={rcs.disableFallback} onChange={(e) => setRcs({ ...rcs, disableFallback: e.target.checked })} /> Não enviar SMS/MMS se o celular não tiver RCS</label>
+              </>
+            ) : (
+              <>
+                <input placeholder="Endereço da API (https://…)" value={rcs.url} onChange={(e) => setRcs({ ...rcs, url: e.target.value })} />
+                <input placeholder="Nome do cabeçalho de autenticação (ex.: Authorization ou X-API-TOKEN)" value={rcs.authHeader} onChange={(e) => setRcs({ ...rcs, authHeader: e.target.value })} />
+                <input type="password" autoComplete="new-password" placeholder={rcs.apiKeyHint ? `Valor da chave salvo (${rcs.apiKeyHint}) — deixe vazio para manter` : 'Valor da chave (ex.: Bearer abc… ou o token)'} value={rcs.apiKey} onChange={(e) => setRcs({ ...rcs, apiKey: e.target.value })} />
+                <input placeholder="ID/nome do agente RCS (vai em {{sender}})" value={rcs.sender} onChange={(e) => setRcs({ ...rcs, sender: e.target.value })} />
+                <label>Modelo do corpo (JSON) — copie do manual do seu provedor e troque os dados pelos campos {'{{to}} {{toDigits}} {{text}} {{title}} {{imageUrl}} {{sender}} {{buttons}} {{suggestions}}'}</label>
+                <textarea rows={9} style={{ fontFamily: 'monospace', fontSize: 12 }} value={rcs.bodyTemplate} onChange={(e) => setRcs({ ...rcs, bodyTemplate: e.target.value })} />
+                <div>
+                  <button type="button" className="btn-secondary-small" onClick={() => setRcs({ ...rcs, bodyTemplate: RCS_PRESETS.generico })}>Modelo: só texto</button>{' '}
+                  <button type="button" className="btn-secondary-small" onClick={() => setRcs({ ...rcs, bodyTemplate: RCS_PRESETS.cartao })}>Modelo: cartão com imagem e botões</button>
+                </div>
+              </>
+            )}
+            <button className="btn-primary" type="submit">Salvar RCS</button>
+            {messages.rcs && <p className="config-msg">{messages.rcs}</p>}
+          </form>
+          <h4 className="subsection-title">Testar agora</h4>
+          <input placeholder="Seu celular Android com DDD (ex.: 11 99999-8888)" value={testRcsTo} onChange={(e) => setTestRcsTo(e.target.value)} />
+          <button type="button" className="btn-secondary-small" onClick={() => sendTest('rcs')} disabled={!testRcsTo}>Enviar RCS de teste</button>
+          {messages.rcsTest && <p className="config-msg">{messages.rcsTest}</p>}
+          <p className="card-note">Os modelos acima são pontos de partida: cada empresa tem seu formato; ajuste conforme a documentação dela e confirme com o teste.</p>
         </div>
 
         <div className="card">

@@ -8,6 +8,7 @@ const { getActiveDomainForSending } = require('../services/email/emailDomainServ
 const TwilioEmailProvider = require('../services/email/TwilioEmailProvider');
 const { getTwilioCredentials } = require('../services/twilioCredentials');
 const { getSmsProvider, getSmsSender } = require('../services/sms/smsProviderFactory');
+const { getRcsProvider } = require('../services/rcs/rcsProviderFactory');
 const { toE164BR } = require('../utils/phone');
 
 exports.listAvailableProviders = async (req, res, next) => {
@@ -304,6 +305,70 @@ exports.testSms = async (req, res, next) => {
     }
     await provider.sendSms({ to, from, body: 'Teste de SMS do Turbo Prospect: se você recebeu, está tudo certo!' });
     res.json({ success: true, message: `SMS de teste enviado para ${to}.`, from });
+  } catch (error) {
+    res.status(422).json({ error: error.message });
+  }
+};
+
+/**
+ * Provedor de RCS: "twilio" (Messaging Service / remetente RCS) ou "custom" (API HTTP de qualquer empresa).
+ */
+exports.saveRcsSettings = async (req, res, next) => {
+  try {
+    const { provider, ...fields } = req.body || {};
+    if (!provider) {
+      await prisma.setting.deleteMany({ where: { userId: req.userId, category: 'rcs' } });
+      return res.json({ success: true, message: 'Configuração de RCS removida.' });
+    }
+    if (!['twilio', 'custom'].includes(provider)) return res.status(400).json({ error: 'Provedor de RCS inválido.' });
+
+    let incoming;
+    if (provider === 'twilio') {
+      const sender = String(fields.sender || '').trim();
+      if (!/^(MG[0-9a-fA-F]{32}|rcs:[A-Za-z0-9_\-.@]{3,120})$/.test(sender)) {
+        return res.status(400).json({ error: 'Remetente inválido. Use o ID do Messaging Service (MG…, recomendado: já tem SMS de segurança automático) ou o remetente RCS (rcs:nome_do_agente).' });
+      }
+      incoming = { sender, fallbackFrom: fields.fallbackFrom, disableFallback: fields.disableFallback ? 'true' : 'false' };
+    } else {
+      const url = String(fields.url || '').trim();
+      if (!/^https:\/\/\S+$/i.test(url)) return res.status(400).json({ error: 'O endereço (URL) da API do provedor precisa começar com https://' });
+      const bodyTemplate = String(fields.bodyTemplate || '').trim();
+      try {
+        JSON.parse(bodyTemplate.replace(/\{\{\s*(buttons|suggestions)\s*\}\}/g, '[]').replace(/\{\{\s*\w+\s*\}\}/g, 'x'));
+      } catch (e) {
+        return res.status(400).json({ error: 'O modelo de corpo não é um JSON válido (confira aspas e vírgulas).' });
+      }
+      incoming = {
+        url,
+        authHeader: fields.authHeader || 'Authorization',
+        apiKey: fields.apiKey,
+        sender: fields.sender,
+        bodyTemplate
+      };
+    }
+    const { merged, toDelete } = await mergeCredentials(req.userId, 'rcs', provider, incoming);
+    await persistCredentials(req.userId, 'rcs', provider, merged, toDelete, { exclusive: true });
+    res.json({ success: true, message: 'Configuração de RCS salva.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** Envia um RCS de teste de verdade (texto + botão de exemplo) para diagnosticar a configuração. */
+exports.testRcs = async (req, res, next) => {
+  try {
+    const to = toE164BR((req.body || {}).to);
+    if (!to) return res.status(400).json({ error: 'Informe o celular de destino com DDD.' });
+    const provider = await getRcsProvider(req.userId);
+    const result = await provider.send({
+      to,
+      text: 'Teste de RCS do Turbo Prospect: se você recebeu, está tudo certo!',
+      title: 'Teste de RCS',
+      imageUrl: null,
+      buttons: [],
+      suggestions: ['Recebi']
+    });
+    res.json({ success: true, message: `RCS de teste enviado para ${to}. ${provider.nativeFallback ? 'Se o aparelho não tiver RCS, a Twilio envia SMS/MMS.' : 'Aparelhos sem RCS não recebem.'}`, id: result.providerMessageId || null });
   } catch (error) {
     res.status(422).json({ error: error.message });
   }

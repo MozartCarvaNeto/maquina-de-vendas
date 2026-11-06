@@ -25,6 +25,7 @@ const linesRoutes = require('./routes/lines.routes');
 const broadcastsRoutes = require('./routes/broadcasts.routes');
 const emailDomainsRoutes = require('./routes/emailDomains.routes');
 const emailTrackingRoutes = require('./routes/emailTracking.routes');
+const publicMediaRoutes = require('./routes/publicMedia.routes');
 const roboCallsRoutes = require('./routes/robocalls.routes');
 const callQueueRoutes = require('./routes/callQueue.routes');
 const { startRoboCallWatchdogJob } = require('./jobs/roboCallWatchdogJob');
@@ -112,6 +113,7 @@ app.use('/api/call-queue', callQueueRoutes);
 // Rotas públicas (sem login) de abertura/clique/descadastro de e-mail —
 // precisam ficar acessíveis pelo cliente de e-mail do destinatário.
 app.use('/api/email/t', emailTrackingRoutes);
+app.use('/api/public/broadcast-media', publicMediaRoutes);
 
 // Serve as imagens anexadas aos disparos (usadas para pré-visualização na
 // tela de Disparos e como fonte dos anexos enviados por e-mail/WhatsApp).
