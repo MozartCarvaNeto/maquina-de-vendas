@@ -82,6 +82,12 @@ module.exports = {
   webrtcIceServers: process.env.WEBRTC_ICE_SERVERS,
   firebaseApiKey: process.env.FIREBASE_API_KEY,
   asteriskWssUrl: process.env.ASTERISK_WSS_URL,
+  // ---- PBX nativo (Asterisk no mesmo servidor)
+  pbxHookSecret: process.env.PBX_HOOK_SECRET || '',
+  asteriskSoundsDir: process.env.ASTERISK_SOUNDS_DIR || '/var/lib/asterisk/sounds/turbo',
+  asteriskRecordingsDir: process.env.ASTERISK_RECORDINGS_DIR || '/var/spool/asterisk/turbo-recordings',
+  asteriskSpoolDir: process.env.ASTERISK_SPOOL_DIR || '/var/spool/asterisk/outgoing',
+  audioSocketPort: parseInt(process.env.AUDIOSOCKET_PORT || '4574', 10),
   twilioSmsFrom: process.env.TWILIO_SMS_FROM || null,
   // Remetente do e-mail da Twilio (precisa estar verificado/autenticado na Twilio). Só o administrador usa.
   twilioEmailFrom: process.env.TWILIO_EMAIL_FROM || null

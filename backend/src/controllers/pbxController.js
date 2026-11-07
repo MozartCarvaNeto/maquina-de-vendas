@@ -1,0 +1,478 @@
+// backend/src/controllers/pbxController.js
+// Telefonia PBX nativa: áudios, URA, filas, rotas de entrada, histórico/gravações, configuração do Asterisk.
+const fs = require('fs');
+const crypto = require('crypto');
+const prisma = require('../config/db');
+const core = require('../services/pbx/pbxCore');
+const svc = require('../services/pbx/pbxService');
+const { normalizeToAsteriskWav, wavToSlin8k, int16ToBuffer, buildWav } = require('../services/pbx/wav');
+const { ensureAllExtensions } = require('../services/smsgw/sipExtensions');
+const fail = (res, status, error) => res.status(status).json({ error });
+const str = (v, n = 80) => String(v ?? '').trim().slice(0, n);
+const num = (v, d, min, max) => Math.min(max, Math.max(min, Number.isFinite(parseInt(v, 10)) ? parseInt(v, 10) : d));
+
+// ------------------------------------------------------------------ visão geral
+exports.overview = async (req, res, next) => {
+  try {
+    const userId = req.userId;
+    const [audios, ivrs, queues, routes, trunks, settings, exts] = await Promise.all([
+      prisma.pbxAudio.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } }),
+      prisma.pbxIvr.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } }),
+      prisma.pbxQueue.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } }),
+      prisma.pbxInboundRoute.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } }),
+      prisma.sipTrunk.findMany({ where: { userId }, select: { id: true, name: true, enabled: true } }),
+      core.getPbxSettings(userId),
+      ensureAllExtensions(userId)
+    ]);
+    res.json({
+      tag: core.tagFor(userId),
+      audios,
+      ivrs,
+      queues,
+      routes,
+      trunks,
+      settings,
+      members: exts.map((e) => ({ memberId: e.memberId, name: e.name, extension: e.extension }))
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.saveSettings = async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const clean = {
+      recordInbound: b.recordInbound === false || b.recordInbound === 'false' ? 'false' : 'true',
+      recordOutbound: b.recordOutbound === false || b.recordOutbound === 'false' ? 'false' : 'true',
+      aiHandoffQueueId: str(b.aiHandoffQueueId, 60),
+      sttLanguage: str(b.sttLanguage, 10) || 'pt-BR',
+      sttProvider: ['auto', 'gemini', 'google', 'azure', 'openai'].includes(b.sttProvider) ? b.sttProvider : 'auto'
+    };
+    if (clean.aiHandoffQueueId) {
+      const q = await prisma.pbxQueue.findFirst({ where: { id: clean.aiHandoffQueueId, userId: req.userId } });
+      if (!q) return fail(res, 400, 'Fila inválida.');
+    }
+    res.json(await core.savePbxSettings(req.userId, clean));
+  } catch (e) {
+    next(e);
+  }
+};
+
+// ------------------------------------------------------------------ áudios
+exports.uploadAudio = async (req, res, next) => {
+  try {
+    if (!req.file) return fail(res, 400, 'Envie um arquivo de áudio.');
+    const kind = req.body.kind === 'moh' ? 'moh' : 'prompt';
+    const { wav, durationMs } = await normalizeToAsteriskWav(req.file.buffer, req.file.originalname);
+    if (durationMs < 200) return fail(res, 400, 'Áudio muito curto.');
+    const id = crypto.randomUUID();
+    await svc.saveAudioFile(req.userId, id, wav, kind);
+    const name = str(req.body.name, 80) || str(req.file.originalname.replace(/\.[^.]+$/, ''), 80) || 'Áudio';
+    const row = await prisma.pbxAudio.create({ data: { id, userId: req.userId, name, kind, durationMs } });
+    res.status(201).json(row);
+  } catch (e) {
+    if (e.status) return fail(res, e.status, e.message);
+    if (/WAV|ffmpeg|converter/i.test(e.message)) return fail(res, 400, e.message);
+    next(e);
+  }
+};
+
+/** Cria o áudio a partir de um texto, com a voz da IA (Gemini). */
+exports.ttsAudio = async (req, res, next) => {
+  try {
+    const text = str(req.body.text, 1200);
+    if (!text) return fail(res, 400, 'Escreva o texto da locução.');
+    let pcm;
+    try {
+      pcm = await require('../services/pbx/voiceEngines').synthesize(req.userId, str(req.body.voice, 120) || 'gemini:Kore', text, { fallback: false });
+    } catch (e) {
+      return fail(res, e.status === 400 ? 400 : 502, e.message);
+    }
+    const wav = buildWav(pcm, 8000);
+    const id = crypto.randomUUID();
+    await svc.saveAudioFile(req.userId, id, wav, 'prompt');
+    const row = await prisma.pbxAudio.create({
+      data: { id, userId: req.userId, name: str(req.body.name, 80) || text.slice(0, 40), kind: 'prompt', durationMs: Math.round((pcm.length / 2 / 8000) * 1000) }
+    });
+    res.status(201).json(row);
+  } catch (e) {
+    if (e.status) return fail(res, e.status, e.message);
+    next(e);
+  }
+};
+
+exports.audioFile = async (req, res, next) => {
+  try {
+    const a = await prisma.pbxAudio.findFirst({ where: { id: req.params.id, userId: req.userId } });
+    if (!a) return fail(res, 404, 'Áudio não encontrado.');
+    const p = svc.audioFilePath(req.userId, a.id);
+    if (!fs.existsSync(p)) return fail(res, 404, 'Arquivo do áudio não está no servidor.');
+    res.type('audio/wav');
+    fs.createReadStream(p).pipe(res);
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.deleteAudio = async (req, res, next) => {
+  try {
+    const id = req.params.id;
+    const used =
+      (await prisma.pbxIvr.findMany({ where: { userId: req.userId } })).some((i) => i.greetingAudioId === id || i.invalidAudioId === id) ||
+      (await prisma.pbxQueue.findMany({ where: { userId: req.userId } })).some((q) => q.mohAudioId === id);
+    if (used) return fail(res, 409, 'Esse áudio está em uso por uma URA ou fila. Troque antes de apagar.');
+    const r = await prisma.pbxAudio.deleteMany({ where: { id, userId: req.userId } });
+    if (!r.count) return fail(res, 404, 'Áudio não encontrado.');
+    svc.removeAudioFile(req.userId, id);
+    res.json({ success: true });
+  } catch (e) {
+    next(e);
+  }
+};
+
+// ------------------------------------------------------------------ URA / filas / rotas
+async function destOk(userId, d) {
+  const c = core.cleanDest(d);
+  if (!c) return null;
+  if (c.type === 'queue' && !(await prisma.pbxQueue.findFirst({ where: { id: c.id, userId } }))) return undefined;
+  if (c.type === 'ivr' && !(await prisma.pbxIvr.findFirst({ where: { id: c.id, userId } }))) return undefined;
+  if (c.type === 'extension' && !c.id && !c.value) return undefined;
+  if (c.type === 'number' && String(c.value || '').replace(/\D/g, '').length < 8) return undefined;
+  return c;
+}
+
+async function ownedAudio(userId, id) {
+  if (!id) return null;
+  const a = await prisma.pbxAudio.findFirst({ where: { id: String(id), userId } });
+  return a ? a.id : undefined;
+}
+
+exports.saveIvr = async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const userId = req.userId;
+    const name = str(b.name);
+    if (!name) return fail(res, 400, 'Dê um nome para a URA.');
+    const greeting = await ownedAudio(userId, b.greetingAudioId);
+    const invalid = await ownedAudio(userId, b.invalidAudioId);
+    if (greeting === undefined || invalid === undefined) return fail(res, 400, 'Áudio inválido.');
+    const options = [];
+    const seen = new Set();
+    for (const o of Array.isArray(b.options) ? b.options : []) {
+      const digit = str(o.digit, 1);
+      if (!/^[0-9*#]$/.test(digit) || seen.has(digit)) return fail(res, 400, `Tecla inválida ou repetida: "${digit}".`);
+      seen.add(digit);
+      const dest = await destOk(userId, o.dest);
+      if (!dest) return fail(res, 400, `Configure o destino da tecla ${digit}.`);
+      if (dest.type === 'ivr' && dest.id === req.params.id) return fail(res, 400, 'Uma URA não pode apontar para ela mesma.');
+      options.push({ digit, dest });
+    }
+    let timeoutDest = null;
+    if (b.timeoutDest && b.timeoutDest.type) {
+      timeoutDest = await destOk(userId, b.timeoutDest);
+      if (!timeoutDest) return fail(res, 400, 'Destino de "sem resposta" inválido.');
+    }
+    const data = {
+      name,
+      greetingAudioId: greeting,
+      invalidAudioId: invalid,
+      timeoutSeconds: num(b.timeoutSeconds, 6, 2, 30),
+      maxRetries: num(b.maxRetries, 2, 1, 5),
+      options,
+      timeoutDest,
+      extensionDial: !!b.extensionDial,
+      enabled: b.enabled !== false
+    };
+    const row = req.params.id
+      ? await prisma.pbxIvr.update({ where: { id: req.params.id }, data })
+      : await prisma.pbxIvr.create({ data: { userId, ...data } });
+    if (req.params.id && row.userId !== userId) return fail(res, 404, 'URA não encontrada.');
+    res.json(row);
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.saveQueue = async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const userId = req.userId;
+    const name = str(b.name);
+    if (!name) return fail(res, 400, 'Dê um nome para a fila.');
+    const moh = await ownedAudio(userId, b.mohAudioId);
+    if (moh === undefined) return fail(res, 400, 'Música de espera inválida.');
+    const exts = await ensureAllExtensions(userId);
+    const valid = new Map(exts.map((e) => [e.memberId, e]));
+    const members = (Array.isArray(b.members) ? b.members : [])
+      .map((m) => valid.get(m.memberId))
+      .filter(Boolean)
+      .map((e) => ({ memberId: e.memberId, name: e.name }));
+    let overflowDest = null;
+    if (b.overflowDest && b.overflowDest.type) {
+      overflowDest = await destOk(userId, b.overflowDest);
+      if (!overflowDest) return fail(res, 400, 'Destino quando ninguém atende inválido.');
+      if (overflowDest.type === 'queue' && overflowDest.id === req.params.id) return fail(res, 400, 'A fila não pode transbordar para ela mesma.');
+    }
+    const data = {
+      name,
+      strategy: ['ringall', 'leastrecent', 'fewestcalls', 'random', 'rrmemory', 'linear'].includes(b.strategy) ? b.strategy : 'rrmemory',
+      ringSeconds: num(b.ringSeconds, 20, 5, 60),
+      maxWaitSeconds: num(b.maxWaitSeconds, 300, 10, 3600),
+      wrapupSeconds: num(b.wrapupSeconds, 5, 0, 120),
+      mohAudioId: moh,
+      announceHoldtime: !!b.announceHoldtime,
+      joinEmpty: !!b.joinEmpty,
+      members,
+      overflowDest,
+      enabled: b.enabled !== false
+    };
+    if (req.params.id) {
+      const cur = await prisma.pbxQueue.findFirst({ where: { id: req.params.id, userId } });
+      if (!cur) return fail(res, 404, 'Fila não encontrada.');
+      return res.json(await prisma.pbxQueue.update({ where: { id: req.params.id }, data }));
+    }
+    res.json(await prisma.pbxQueue.create({ data: { userId, ...data } }));
+  } catch (e) {
+    next(e);
+  }
+};
+
+function cleanHours(h) {
+  if (!h || !h.enabled) return null;
+  const days = {};
+  for (const d of core.DAY_KEYS) {
+    days[d] = (Array.isArray(h.days?.[d]) ? h.days[d] : [])
+      .filter((r) => /^\d{2}:\d{2}$/.test(r?.[0]) && /^\d{2}:\d{2}$/.test(r?.[1]) && r[0] < r[1])
+      .slice(0, 4)
+      .map((r) => [r[0], r[1]]);
+  }
+  return { enabled: true, tz: /^[A-Za-z_\/+-]{3,40}$/.test(h.tz || '') ? h.tz : 'America/Sao_Paulo', days };
+}
+
+exports.saveRoute = async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const userId = req.userId;
+    const name = str(b.name);
+    if (!name) return fail(res, 400, 'Dê um nome para a rota.');
+    const dest = await destOk(userId, b.dest);
+    if (!dest) return fail(res, 400, 'Escolha para onde a ligação vai.');
+    let closedDest = null;
+    const hours = cleanHours(b.hours);
+    if (hours) {
+      closedDest = await destOk(userId, b.closedDest || { type: 'hangup' });
+      if (!closedDest) return fail(res, 400, 'Destino fora do horário inválido.');
+    }
+    let trunkId = null;
+    if (b.trunkId) {
+      const t = await prisma.sipTrunk.findFirst({ where: { id: String(b.trunkId), userId } });
+      if (!t) return fail(res, 400, 'Tronco inválido.');
+      trunkId = t.id;
+    }
+    const data = { name, trunkId, did: str(b.did, 30).replace(/\D/g, '') || null, dest, hours, closedDest, record: b.record !== false, enabled: b.enabled !== false };
+    if (req.params.id) {
+      const cur = await prisma.pbxInboundRoute.findFirst({ where: { id: req.params.id, userId } });
+      if (!cur) return fail(res, 404, 'Rota não encontrada.');
+      return res.json(await prisma.pbxInboundRoute.update({ where: { id: req.params.id }, data }));
+    }
+    res.json(await prisma.pbxInboundRoute.create({ data: { userId, ...data } }));
+  } catch (e) {
+    next(e);
+  }
+};
+
+function remover(model, label) {
+  return async (req, res, next) => {
+    try {
+      const id = req.params.id;
+      if (model === 'pbxQueue' || model === 'pbxIvr') {
+        const refs = [
+          ...(await prisma.pbxInboundRoute.findMany({ where: { userId: req.userId } })).flatMap((r) => [r.dest, r.closedDest]),
+          ...(await prisma.pbxIvr.findMany({ where: { userId: req.userId } })).flatMap((i) => [...(Array.isArray(i.options) ? i.options.map((o) => o.dest) : []), i.timeoutDest]),
+          ...(await prisma.pbxQueue.findMany({ where: { userId: req.userId } })).map((q) => q.overflowDest)
+        ];
+        if (refs.some((d) => d && d.id === id)) return fail(res, 409, `Essa ${label} está sendo usada em uma rota, URA ou fila. Troque antes de apagar.`);
+      }
+      const r = await prisma[model].deleteMany({ where: { id, userId: req.userId } });
+      if (!r.count) return fail(res, 404, 'Não encontrado.');
+      res.json({ success: true });
+    } catch (e) {
+      next(e);
+    }
+  };
+}
+exports.deleteIvr = remover('pbxIvr', 'URA');
+exports.deleteQueue = remover('pbxQueue', 'fila');
+exports.deleteRoute = remover('pbxInboundRoute', 'rota');
+
+// ------------------------------------------------------------------ histórico e gravações
+exports.listCalls = async (req, res, next) => {
+  try {
+    const where = { userId: req.userId };
+    if (['entrada', 'saida', 'ia'].includes(req.query.direction)) where.direction = req.query.direction;
+    if (req.query.status) where.status = String(req.query.status);
+    if (req.query.q) where.OR = [{ fromNumber: { contains: String(req.query.q) } }, { toNumber: { contains: String(req.query.q) } }];
+    const rows = (await prisma.pbxCall.findMany({ where, orderBy: { startedAt: 'desc' }, take: 200 })).map((c) => {
+      const has = (f) => {
+        const p = f && svc.recordingPath(req.userId, f);
+        return !!p && fs.existsSync(p);
+      };
+      return { ...c, hasRecording: has(c.recordingFile), hasVoicemail: has(c.voicemailFile) };
+    });
+    res.json(rows);
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.streamRecording = async (req, res, next) => {
+  try {
+    const c = await prisma.pbxCall.findFirst({ where: { id: req.params.id, userId: req.userId } });
+    if (!c) return fail(res, 404, 'Chamada não encontrada.');
+    const file = req.query.kind === 'voicemail' ? c.voicemailFile : c.recordingFile;
+    const p = file && svc.recordingPath(req.userId, file);
+    if (!p || !fs.existsSync(p)) return fail(res, 404, 'Gravação não encontrada no servidor.');
+    const size = fs.statSync(p).size;
+    const range = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
+    res.set('Content-Type', 'audio/wav');
+    res.set('Accept-Ranges', 'bytes');
+    if (req.query.download) res.set('Content-Disposition', `attachment; filename="${file}.wav"`);
+    if (range) {
+      const start = range[1] ? parseInt(range[1], 10) : 0;
+      const end = range[2] ? Math.min(size - 1, parseInt(range[2], 10)) : size - 1;
+      if (start > end || start >= size) return res.status(416).end();
+      res.status(206).set({ 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1 });
+      return fs.createReadStream(p, { start, end }).pipe(res);
+    }
+    res.set('Content-Length', size);
+    fs.createReadStream(p).pipe(res);
+  } catch (e) {
+    next(e);
+  }
+};
+
+// ------------------------------------------------------------------ configuração do Asterisk
+exports.config = async (req, res, next) => {
+  try {
+    res.json(await svc.loadPbxConfig(req.userId));
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.apply = async (req, res, next) => {
+  try {
+    res.json(await svc.applyConfig(req.userId));
+  } catch (e) {
+    if (e.status) return fail(res, e.status, e.message);
+    next(e);
+  }
+};
+
+// ------------------------------------------------------------------ ligar sem pagar nada ao vendedor (click-to-call)
+exports.clickToCall = async (req, res, next) => {
+  try {
+    const number = String(req.body.number || '').replace(/\D/g, '');
+    if (number.length < 8) return fail(res, 400, 'Número inválido.');
+    const ext = await prisma.sipExtension.findFirst({ where: { userId: req.userId, memberId: req.memberId } });
+    if (!ext) return fail(res, 400, 'Você ainda não tem ramal. Abra a tela Telefone uma vez.');
+    const fs2 = require('fs');
+    const path = require('path');
+    const os = require('os');
+    const env = require('../config/env');
+    const tag = core.tagFor(req.userId);
+    const name = `turbo-c2c-${crypto.randomUUID()}.call`;
+    const body = [`Channel: PJSIP/${ext.extension}`, `CallerID: "Ligando para ${number}" <${number}>`, 'WaitTime: 30', 'MaxRetries: 0', `Context: turbo-agent-${tag}`, `Extension: ${number}`, 'Priority: 1', 'Archive: no'].join('\n') + '\n';
+    const tmp = path.join(os.tmpdir(), name);
+    fs2.writeFileSync(tmp, body);
+    try {
+      try {
+        fs2.renameSync(tmp, path.join(env.asteriskSpoolDir, name));
+      } catch (_) {
+        fs2.copyFileSync(tmp, path.join(env.asteriskSpoolDir, name));
+        fs2.rmSync(tmp, { force: true });
+      }
+    } catch (e) {
+      fs2.rmSync(tmp, { force: true });
+      return fail(res, 502, 'Não consegui entregar a ligação ao Asterisk (ele precisa estar no mesmo servidor).');
+    }
+    res.json({ success: true, message: 'Seu telefone vai tocar; ao atender, ligamos para o cliente.' });
+  } catch (e) {
+    next(e);
+  }
+};
+
+// ------------------------------------------------------------------ vozes e reconhecimento de fala (chaves)
+const VOICE_PROVIDERS = {
+  google: { fields: ['apiKey'], label: 'Google Cloud' },
+  azure: { fields: ['apiKey', 'region'], label: 'Microsoft Azure' },
+  polly: { fields: ['accessKeyId', 'secret', 'region'], label: 'Amazon Polly' },
+  elevenlabs: { fields: ['apiKey'], label: 'ElevenLabs' }
+};
+
+exports.voiceEngines = async (req, res, next) => {
+  try {
+    const { describeStored } = require('../services/settingsHelpers');
+    const out = {};
+    for (const [p, meta] of Object.entries(VOICE_PROVIDERS)) {
+      const stored = await require('../services/settingsHelpers').readStoredCredentials(req.userId, 'voice_engines', p).catch(() => ({}));
+      const view = describeStored ? describeStored(stored) : {};
+      out[p] = { label: meta.label, configured: Object.keys(stored).length > 0, fields: meta.fields, values: view };
+    }
+    res.json(out);
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.saveVoiceEngine = async (req, res, next) => {
+  try {
+    const p = req.params.provider;
+    const meta = VOICE_PROVIDERS[p];
+    if (!meta) return fail(res, 404, 'Fornecedor desconhecido.');
+    const { mergeCredentials, persistCredentials } = require('../services/settingsHelpers');
+    const incoming = {};
+    for (const f of meta.fields) if (req.body[f] !== undefined) incoming[f] = String(req.body[f]).replace(/\s+/g, '').slice(0, 300);
+    if (incoming.region && !/^[a-z0-9-]{3,30}$/i.test(incoming.region)) return fail(res, 400, 'Região inválida (ex.: brazilsouth, eastus, us-east-1).');
+    const { merged, toDelete } = await mergeCredentials(req.userId, 'voice_engines', p, incoming);
+    await persistCredentials(req.userId, 'voice_engines', p, merged, toDelete, { exclusive: false });
+    res.json({ success: true });
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.deleteVoiceEngine = async (req, res, next) => {
+  try {
+    if (!VOICE_PROVIDERS[req.params.provider]) return fail(res, 404, 'Fornecedor desconhecido.');
+    await prisma.setting.deleteMany({ where: { userId: req.userId, category: 'voice_engines', provider: req.params.provider } });
+    res.json({ success: true });
+  } catch (e) {
+    next(e);
+  }
+};
+
+/** Ouvir amostra de qualquer voz, exatamente como o telefone vai receber (8 kHz). */
+exports.voiceTest = async (req, res) => {
+  try {
+    const text = str(req.body.text, 300) || 'Olá! Tudo bem? Aqui é a assistente virtual. Posso te ajudar?';
+    const pcm = await require('../services/pbx/voiceEngines').synthesize(req.userId, str(req.body.voice, 120), text, { fallback: false });
+    res.type('audio/wav').send(buildWav(pcm, 8000));
+  } catch (e) {
+    fail(res, e.status === 400 ? 400 : 502, e.message);
+  }
+};
+
+/** Teste do reconhecimento de fala: a voz fala uma frase, o motor escolhido transcreve. */
+exports.sttTest = async (req, res) => {
+  try {
+    const engines = require('../services/pbx/voiceEngines');
+    const phrase = 'quero saber o preço do produto';
+    const pcm = await engines.synthesize(req.userId, str(req.body.voice, 120) || 'gemini:Kore', phrase, { fallback: false });
+    const heard = await require('../services/pbx/stt').transcribe(req.userId, pcm, { provider: str(req.body.provider, 12) || 'auto', language: 'pt-BR' });
+    res.json({ said: phrase, heard, ok: /pre[cç]o/i.test(heard) });
+  } catch (e) {
+    fail(res, e.status === 400 ? 400 : 502, e.message);
+  }
+};

@@ -152,6 +152,12 @@ function sayTag(text, agent) {
     const spokenGemini = applyPronunciation(text, agent, { useBuiltIn: false });
     return `<Say voice="${FALLBACK_VOICE}" language="${escapeXml(agent.language || 'pt-BR')}" data-tts="gemini:${escapeXml(geminiVoice)}|${escapeXml(agent.userId || '')}">${escapeXml(spokenGemini)}</Say>`;
   }
+  // Vozes que só existem no PBX nativo (Azure, OpenAI, ElevenLabs): operadoras como a Twilio não as conhecem,
+  // então a tag leva a voz padrão e o nome real vai em data-voice (lido pela ponte do Asterisk).
+  if (/^(azure|openai|elevenlabs):/i.test(String(agent.voice || ''))) {
+    const spokenNative = applyPronunciation(text, agent, { useBuiltIn: false });
+    return `<Say voice="${FALLBACK_VOICE}" language="${escapeXml(agent.language || 'pt-BR')}" data-voice="${escapeXml(agent.voice)}">${escapeXml(spokenNative)}</Say>`;
+  }
   const voice = agent.voice ? ` voice="${escapeXml(agent.voice)}"` : '';
   // Troca palavras em inglês (ex.: nome da empresa) pela grafia que a voz em português lê direito.
   const spoken = applyPronunciation(text, agent);

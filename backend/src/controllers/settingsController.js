@@ -88,6 +88,15 @@ exports.saveTelephonySettings = async (req, res, next) => {
     if (!provider || !PROVIDER_REGISTRY[provider]) {
       return res.status(400).json({ error: 'Provedor de telefonia inválido' });
     }
+    if (provider === 'asterisk') {
+      const check = await new AI_TELEPHONY_REGISTRY.asterisk({ userId: req.userId }).validateCredentials();
+      if (!check.valid && !force) {
+        return res.status(422).json({ error: 'O Asterisk não está acessível por este sistema — nada foi alterado.', details: check.error, canForce: true });
+      }
+      await persistCredentials(req.userId, 'ai_telephony', 'asterisk', { ativo: 'true' }, [], { exclusive: true });
+      return res.json({ success: true, validated: check.valid, message: 'As ligações da IA vão sair pelo seu Asterisk (PBX próprio). Faça uma ligação de teste.', warning: check.valid ? undefined : check.error });
+    }
+
     if (!credentials || typeof credentials !== 'object') {
       return res.status(400).json({ error: 'Credenciais não informadas' });
     }

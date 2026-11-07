@@ -17,6 +17,7 @@ import Campanhas from './pages/Campanhas';
 import Listas from './pages/Listas';
 import BuscarEmpresas from './pages/BuscarEmpresas';
 import Disparos from './pages/Disparos';
+import PbxCentral from './pages/PbxCentral';
 import GatewayTelecom from './pages/GatewayTelecom';
 import Conexoes from './pages/Conexoes';
 import Discador from './pages/Discador';
@@ -60,6 +61,7 @@ export default function App() {
           <Route path="listas" element={<FeatureRoute feature="contatos"><Listas /></FeatureRoute>} />
           <Route path="disparos" element={<FeatureRoute feature="disparos"><Disparos /></FeatureRoute>} />
           <Route path="telefone-sip" element={<FeatureRoute feature="gateway"><TelefoneSip /></FeatureRoute>} />
+          <Route path="pbx" element={<FeatureRoute feature="gateway"><PbxCentral /></FeatureRoute>} />
           <Route path="gateway" element={<FeatureRoute feature="gateway"><GatewayTelecom /></FeatureRoute>} />
           <Route path="conexoes" element={<FeatureRoute feature="conexoes"><Conexoes /></FeatureRoute>} />
           <Route path="discador" element={<FeatureRoute feature="discador"><Discador /></FeatureRoute>} />

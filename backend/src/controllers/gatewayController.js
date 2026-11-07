@@ -290,9 +290,7 @@ exports.deleteTrunk = async (req, res, next) => {
 
 exports.asteriskConfig = async (req, res, next) => {
   try {
-    const trunks = await prisma.sipTrunk.findMany({ where: { userId: req.userId }, orderBy: { createdAt: 'asc' } });
-    const extensions = await ensureAllExtensions(req.userId);
-    res.json(buildAsteriskConfig(trunks, extensions));
+    res.json(await require('../services/pbx/pbxService').loadPbxConfig(req.userId));
   } catch (error) {
     next(error);
   }

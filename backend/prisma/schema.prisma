@@ -1058,3 +1058,107 @@ model SipCallLog {
   @@index([userId, startedAt])
   @@map("sip_call_logs")
 }
+
+// ============================ PBX nativo (URA, filas, gravação) ============================
+// Áudio enviado/gerado (saudação da URA, música de espera, aviso de fora do horário...).
+model PbxAudio {
+  id         String   @id @default(uuid())
+  userId     String
+  name       String
+  kind       String   @default("prompt")
+  durationMs Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@map("pbx_audios")
+}
+
+// URA: menu de voz. options = [{digit:"1", dest:{type:"queue", id:"..."}}]
+model PbxIvr {
+  id              String   @id @default(uuid())
+  userId          String
+  name            String
+  greetingAudioId String?
+  invalidAudioId  String?
+  timeoutSeconds  Int      @default(6)
+  maxRetries      Int      @default(2)
+  options         Json     @default("[]")
+  timeoutDest     Json?
+  extensionDial   Boolean  @default(false)
+  enabled         Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@map("pbx_ivrs")
+}
+
+// Fila de atendimento (app_queue do Asterisk). members = [{memberId:"..."}]
+model PbxQueue {
+  id               String   @id @default(uuid())
+  userId           String
+  name             String
+  strategy         String   @default("rrmemory")
+  ringSeconds      Int      @default(20)
+  maxWaitSeconds   Int      @default(300)
+  wrapupSeconds    Int      @default(5)
+  mohAudioId       String?
+  announceHoldtime Boolean  @default(false)
+  joinEmpty        Boolean  @default(false)
+  members          Json     @default("[]")
+  overflowDest     Json?
+  enabled          Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([userId])
+  @@map("pbx_queues")
+}
+
+// Rota de entrada: o que acontece quando alguém liga para um número/tronco. hours = horário comercial.
+model PbxInboundRoute {
+  id         String   @id @default(uuid())
+  userId     String
+  name       String
+  trunkId    String?
+  did        String?
+  dest       Json
+  hours      Json?
+  closedDest Json?
+  record     Boolean  @default(true)
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId])
+  @@map("pbx_inbound_routes")
+}
+
+// Registro de cada chamada que passou pelo Asterisk (CDR), com gravação e recado de voz.
+model PbxCall {
+  id              String    @id @default(uuid())
+  userId          String
+  uniqueId        String
+  direction       String
+  fromNumber      String?
+  toNumber        String?
+  trunk           String?
+  routeId         String?
+  queueName       String?
+  extension       String?
+  memberId        String?
+  status          String    @default("tocando")
+  startedAt       DateTime  @default(now())
+  answeredAt      DateTime?
+  endedAt         DateTime?
+  durationSeconds Int?
+  recordingFile   String?
+  voicemailFile   String?
+  hangupCause     String?
+  aiCallId        String?
+  createdAt       DateTime  @default(now())
+
+  @@unique([userId, uniqueId])
+  @@index([userId, startedAt])
+  @@map("pbx_calls")
+}

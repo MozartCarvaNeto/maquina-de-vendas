@@ -2,6 +2,7 @@
 const TwilioProvider = require('./TwilioProvider');
 const TelnyxProvider = require('./TelnyxProvider');
 const JambonzProvider = require('./JambonzProvider');
+const AsteriskProvider = require('./AsteriskProvider');
 const prisma = require('../../config/db');
 const env = require('../../config/env');
 const { decrypt } = require('../crypto/settingsCrypto');
@@ -73,7 +74,8 @@ async function isTelephonyConfiguredViaEnv(userId) {
 const AI_TELEPHONY_REGISTRY = {
   twilio: TwilioProvider,
   telnyx: TelnyxProvider,
-  jambonz: JambonzProvider
+  jambonz: JambonzProvider,
+  asterisk: AsteriskProvider
 };
 
 async function getAiTelephonyProvider(userId) {
@@ -93,6 +95,7 @@ async function getAiTelephonyProvider(userId) {
   }
   const credentials = {};
   for (const setting of settings) credentials[setting.key] = decrypt(setting.value);
+  credentials.userId = userId;
   return new ProviderClass(credentials);
 }
 

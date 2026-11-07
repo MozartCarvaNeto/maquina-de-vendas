@@ -35,6 +35,15 @@ const VOICES = [
     label: `${n} (Google Chirp 3 HD)`,
     group: 'Google Chirp 3 HD (via Twilio — mais natural)'
   })),
+  // Vozes só do PBX nativo (Asterisk): precisam da chave do fornecedor em Telefonia PBX → Vozes e fala
+  ...[
+    ['pt-BR-FranciscaNeural', 'Francisca (feminina)'], ['pt-BR-ThalitaMultilingualNeural', 'Thalita (feminina, multilíngue)'],
+    ['pt-BR-BrendaNeural', 'Brenda (feminina)'], ['pt-BR-GiovannaNeural', 'Giovanna (feminina)'], ['pt-BR-LeilaNeural', 'Leila (feminina)'],
+    ['pt-BR-AntonioNeural', 'Antônio (masculina)'], ['pt-BR-DonatoNeural', 'Donato (masculina)'], ['pt-BR-FabioNeural', 'Fábio (masculina)'], ['pt-BR-HumbertoNeural', 'Humberto (masculina)']
+  ].map(([id, label]) => ({ id: `azure:${id}`, label: `${label} — Microsoft Azure`, group: 'Microsoft Azure (só no PBX nativo)' })),
+  ...['alloy', 'ash', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer'].map((n) => ({ id: `openai:${n}`, label: `${n} — OpenAI`, group: 'OpenAI (só no PBX nativo)' })),
+  { id: 'elevenlabs:21m00Tcm4TlvDq8ikWAM', label: 'Rachel — ElevenLabs', group: 'ElevenLabs (só no PBX nativo)' },
+  { id: 'elevenlabs:EXAVITQu4vr4xnSDxMaL', label: 'Sarah — ElevenLabs', group: 'ElevenLabs (só no PBX nativo)' },
   // Vozes do Gemini: as mais realistas (precisam da chave do Gemini em Configurações)
   ...Object.entries(PREBUILT_VOICES).map(([name, trait]) => ({
     id: `gemini:${name}`,
@@ -179,6 +188,16 @@ exports.previewVoice = async (req, res, next) => {
     const voice = String(req.body.voice || '');
     const isGemini = /^gemini:/i.test(voice);
     const isChirp = /^Google\./i.test(voice);
+    if (/^(azure|openai|elevenlabs):/i.test(voice) || (/^polly[.:]/i.test(voice) && req.query.native !== '0' && req.body.native !== false)) {
+      try {
+        const txt = String(req.body.text || 'Olá! Tudo bem? Aqui é a assistente virtual. Posso te contar rapidinho sobre nossos produtos?').slice(0, 300);
+        const pcm = await require('../services/pbx/voiceEngines').synthesize(req.userId, voice, txt, { fallback: false });
+        res.set('Content-Type', 'audio/wav');
+        return res.send(require('../services/pbx/wav').buildWav(pcm, 8000));
+      } catch (e) {
+        if (!/^polly[.:]/i.test(voice) || e.status !== 400) return res.status(e.status || 502).json({ error: `Não foi possível gerar a amostra: ${e.message}` });
+      }
+    }
     if (!isGemini && !isChirp) {
       return res.status(400).json({
         error: 'As vozes Amazon Polly só existem dentro da ligação (a Twilio é quem as gera), então não há como tocar uma amostra aqui. Para ouvir esta voz use "Ligar para o meu celular" na aba Testar — ou escolha uma voz Gemini/Google Chirp, que têm amostra.'

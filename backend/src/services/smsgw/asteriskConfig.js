@@ -25,22 +25,25 @@ function plain(passwordEnc) {
  * @param {Array} trunks  troncos SIP (SipTrunk)
  * @param {Array} extensions  ramais [{extension, passwordEnc, name}]
  */
-function buildAsteriskConfig(trunks, extensions = []) {
+function buildAsteriskConfig(trunks, extensions = [], opts = {}) {
+  const tag = opts.tag || '';
   const active = trunks.filter((t) => t.enabled);
-  const names = active.map((t, i) => safeName(t.name, i));
+  const names = active.map((t, i) => (tag ? `tp_${tag}_${safeName(t.name, i).slice(3)}` : safeName(t.name, i)));
   const lines = [];
   lines.push('; ============================================================================');
   lines.push('; Gerado pelo Turbo Prospect (Gateway de telecom). Não edite à mão: gere de novo.');
   lines.push('; Inclua no final do /etc/asterisk/pjsip.conf com a linha:  #include pjsip_turbo.conf');
   lines.push('; ============================================================================');
   lines.push('');
-  lines.push('[transport-udp]\ntype=transport\nprotocol=udp\nbind=0.0.0.0:5060\n');
-  lines.push('[transport-tcp]\ntype=transport\nprotocol=tcp\nbind=0.0.0.0:5060\n');
-  lines.push('; WebSocket (telefone no navegador). O nginx cuida do https (wss) e repassa para cá.');
-  lines.push('[transport-ws]\ntype=transport\nprotocol=ws\nbind=0.0.0.0\n');
+  const transports = [];
+  const tl = tag ? transports : lines; // com código da conta, as portas ficam num arquivo compartilhado
+  tl.push('[transport-udp]\ntype=transport\nprotocol=udp\nbind=0.0.0.0:5060\n');
+  tl.push('[transport-tcp]\ntype=transport\nprotocol=tcp\nbind=0.0.0.0:5060\n');
+  tl.push('; WebSocket (telefone no navegador). O nginx cuida do https (wss) e repassa para cá.');
+  tl.push('[transport-ws]\ntype=transport\nprotocol=ws\nbind=0.0.0.0\n');
   if (active.some((t) => t.transport === 'tls')) {
-    lines.push('; Para TLS configure cert_file/priv_key_file do seu domínio abaixo.');
-    lines.push('[transport-tls]\ntype=transport\nprotocol=tls\nbind=0.0.0.0:5061\n; cert_file=/etc/asterisk/keys/asterisk.crt\n; priv_key_file=/etc/asterisk/keys/asterisk.key\nmethod=tlsv1_2\n');
+    tl.push('; Para TLS configure cert_file/priv_key_file do seu domínio abaixo.');
+    tl.push('[transport-tls]\ntype=transport\nprotocol=tls\nbind=0.0.0.0:5061\n; cert_file=/etc/asterisk/keys/asterisk.crt\n; priv_key_file=/etc/asterisk/keys/asterisk.key\nmethod=tlsv1_2\n');
   }
 
   active.forEach((t, i) => {
@@ -55,7 +58,7 @@ function buildAsteriskConfig(trunks, extensions = []) {
     }
     lines.push(`[aor_${n}]\ntype=aor\ncontact=${uri}\n`);
     lines.push(
-      `[${n}]\ntype=endpoint\ntransport=${transportName(t.transport)}\ncontext=turbo-from-trunk\ndisallow=all\nallow=${t.codecs || 'alaw,ulaw'}\n` +
+      `[${n}]\ntype=endpoint\ntransport=${transportName(t.transport)}\ncontext=${tag ? `turbo-in-${tag}` : 'turbo-from-trunk'}\ndisallow=all\nallow=${t.codecs || 'alaw,ulaw'}\n` +
         `aors=aor_${n}\n${t.username ? `outbound_auth=auth_${n}\n` : ''}${t.fromDomain ? `from_domain=${t.fromDomain}\n` : ''}` +
         `${t.outboundCallerId ? `from_user=${t.outboundCallerId}\n` : t.username ? `from_user=${t.username}\n` : ''}direct_media=no\nrtp_symmetric=yes\nforce_rport=yes\nrewrite_contact=yes\ndtmf_mode=rfc4733\n`
     );
@@ -69,13 +72,16 @@ function buildAsteriskConfig(trunks, extensions = []) {
       lines.push(
         `; ${x.name || id}\n[${id}]\ntype=aor\nmax_contacts=5\nremove_existing=yes\nqualify_frequency=30\n\n` +
           `[auth${id}]\ntype=auth\nauth_type=userpass\nusername=${id}\npassword=${plain(x.passwordEnc)}\n\n` +
-          `[${id}]\ntype=endpoint\ntransport=transport-ws\ncontext=turbo-agent\ndisallow=all\nallow=opus,ulaw,alaw\nwebrtc=yes\n` +
+          `[${id}]\ntype=endpoint\ntransport=transport-ws\ncontext=${tag ? `turbo-agent-${tag}` : 'turbo-agent'}\ndisallow=all\nallow=opus,ulaw,alaw\nwebrtc=yes\n` +
           `auth=auth${id}\naors=${id}\ndtmf_mode=rfc4733\ndirect_media=no\nrtp_symmetric=yes\nforce_rport=yes\nrewrite_contact=yes\n` +
           `callerid="${String(x.name || id).replace(/"/g, '')}" <${id}>\n`
       );
     });
   }
 
+  if (tag) {
+    return { pjsip: lines.join('\n'), transports: transports.join('\n'), trunks: names, active, extensionCount: extensions.length };
+  }
   const dial = [];
   dial.push('; Inclua no /etc/asterisk/extensions.conf:  #include extensions_turbo.conf');
   const outLines = [];

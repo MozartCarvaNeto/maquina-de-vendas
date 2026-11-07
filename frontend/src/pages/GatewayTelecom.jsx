@@ -360,16 +360,8 @@ curl ${apiBase}/ID_DA_MENSAGEM -H "Authorization: Bearer SUA_CHAVE"`}</pre>
               <div className="gw-actions"><button className="btn-primary" type="submit">Salvar</button> <button type="button" className="btn-secondary-small" onClick={() => setTrunk(null)}>Cancelar</button></div>
             </form>
           )}
-          <h4 className="subsection-title">Configuração do Asterisk</h4>
-          <button type="button" className="btn-secondary-small" onClick={genAsterisk} disabled={trunks.length === 0}>Gerar arquivos</button>
-          {asterisk && (
-            <>
-              <p className="hint-text">Contém a senha do tronco: guarde com cuidado.</p>
-              <button type="button" className="btn-secondary-small" onClick={() => download('pjsip_turbo.conf', asterisk.pjsip)}>⬇️ pjsip_turbo.conf</button>{' '}
-              <button type="button" className="btn-secondary-small" onClick={() => download('extensions_turbo.conf', asterisk.extensions)}>⬇️ extensions_turbo.conf</button>
-              <pre className="gw-pre">{asterisk.pjsip}</pre>
-            </>
-          )}
+          <h4 className="subsection-title">Configuração do Asterisk, URA e filas</h4>
+          <p className="hint-text">Agora a configuração do Asterisk (troncos, ramais, URA, filas, gravação e IA) é gerada na tela <a href="/pbx">🏢 Telefonia PBX</a>, aba "Instalação e IA".</p>
         </div>
       )}
     </div>

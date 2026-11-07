@@ -81,7 +81,7 @@ export default function Configuracoes() {
         if (tel?.values?.accountSid) setTelephony((t) => ({ ...t, accountSid: tel.values.accountSid }));
 
         const aiTel = list.find((x) => x.category === 'ai_telephony');
-        if (aiTel && ['twilio', 'telnyx', 'jambonz'].includes(aiTel.provider)) {
+        if (aiTel && ['twilio', 'telnyx', 'jambonz', 'asterisk'].includes(aiTel.provider)) {
           setAiTelProvider(aiTel.provider);
           const v = aiTel.values || {};
           if (aiTel.provider === 'telnyx') setTelnyx((cur) => ({ ...cur, applicationSid: v.applicationSid || '', accountSid: v.accountSid || '' }));
@@ -550,10 +550,17 @@ export default function Configuracoes() {
               <option value="twilio">Twilio (padrão — a mesma configurada acima)</option>
               <option value="telnyx">Telnyx (TeXML) — alternativa mais barata</option>
               <option value="jambonz">Jambonz + tronco SIP (operadora brasileira, minutos ilimitados)</option>
+              <option value="asterisk">Asterisk (PBX próprio do sistema — sem Twilio)</option>
             </select>
 
             {aiTelProvider === 'twilio' && (
               <p className="hint-text">As ligações da IA usam a Twilio configurada acima. Clique em Salvar para voltar ao padrão, se estava usando outra.</p>
+            )}
+
+            {aiTelProvider === 'asterisk' && (
+              <p className="hint-text">
+                A IA liga pelo Asterisk instalado no mesmo servidor, usando o tronco SIP cadastrado em Gateway de telecom. O áudio da conversa passa pelo sistema (precisa da chave do Gemini em Inteligência Artificial para entender e falar). Veja o guia "Telefonia PBX"; transferência para humanos (fila) fica em Telefonia PBX → Instalação e IA.
+              </p>
             )}
 
             {aiTelProvider === 'telnyx' && (

@@ -29,6 +29,9 @@ const publicMediaRoutes = require('./routes/publicMedia.routes');
 const gatewayRoutes = require('./routes/gateway.routes');
 const smsApiV1Routes = require('./routes/smsApiV1.routes');
 const voiceRoutes = require('./routes/voice.routes');
+const pbxRoutes = require('./routes/pbx.routes');
+const pbxHookRoutes = require('./routes/pbxHook.routes');
+const aiBridge = require('./services/pbx/aiBridge');
 const smsGateway = require('./services/smsgw/gateway');
 const roboCallsRoutes = require('./routes/robocalls.routes');
 const callQueueRoutes = require('./routes/callQueue.routes');
@@ -120,6 +123,8 @@ app.use('/api/email/t', emailTrackingRoutes);
 app.use('/api/public/broadcast-media', publicMediaRoutes);
 app.use('/api/gateway', gatewayRoutes);
 app.use('/api/voice', voiceRoutes);
+app.use('/api/pbx', pbxRoutes);
+app.use('/api/pbx-hook', pbxHookRoutes);
 app.use('/api/v1/sms', smsApiV1Routes);
 
 // Serve as imagens anexadas aos disparos (usadas para pré-visualização na
@@ -159,6 +164,7 @@ server.listen(env.port, async () => {
   await ensureAdminAccounts().catch((err) => console.error('Erro ao liberar administradores:', err.message));
   nativeWhatsappService.bootstrapExistingSessions();
   smsGateway.start().catch((err) => console.error('Gateway SMS:', err.message));
+  if (process.env.ASTERISK_AI_BRIDGE !== 'off') aiBridge.start({ port: env.audioSocketPort });
 });
 
 /**
