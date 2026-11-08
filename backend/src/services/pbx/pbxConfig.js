@@ -53,12 +53,23 @@ function buildShared(base) {
   L.push(V('same => n,Dial(@{TP_DIALSTR},@{TP_WAIT},U(turbo-dial-ans^@{TP_SID}^@{TP_LEG}))'));
   L.push('same => n,Hangup()');
   L.push('');
+  L.push('[turbo-robo]');
+  L.push('; URA reversa: toca a abertura, lê 1 tecla; sem tecla, a ponte escuta a fala. A ponte decide e toca a resposta.');
+  L.push(V('exten => s,1,NoOp(Robo @{TP_CALLID})'));
+  L.push(V('same => n,GotoIf($["@{TP_REC}" = ""]?norec)'));
+  L.push(V('same => n,MixMonitor(@{TP_REC}.wav)'));
+  L.push(V('same => n(norec),Wait(0.5)'));
+  L.push(V('same => n,Read(TPD,@{TP_INTRO},1,,1,8)'));
+  L.push(V(`same => n,Set(TPR=@{CURL(${hook}/robo-digit?t=${token}&callId=@{TP_CALLID}&d=@{TPD})})`));
+  L.push(V(`same => n,AudioSocket(@{TP_CALLID},127.0.0.1:${env.audioSocketPort})`));
+  L.push('same => n,Hangup()');
+  L.push('');
   L.push('[turbo-dial-ans]');
-  L.push(V(`exten => s,1,Set(TPR=@{CURL(${hook}/dial-event?t=${token}&ev=answered&sid=@{ARG1}&leg=@{ARG2})})`));
+  L.push(V(`exten => s,1,Set(TPR=@{CURL(${hook}/dial-event?t=${token}&ev=answered&sid=@{ARG1}&cid=@{MASTER_CHANNEL(TP_CALLID)}&leg=@{ARG2})})`));
   L.push('same => n,Return()');
   L.push('');
   L.push('[turbo-dial-end]');
-  L.push(V(`exten => s,1,Set(TPR=@{CURL(${hook}/dial-event?t=${token}&ev=end&sid=@{TP_SID}&leg=@{TP_LEG}&ds=@{DIALSTATUS}&at=@{ANSWEREDTIME})})`));
+  L.push(V(`exten => s,1,Set(TPR=@{CURL(${hook}/dial-event?t=${token}&ev=end&sid=@{TP_SID}&cid=@{TP_CALLID}&leg=@{TP_LEG}&ds=@{DIALSTATUS}&at=@{ANSWEREDTIME})})`));
   L.push('same => n,Return()');
   L.push('');
   L.push('[turbo-ai-hangup]');
@@ -129,7 +140,7 @@ function destLines(d, c, depth = 0) {
   return L;
 }
 
-function buildPbxConfig({ userId, trunks, extensions, ivrs = [], queues = [], routes = [], settings = {} }) {
+function buildPbxConfig({ userId, trunks, extensions, ivrs = [], queues = [], routes = [], settings = {}, sharedTrunks = [] }) {
   const tag = core.tagFor(userId);
   const base = buildAsteriskConfig(trunks, extensions, { tag });
   const c = {
@@ -154,7 +165,12 @@ function buildPbxConfig({ userId, trunks, extensions, ivrs = [], queues = [], ro
     out.push(`same => n,Dial(PJSIP/${t.dialPrefix || ''}\${EXTEN}@${base.trunks[i]},60)`);
   });
   out.push('same => n(done),Hangup()');
-  if (!base.active.length) warnings.push('Nenhum tronco SIP ativo: ligações de saída não terão por onde sair.');
+  // troncos da plataforma (compartilhados): só a discagem; a configuração deles fica no arquivo do administrador
+  sharedTrunks.forEach((t, i) => {
+    if (base.active.length || i > 0) out.splice(out.length - 1, 0, 'same => n,GotoIf($["${DIALSTATUS}" = "ANSWER"]?done)');
+    out.splice(out.length - 1, 0, `same => n,Dial(PJSIP/${t.dialPrefix || ''}\${EXTEN}@${t.endpoint},60)`);
+  });
+  if (!base.active.length && !sharedTrunks.length) warnings.push('Nenhum tronco SIP ativo: ligações de saída não terão por onde sair. O administrador do serviço precisa cadastrar um.');
 
   E.push(`[turbo-out-${tag}]`);
   E.push(...out);

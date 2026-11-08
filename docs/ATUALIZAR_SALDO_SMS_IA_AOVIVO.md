@@ -51,7 +51,28 @@ Esta atualização vem **junto** das anteriores (PBX nativo e vozes). Aplique tu
 - Ligações da IA e discador agora têm escolhas independentes (cada um pode ficar na Twilio ou no Asterisk).
 - Saldo pré-pago: a perna do cliente é cobrada; o limite de duração segue o saldo.
 
+## URA reversa e gravação pelo Asterisk (nova)
+- Com o discador em **Asterisk**, a **URA reversa** (robô com áudios) também liga pelo Asterisk: toca o áudio de abertura, lê a tecla; se ninguém apertar e a campanha usa "reconhecer fala", o sistema escuta ~6 s. A decisão (interessado / sem interesse / opt-out / WhatsApp / CRM) é a mesma da versão Twilio. Os áudios de resposta (WAV ou MP3) são tocados; sem áudio, o sistema fala com a voz configurada.
+- **MP3 precisa do ffmpeg no servidor** (`apt install ffmpeg`; a imagem Docker já traz). WAV funciona sem ele.
+- **Gravação:** a opção "gravar chamadas" do discador e da URA reversa agora grava pelo Asterisk (conversa inteira) e o áudio toca no histórico de ligações, como antes.
+- Observação: a tecla é lida durante o áudio de abertura (interrompe o áudio); a fala só é escutada depois dele terminar.
+
 ## Limites
-- **URA reversa (robô com áudios) continua na Twilio** (usa arquivos de áudio e teclas; precisa de uma etapa própria).
-- **Gravação do discador pelo Asterisk ainda não foi ligada** (a opção "gravar" só vale na Twilio; as gravações do PBX e da IA continuam).
-- Não testado com Asterisk real: em especial a passagem de variáveis entre as duas metades do canal "Local" — se a ligação não sair, envie o log do Asterisk.
+- Não testado com Asterisk real: em especial a passagem de variáveis entre as duas metades do canal "Local", o `mixmonitor start` pelo console e a leitura de tecla (`Read`) — se algo não funcionar, envie o log do Asterisk.
+- Ligações com roteiro TwiML de outros tipos continuam só na Twilio (não há outras além das já cobertas).
+
+---
+
+# Complemento: infraestrutura só do administrador (venda de créditos)
+
+**Só o administrador da plataforma** (e-mail em `SUPERADMIN_EMAILS`) pode:
+- cadastrar/editar/apagar **troncos SIP** e **fornecedores SMPP** (e ver a tela de fornecedores e de Voz SIP);
+- ver a configuração do Asterisk dos troncos e baixar arquivos com senhas;
+- cadastrar as **chaves dos motores de voz** (Google, Azure, Amazon, ElevenLabs, OpenAI) e fazer os testes de voz;
+- recarregar saldo e definir tarifas (já era assim).
+
+**O cliente (dono/admin da conta)** continua podendo: enviar SMS, ver conversas e saldo, criar filas, URA, rotas e áudios, escolher agente de IA, usar o discador e o telefone do navegador, criar chaves de API. Ele **não vê o custo** do SMS (só o que gastou), nem o fornecedor usado, nem os dados do tronco.
+
+**Como o cliente liga sem ter tronco:** se a conta dele não tem tronco/fornecedor próprio, o sistema usa automaticamente os da conta do administrador (SMS, discador, IA, URA reversa). Idem para as chaves de voz. A cobrança é pelo saldo/tarifa de cada conta.
+
+**Limite importante:** *números de entrada (DID)* — o cliente com tronco compartilhado ainda não recebe ligações em número próprio, porque a chamada de entrada cai na conta do administrador. Para o cliente ter número de entrada hoje, o administrador precisa criar a rota na conta dele. (Dá para automatizar depois: tela do administrador "atribuir número a cliente".)

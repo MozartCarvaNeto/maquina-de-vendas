@@ -5,6 +5,7 @@ const router = express.Router();
 const c = require('../controllers/pbxController');
 const auth = require('../middlewares/auth');
 const requireRole = require('../middlewares/requireRole');
+const requirePlatformAdmin = require('../middlewares/requirePlatformAdmin');
 const { requireFeature } = require('../services/featureService');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 1 } });
@@ -36,11 +37,12 @@ router.delete('/queues/:id', admin, c.deleteQueue);
 router.post('/routes', admin, c.saveRoute);
 router.put('/routes/:id', admin, c.saveRoute);
 router.delete('/routes/:id', admin, c.deleteRoute);
-router.get('/voice-engines', admin, c.voiceEngines);
-router.put('/voice-engines/:provider', admin, c.saveVoiceEngine);
-router.delete('/voice-engines/:provider', admin, c.deleteVoiceEngine);
-router.post('/voices/test', admin, c.voiceTest);
-router.post('/voices/stt-test', admin, c.sttTest);
+// Chaves dos motores de voz (Google/Azure/Amazon/ElevenLabs/OpenAI) e testes: só o administrador da plataforma.
+router.get('/voice-engines', requirePlatformAdmin, c.voiceEngines);
+router.put('/voice-engines/:provider', requirePlatformAdmin, c.saveVoiceEngine);
+router.delete('/voice-engines/:provider', requirePlatformAdmin, c.deleteVoiceEngine);
+router.post('/voices/test', requirePlatformAdmin, c.voiceTest);
+router.post('/voices/stt-test', requirePlatformAdmin, c.sttTest);
 router.get('/config', admin, c.config);
 router.post('/apply', admin, c.apply);
 

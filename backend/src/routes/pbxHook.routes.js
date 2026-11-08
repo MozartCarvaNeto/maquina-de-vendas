@@ -7,6 +7,7 @@ const c = require('../controllers/pbxHookController');
 router.get('/event', c.event);
 router.get('/allow', c.allow);
 router.get('/dial-event', c.dialEvent);
+router.get('/robo-digit', c.roboDigit);
 router.get('/ai-start', c.aiStart);
 router.get('/ai-next', c.aiNext);
 router.get('/ai-end', c.aiEnd);

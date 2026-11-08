@@ -15,7 +15,7 @@ const num = (v, d, min, max) => Math.min(max, Math.max(min, Number.isFinite(pars
 exports.overview = async (req, res, next) => {
   try {
     const userId = req.userId;
-    const [audios, ivrs, queues, routes, trunks, settings, exts] = await Promise.all([
+    const [audios, ivrs, queues, routes, trunksAll, settings, exts] = await Promise.all([
       prisma.pbxAudio.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } }),
       prisma.pbxIvr.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } }),
       prisma.pbxQueue.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } }),
@@ -26,11 +26,12 @@ exports.overview = async (req, res, next) => {
     ]);
     res.json({
       tag: core.tagFor(userId),
+      isPlatformAdmin: Boolean(req.isPlatformAdmin),
       audios,
       ivrs,
       queues,
       routes,
-      trunks,
+      trunks: req.isPlatformAdmin ? trunksAll : [],
       settings,
       members: exts.map((e) => ({ memberId: e.memberId, name: e.name, extension: e.extension }))
     });

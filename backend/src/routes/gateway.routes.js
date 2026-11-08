@@ -13,9 +13,10 @@ router.use(requireFeature('gateway'));
 
 router.get('/overview', c.overview);
 router.put('/settings', c.saveSettings);
-router.post('/carriers', c.createCarrier);
-router.put('/carriers/:id', c.updateCarrier);
-router.delete('/carriers/:id', c.deleteCarrier);
+// Infraestrutura (fornecedores SMPP, troncos SIP, arquivos do Asterisk): SÓ o administrador da plataforma.
+router.post('/carriers', requirePlatformAdmin, c.createCarrier);
+router.put('/carriers/:id', requirePlatformAdmin, c.updateCarrier);
+router.delete('/carriers/:id', requirePlatformAdmin, c.deleteCarrier);
 router.post('/send', c.sendTest);
 router.post('/segments', c.previewSegments);
 router.get('/messages', c.listMessages);
@@ -31,10 +32,10 @@ router.get('/keys', c.listKeys);
 router.post('/keys', c.createKey);
 router.delete('/keys/:id', c.deleteKey);
 router.put('/keys/:id/webhook', c.setKeyWebhook);
-router.get('/trunks', c.listTrunks);
-router.post('/trunks', c.createTrunk);
-router.put('/trunks/:id', c.updateTrunk);
-router.delete('/trunks/:id', c.deleteTrunk);
-router.get('/voice/asterisk-config', c.asteriskConfig);
+router.get('/trunks', requirePlatformAdmin, c.listTrunks);
+router.post('/trunks', requirePlatformAdmin, c.createTrunk);
+router.put('/trunks/:id', requirePlatformAdmin, c.updateTrunk);
+router.delete('/trunks/:id', requirePlatformAdmin, c.deleteTrunk);
+router.get('/voice/asterisk-config', requirePlatformAdmin, c.asteriskConfig);
 
 module.exports = router;

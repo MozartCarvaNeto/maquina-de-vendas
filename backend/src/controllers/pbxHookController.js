@@ -1,5 +1,6 @@
 // backend/src/controllers/pbxHookController.js
 // Avisos que o Asterisk (no mesmo servidor) manda ao sistema: fim de chamada (histórico + gravação) e ponte da IA.
+const env = require('../config/env');
 const prisma = require('../config/db');
 const core = require('../services/pbx/pbxCore');
 const svc = require('../services/pbx/pbxService');
@@ -122,13 +123,24 @@ exports.dialEvent = async (req, res) => {
       const ds = String(q.ds || '');
       status = ds === 'ANSWER' ? 'completed' : ds === 'BUSY' ? 'busy' : ['NOANSWER', 'CANCEL', ''].includes(ds) ? 'no-answer' : 'failed';
     }
-    const webhook = require('./callsWebhookController');
     const fake = { set() { return this; }, status() { return this; }, send() { return this; }, json() { return this; }, type() { return this; } };
-    await webhook.handleTwilioWebhook({ body: { CallSid: sid, CallStatus: status, Source: 'asterisk' } }, fake, (e) => { if (e) console.error('Discador Asterisk:', e.message); });
+    const cid = /^[0-9a-f-]{36}$/i.test(q.cid || '') ? String(q.cid) : null;
+    if (cid) {
+      // URA reversa (robô): mesmos avisos de status que a Twilio mandava
+      await require('./roboCallWebhookController').handleStatus({ query: { callId: cid }, body: { CallSid: sid, CallStatus: status } }, fake);
+    } else {
+      await require('./callsWebhookController').handleTwilioWebhook({ body: { CallSid: sid, CallStatus: status, Source: 'asterisk' } }, fake, (e) => { if (e) console.error('Discador Asterisk:', e.message); });
+    }
+    if (cid && q.ev === 'end') {
+      const f = `robo-${cid}.wav`;
+      if (require('fs').existsSync(require('path').join(env.asteriskRecordingsDir, f))) {
+        await prisma.call.update({ where: { id: cid }, data: { recordingUrl: `local:${f}` } }).catch(() => null);
+      }
+    }
     // cobrança da perna do cliente (a do vendedor é interna)
     if (q.ev === 'end' && status === 'completed' && q.leg === 'lead') {
       const secs = num(q.at);
-      const call = await prisma.call.findFirst({ where: { providerCallId: sid } });
+      const call = await prisma.call.findFirst({ where: cid ? { id: cid } : { providerCallId: sid } });
       if (call && secs > 0) {
         await wallet.chargeCall(call.userId, { direction: 'saida', seconds: secs, refId: sid, description: `Ligação do discador (${secs}s)` }).catch(() => 0);
       }
@@ -138,6 +150,13 @@ exports.dialEvent = async (req, res) => {
     console.error('PBX discador:', e.message);
     res.type('text/plain').send('ERR');
   }
+};
+
+/** Robô: guarda a tecla apertada durante a abertura (a ponte decide o rumo). */
+exports.roboDigit = (req, res) => {
+  if (!guard(req, res)) return;
+  bridge.setDigit(String(req.query.callId || ''), String(req.query.d || '').replace(/[^0-9*#]/g, '').slice(0, 1));
+  res.type('text/plain').send('OK');
 };
 
 exports.aiNext = (req, res) => {

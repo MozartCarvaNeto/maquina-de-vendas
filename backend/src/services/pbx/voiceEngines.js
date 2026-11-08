@@ -11,8 +11,16 @@ const TIMEOUT = 15000;
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const fail = (msg, status = 502) => Object.assign(new Error(msg), { status });
 
+/** Chave do próprio cliente (se houver); senão a da plataforma — o cliente usa por créditos, sem cadastrar chaves. */
 async function creds(userId, provider) {
-  return readStoredCredentials(userId, 'voice_engines', provider).catch(() => ({}));
+  const own = await readStoredCredentials(userId, 'voice_engines', provider).catch(() => ({}));
+  if (own && Object.keys(own).length) return own;
+  for (const pid of await require('../platformService').platformAccountIds()) {
+    if (pid === userId) continue;
+    const c = await readStoredCredentials(pid, 'voice_engines', provider).catch(() => ({}));
+    if (c && Object.keys(c).length) return c;
+  }
+  return own || {};
 }
 
 async function googleKey(userId) {

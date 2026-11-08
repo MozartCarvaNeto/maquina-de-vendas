@@ -327,7 +327,7 @@ async function executeRoboCampaign(campaignId) {
     const campaign = await prisma.roboCallCampaign.findUnique({ where: { id: campaignId } });
     if (!campaign) return;
 
-    const provider = await getActiveTelephonyProvider(campaign.userId, { ignoreDialerChoice: true });
+    const provider = await getActiveTelephonyProvider(campaign.userId);
     const audience = await resolveAudience(campaign.userId, campaign.audienceFilter, 'sms');
 
     const alreadyCalled = await prisma.call.findMany({
@@ -401,7 +401,65 @@ async function executeRoboCampaign(campaignId) {
   }
 }
 
+/**
+ * Registra o que o lead respondeu (tecla ou voz): conta, move no CRM, opt-out e, se houve interesse,
+ * dispara o WhatsApp. Serve para a Twilio (webhook) e para o Asterisk (ponte). Devolve {decision, qualified}.
+ */
+async function registerResponse(call, { digits, speech, confidence, raw }) {
+  const campaign = call.roboCallCampaign;
+  const Digits = digits;
+  const SpeechResult = speech;
+  const Confidence = confidence;
+  const req = { body: raw || { Digits, SpeechResult, Confidence } };
+    const { decision, optOut } = classifyResponse(
+      { digits: Digits, speech: SpeechResult, confidence: Confidence },
+      campaign
+    );
+    const qualified = decision === 'interessado';
+
+    await prisma.call.update({
+      where: { id: call.id },
+      data: {
+        digitsPressed: Digits ? String(Digits) : null,
+        speechResult: SpeechResult ? String(SpeechResult).slice(0, 500) : null,
+        qualified
+      }
+    });
+    await prisma.callEvent.create({
+      data: { callId: call.id, eventType: `resposta_${decision}`, rawPayload: req.body }
+    });
+
+    await prisma.roboCallCampaign.update({
+      where: { id: campaign.id },
+      data: qualified ? { interestedCount: { increment: 1 } } : { notInterestedCount: { increment: 1 } }
+    });
+
+    if (optOut) {
+      await prisma.lead.update({ where: { id: call.leadId }, data: { optOut: true } });
+    }
+
+    // Recusou ("sem interesse"): vai para "Perdidos" no CRM e não é chamado de novo.
+    if (decision === 'sem_interesse') {
+      try {
+        const { markLeadLost } = require('../services/ai/voice/aiCallService');
+        const stamp = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+        await markLeadLost({
+          userId: campaign.userId,
+          lead: call.lead,
+          reason: optOut ? 'Pediu para não receber ligações (robô)' : 'Sem interesse (ligação robô)',
+          note: `📞 Ligação robô "${campaign.name}" em ${stamp}: sem interesse.`
+        });
+      } catch (error) {
+        console.error('Não foi possível mover o lead para Perdidos:', error.message);
+      }
+    }
+
+  if (qualified) await handleQualifiedLead(campaign, call, call.lead);
+  return { decision, qualified };
+}
+
 module.exports = {
+  registerResponse,
   TERMINAL_STATUSES,
   normalizeText,
   classifyResponse,

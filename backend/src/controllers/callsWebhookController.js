@@ -85,7 +85,7 @@ exports.handleTwilioWebhook = async (req, res, next) => {
           const recordingEnabled = dialerSettings?.recordCallsEnabled === 'true';
 
           try {
-            const { agentCallSid } = await provider.bridgeToAgent({
+            const { agentCallSid, recordingUrl: localRecording } = await provider.bridgeToAgent({
               providerCallId: call.providerCallId,
               from: callerNumber.phoneNumber,
               agentPhoneNumber: toE164BR(agent.phoneNumber) || agent.phoneNumber,
@@ -97,6 +97,7 @@ exports.handleTwilioWebhook = async (req, res, next) => {
             });
 
             updateData.agentProviderCallId = agentCallSid;
+            if (localRecording) updateData.recordingUrl = localRecording;
             updateData.conferenceRoom = conferenceRoom;
           } catch (bridgeError) {
             console.error(`❌ Não foi possível ligar para o vendedor ${agent.name}: ${bridgeError.message}`);

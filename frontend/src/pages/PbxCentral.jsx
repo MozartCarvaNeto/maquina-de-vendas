@@ -72,6 +72,7 @@ function AudioSelect({ value, onChange, audios, kind, empty = '— sem áudio �
 }
 
 export default function PbxCentral() {
+  const isPlatform = (() => { try { return Boolean(JSON.parse(localStorage.getItem('mdv_user') || '{}').isPlatformAdmin); } catch { return false; } })();
   const [tab, setTab] = useState('rotas');
   const [data, setData] = useState(null);
   const [msg, setMsg] = useState('');
@@ -226,7 +227,7 @@ export default function PbxCentral() {
         <p>Central telefônica própria: URA, filas de atendimento, horário comercial, gravação das chamadas e ligações da IA — tudo rodando no seu Asterisk, sem Twilio.</p>
       </header>
       {msg && <p className="pbx-flash">{msg}</p>}
-      <div className="pbx-tabs">{TABS.map(([k, l]) => <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{l}</button>)}</div>
+      <div className="pbx-tabs">{TABS.filter(([k]) => isPlatform || k !== 'vozes').map(([k, l]) => <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{l}</button>)}</div>
       {player && <div className="pbx-player"><audio controls autoPlay src={player.url} /> <button className="btn-secondary-small" onClick={() => setPlayer(null)}>Fechar</button></div>}
 
       {tab === 'rotas' && (
@@ -542,9 +543,9 @@ export default function PbxCentral() {
               {applyRes.reload.map((r) => <p key={r.cmd}>{r.ok ? '✅' : '❌'} {r.cmd}{!r.ok && r.out ? ` — ${r.out}` : ''}</p>)}
             </div>
           )}
-          <h4>Instalar à mão (alternativa)</h4>
-          <button className="btn-secondary-small" onClick={genConfig}>Gerar arquivos para baixar</button>
-          {cfg && (
+          {isPlatform && <h4>Instalar à mão (alternativa)</h4>}
+          {isPlatform && <button className="btn-secondary-small" onClick={genConfig}>Gerar arquivos para baixar</button>}
+          {isPlatform && cfg && (
             <>
               <p className="hint-text">Contém senhas: guarde com cuidado. {cfg.warnings.map((w) => `⚠️ ${w}`).join(' ')}</p>
               <div className="pbx-actions">

@@ -306,6 +306,14 @@ exports.getRecording = async (req, res, next) => {
 
     // Usa o mesmo provedor das ligações (banco ou, se vazio, o .env) — antes só olhava o banco
     // e falhava com "Telefonia não configurada" quando a Twilio estava só no .env.
+    // Gravação feita pelo Asterisk próprio: arquivo local (nome validado; nada de caminhos soltos)
+    const local = /^local:((?:dial|robo)-[0-9a-f-]{32,36}\.wav)$/.exec(call.recordingUrl);
+    if (local) {
+      const file = require('path').join(env.asteriskRecordingsDir, local[1]);
+      if (!require('fs').existsSync(file)) return res.status(404).json({ error: 'A gravação ainda não está disponível.' });
+      res.setHeader('Content-Type', 'audio/wav');
+      return require('fs').createReadStream(file).pipe(res);
+    }
     const telephonyProvider = await getActiveTelephonyProvider(req.userId);
     const telephonySettings = { accountSid: telephonyProvider.accountSid, authToken: telephonyProvider.authToken };
 

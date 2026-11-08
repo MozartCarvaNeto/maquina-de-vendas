@@ -60,7 +60,8 @@ exports.overview = async (req, res, next) => {
     const counts = {};
     recent.forEach((m) => { counts[m.status] = (counts[m.status] || 0) + 1; });
     res.json({
-      carriers: carriers.map(publicCarrier),
+      carriers: req.isPlatformAdmin ? carriers.map(publicCarrier) : [],
+      isPlatformAdmin: Boolean(req.isPlatformAdmin),
       last24h: counts,
       settings: await gateway.getGatewaySettings(userId)
     });
@@ -153,7 +154,8 @@ exports.listMessages = async (req, res, next) => {
     if (req.query.status) where.status = String(req.query.status);
     const take = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
     const rows = await prisma.smsMessage.findMany({ where, orderBy: { createdAt: 'desc' }, take });
-    res.json(rows);
+    // O custo e o fornecedor usados são da plataforma: cliente não vê.
+    res.json(req.isPlatformAdmin ? rows : rows.map(({ costBrl, carrierId, providerMessageId, ...m }) => m));
   } catch (error) {
     next(error);
   }
@@ -177,7 +179,13 @@ exports.usage = async (req, res, next) => {
       d.messages += 1; d.parts += r.parts; d.cost += r.costBrl; d.revenue += r.priceBrl; if (r.status === 'delivered') d.delivered += 1;
       total.messages += 1; total.parts += r.parts; total.cost += r.costBrl; total.revenue += r.priceBrl; if (r.status === 'delivered') total.delivered += 1;
     }
-    res.json({ days, total, byDay: Object.values(byDay).sort((a, b) => (a.day < b.day ? 1 : -1)) });
+    const days2 = Object.values(byDay).sort((a, b) => (a.day < b.day ? 1 : -1));
+    if (!req.isPlatformAdmin) {
+      // cliente vê só o que gastou (sem o custo da plataforma)
+      total.cost = 0;
+      days2.forEach((d) => { d.cost = 0; });
+    }
+    res.json({ days, total, byDay: days2 });
   } catch (error) {
     next(error);
   }

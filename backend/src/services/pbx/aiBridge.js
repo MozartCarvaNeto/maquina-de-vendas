@@ -11,6 +11,7 @@ const MAX_STEPS = 80;
 const pendingNext = new Map(); // callId -> {kind:'queue'|'dial', target}
 const ended = new Set();
 const origination = new Map(); // callId -> timer (esperando a pessoa atender)
+const digits = new Map(); // callId -> tecla apertada na abertura do robô
 
 const defaultDeps = {
   get prisma() {
@@ -119,6 +120,63 @@ class Conversation {
   }
 }
 
+function setDigit(callId, d) {
+  if (d) digits.set(callId, d);
+}
+
+/** Som de resposta do robô: arquivo enviado pelo cliente (WAV/MP3) ou, sem arquivo, a fala padrão pela voz do sistema. */
+async function roboAnswerPcm(call, campaign, qualified, deps) {
+  const fname = qualified ? campaign.interestedAudioFilename : campaign.notInterestedAudioFilename;
+  if (fname) {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const file = path.join(__dirname, '../../../uploads/robocall-audio', campaign.id, fname);
+      const { wav } = await require('./wav').normalizeToAsteriskWav(fs.readFileSync(file), file);
+      return int16ToBuffer(wavToSlin8k(wav));
+    } catch (e) {
+      console.warn('⚠️ Áudio de resposta do robô não pôde ser tocado, usando voz do sistema:', e.message);
+    }
+  }
+  const text = qualified
+    ? 'Perfeito! Vamos continuar o seu atendimento pelo WhatsApp, é só aguardar a nossa mensagem. Obrigado!'
+    : 'Sem problemas. Obrigado pelo seu tempo, tenha um ótimo dia!';
+  return deps.tts(call.userId, text, null, 'pt-BR');
+}
+
+/** URA reversa pelo Asterisk: tecla (já lida no plano de discagem) ou fala -> mesma decisão da versão Twilio. */
+async function runRobo(session, call, convo, deps) {
+  const prisma = deps.prisma;
+  const full = await prisma.call.findUnique({ where: { id: call.id }, include: { roboCallCampaign: true, lead: true } });
+  const campaign = full.roboCallCampaign;
+  const robo = deps.robo || require('../roboCallService');
+  let heard = '';
+  const digit = digits.get(call.id) || '';
+  digits.delete(call.id);
+  if (!digit && campaign.useSpeechRecognition) {
+    const audio = await convo.listen(6000);
+    if (audio && audio.length > FRAME_BYTES * 10) {
+      try {
+        heard = await deps.stt(call.userId, audio, { language: 'pt-BR', provider: 'auto' });
+      } catch (e) {
+        console.warn('⚠️ Reconhecimento de fala (robô) falhou:', e.message);
+      }
+    }
+  }
+  let qualified = false;
+  if (full.qualified === null || full.qualified === undefined) {
+    ({ qualified } = await robo.registerResponse(full, { digits: digit, speech: heard, confidence: heard ? 0.9 : 0 }));
+  } else {
+    qualified = Boolean(full.qualified);
+  }
+  const noAnswer = !digit && !heard;
+  const pcm = noAnswer
+    ? await deps.tts(call.userId, 'Não identificamos sua resposta. Obrigado pela atenção, até logo.', null, 'pt-BR')
+    : await roboAnswerPcm(call, campaign, qualified, deps);
+  await convo.play(pcm, false);
+  session.hangup();
+}
+
 async function runCall(session, deps = defaultDeps) {
   const callId = session.id;
   const prisma = deps.prisma;
@@ -133,6 +191,11 @@ async function runCall(session, deps = defaultDeps) {
   await prisma.call
     .update({ where: { id: callId }, data: { status: 'atendida', answeredAt: call.answeredAt || new Date() } })
     .catch(() => {});
+
+  if (call.roboCallCampaignId) {
+    session.isRobo = true; // o fim vem do aviso da perna do cliente (dial-event), não daqui
+    return runRobo(session, call, convo, deps);
+  }
 
   let sttProvider = 'auto';
   try {
@@ -193,6 +256,7 @@ async function handleSession(session, deps = defaultDeps) {
     console.error(`❌ Ponte da IA (${session.id}):`, e.message);
     session.hangup();
   }
+  if (session.isRobo) return;
   // Rede de segurança: se o Asterisk não avisar o fim da ligação, fechamos daqui a pouco.
   const t = setTimeout(() => endCall(session.id, {}, deps).catch(() => {}), pendingNext.has(session.id) ? 120000 : 6000);
   t.unref();
@@ -294,4 +358,4 @@ function start({ port, host = '127.0.0.1' } = {}) {
   return server;
 }
 
-module.exports = { start, startInbound, handleSession, runCall, endCall, watchOrigination, nextAction, Conversation, _pending: pendingNext };
+module.exports = { setDigit, start, startInbound, handleSession, runCall, endCall, watchOrigination, nextAction, Conversation, _pending: pendingNext };

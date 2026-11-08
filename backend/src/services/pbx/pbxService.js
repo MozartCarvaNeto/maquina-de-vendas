@@ -17,7 +17,20 @@ async function loadPbxConfig(userId) {
     prisma.pbxInboundRoute.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } }),
     core.getPbxSettings(userId)
   ]);
-  return buildPbxConfig({ userId, trunks, extensions, ivrs, queues, routes, settings });
+  let sharedTrunks = [];
+  if (!trunks.some((t) => t.enabled)) {
+    const { buildAsteriskConfig } = require('../smsgw/asteriskConfig');
+    for (const pid of await require('../platformService').platformAccountIds()) {
+      if (pid === userId) continue;
+      const pt = await prisma.sipTrunk.findMany({ where: { userId: pid, enabled: true }, orderBy: { createdAt: 'asc' } });
+      if (pt.length) {
+        const b = buildAsteriskConfig(pt, [], { tag: core.tagFor(pid) });
+        sharedTrunks = b.active.map((t, i) => ({ dialPrefix: t.dialPrefix, endpoint: b.trunks[i] }));
+        break;
+      }
+    }
+  }
+  return buildPbxConfig({ userId, trunks, extensions, ivrs, queues, routes, settings, sharedTrunks });
 }
 
 const CONF_DIR = () => process.env.ASTERISK_CONF_DIR || '/etc/asterisk';

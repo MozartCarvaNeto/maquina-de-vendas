@@ -97,9 +97,13 @@ function carrierRuntime(carrierId) {
 /** Escolhe os fornecedores possíveis para um destino, em ordem: menor prioridade, depois menor custo. */
 function candidateCarriers(userId, toE164) {
   const digits = String(toE164 || '').replace(/\D/g, '');
-  return [...sessions.values()]
-    .map((e) => e.carrier)
-    .filter((c) => c.userId === userId && c.enabled && sessions.get(c.id).session.state === 'bound')
+  const usable = (c) => c.enabled && sessions.get(c.id).session.state === 'bound';
+  const all = [...sessions.values()].map((e) => e.carrier);
+  // fornecedores do próprio cliente (se houver); senão, os da plataforma (venda por saldo)
+  const own = all.filter((c) => c.userId === userId && usable(c));
+  const platformIds = require('../platformService').platformAccountIdsSync();
+  const pool = own.length ? own : all.filter((c) => platformIds.includes(c.userId) && usable(c));
+  return pool
     .filter((c) => {
       const prefixes = String(c.allowedPrefixes || '').split(',').map((p) => p.trim()).filter(Boolean);
       return !prefixes.length || prefixes.some((p) => digits.startsWith(p.replace(/\D/g, '')));
@@ -338,6 +342,7 @@ async function tick() {
   if (working) return;
   working = true;
   try {
+    await require('../platformService').platformAccountIds();
     const due = await prisma.smsMessage.findMany({
       where: { direction: 'out', status: 'queued', nextAttemptAt: { lte: new Date() } },
       orderBy: { createdAt: 'asc' },

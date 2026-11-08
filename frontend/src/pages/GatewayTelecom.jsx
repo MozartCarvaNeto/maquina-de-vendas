@@ -26,7 +26,8 @@ const STATE_LABEL = { bound: '🟢 Conectado', connecting: '🟡 Conectando…',
 const brl = (n) => Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 4 });
 
 export default function GatewayTelecom() {
-  const [tab, setTab] = useState('fornecedores');
+  const isPlatform = (() => { try { return Boolean(JSON.parse(localStorage.getItem('mdv_user') || '{}').isPlatformAdmin); } catch { return false; } })();
+  const [tab, setTab] = useState(isPlatform ? 'fornecedores' : 'mensagens');
   const [overview, setOverview] = useState(null);
   const [msg, setMsg] = useState('');
   const [carrier, setCarrier] = useState(null); // formulário aberto (novo ou edição)
@@ -151,7 +152,7 @@ export default function GatewayTelecom() {
       {msg && <div className="gw-flash">{msg}</div>}
 
       <div className="gw-tabs">
-        {TABS.map(([k, label]) => (
+        {TABS.filter(([k]) => isPlatform || !['fornecedores', 'voz'].includes(k)).map(([k, label]) => (
           <button key={k} type="button" className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{label}</button>
         ))}
       </div>
