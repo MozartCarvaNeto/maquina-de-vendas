@@ -140,7 +140,7 @@ function destLines(d, c, depth = 0) {
   return L;
 }
 
-function buildPbxConfig({ userId, trunks, extensions, ivrs = [], queues = [], routes = [], settings = {}, sharedTrunks = [] }) {
+function buildPbxConfig({ userId, trunks, extensions, ivrs = [], queues = [], routes = [], settings = {}, sharedTrunks = [], didDispatch = [] }) {
   const tag = core.tagFor(userId);
   const base = buildAsteriskConfig(trunks, extensions, { tag });
   const c = {
@@ -219,6 +219,10 @@ function buildPbxConfig({ userId, trunks, extensions, ivrs = [], queues = [], ro
   E.push(`[turbo-in-${tag}]`);
   E.push('; Ligação recebida pelos troncos: escolhe a rota de entrada (número chamado > tronco > padrão).');
   E.push('exten => _X.,1,NoOp(Entrada de ${CALLERID(num)} para ${EXTEN})');
+  // Números atribuídos a clientes: a ligação vai para o contexto do cliente (antes de registrar eventos aqui, para não contar duas vezes).
+  didDispatch.forEach((d) => {
+    E.push(`same => n,GotoIf($["\${EXTEN:-${d.digits.length}}" = "${d.digits}"]?turbo-in-${d.tag},\${EXTEN},1)`);
+  });
   E.push(hangupPush);
   E.push(...setVars('in'));
   withDid.forEach((r) => {

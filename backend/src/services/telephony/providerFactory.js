@@ -56,6 +56,13 @@ async function getActiveTelephonyProvider(userId, { ignoreDialerChoice = false }
     return new TwilioProvider({ accountSid: env.twilioAccountSid, authToken: env.twilioAuthToken });
   }
 
+  // Sem chaves de outra operadora: se há tronco SIP (do cliente ou da plataforma), liga pelo serviço nativo.
+  try {
+    const native = new AsteriskProvider({ userId });
+    await native.pickTrunk();
+    return native;
+  } catch (_) { /* sem tronco: cai na mensagem abaixo */ }
+
   const err = new Error(
     'Nenhum provedor de telefonia configurado. Preencha TWILIO_ACCOUNT_SID e TWILIO_AUTH_TOKEN no arquivo .env do backend, ou configure manualmente em Configurações > Telefonia.'
   );

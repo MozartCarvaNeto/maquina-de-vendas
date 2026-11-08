@@ -271,7 +271,7 @@ async function placeRoboCall(campaign, lead, provider) {
       id: callId,
       userId: campaign.userId,
       leadId: lead.id,
-      provider: 'twilio',
+      provider: provider.providerName || 'twilio',
       fromNumber: callerNumber.phoneNumber,
       toNumber: toE164BR(lead.phone) || lead.phone,
       callerNumberId: callerNumber.id,

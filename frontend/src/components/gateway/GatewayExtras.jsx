@@ -7,7 +7,10 @@ const brl = (n) => Number(n || 0).toLocaleString('pt-BR', { style: 'currency', c
 const errText = (e) => e.response?.data?.error || e.message || 'Erro';
 const STATUS = { queued: 'Na fila', sending: 'Enviando', sent: 'Enviado', delivered: 'Entregue', undelivered: 'Não entregue', failed: 'Falhou', received: 'Recebido' };
 
-export function ConversasTab({ flash }) {
+export function ConversasTab({ flash: flashProp }) {
+  const ref = useRef(flashProp);
+  ref.current = flashProp;
+  const flash = useCallback((t) => ref.current(t), []);
   const [list, setList] = useState([]);
   const [open, setOpen] = useState(null); // número aberto
   const [msgs, setMsgs] = useState([]);
@@ -90,7 +93,10 @@ export function ConversasTab({ flash }) {
   );
 }
 
-export function SaldoTab({ flash }) {
+export function SaldoTab({ flash: flashProp }) {
+  const ref = useRef(flashProp);
+  ref.current = flashProp;
+  const flash = useCallback((t) => ref.current(t), []);
   const user = JSON.parse(localStorage.getItem('mdv_user') || '{}');
   const [me, setMe] = useState(null);
   const [accounts, setAccounts] = useState([]);

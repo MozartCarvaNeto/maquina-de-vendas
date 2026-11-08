@@ -16,3 +16,14 @@ CREATE INDEX IF NOT EXISTS "wallet_txs_userId_createdAt_idx" ON "wallet_txs"("us
 ALTER TABLE "sms_messages" ADD COLUMN IF NOT EXISTS "callbackUrl" TEXT;
 ALTER TABLE "sms_api_keys" ADD COLUMN IF NOT EXISTS "webhookUrl" TEXT;
 ALTER TABLE "pbx_calls" ADD COLUMN IF NOT EXISTS "costBrl" DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+-- Números (DID) da plataforma atribuídos aos clientes
+CREATE TABLE IF NOT EXISTS "pbx_dids" (
+  "id" TEXT PRIMARY KEY,
+  "number" TEXT NOT NULL UNIQUE,
+  "accountId" TEXT,
+  "label" TEXT,
+  "assignedAt" TIMESTAMP(3),
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS "pbx_dids_accountId_idx" ON "pbx_dids" ("accountId");

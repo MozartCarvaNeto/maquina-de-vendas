@@ -20,6 +20,13 @@ const admin = requireRole(['owner', 'admin']);
 router.get('/calls', admin, c.listCalls);
 router.get('/calls/:id/recording', admin, c.streamRecording);
 router.get('/overview', admin, c.overview);
+// Números (DID): estoque e atribuição aos clientes — só o administrador da plataforma.
+router.get('/admin/dids', requirePlatformAdmin, c.adminDids);
+router.post('/admin/dids', requirePlatformAdmin, c.adminAddDids);
+router.post('/admin/dids/assign', requirePlatformAdmin, c.adminAssignDids);
+router.post('/admin/dids/unassign', requirePlatformAdmin, c.adminUnassignDids);
+router.delete('/admin/dids/:id', requirePlatformAdmin, c.adminDeleteDid);
+router.put('/admin/did-settings', requirePlatformAdmin, c.adminDidSettings);
 router.get('/live', admin, c.live);
 router.post('/live/spy', admin, c.spy);
 router.post('/live/hangup', admin, c.hangupLive);

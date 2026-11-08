@@ -75,4 +75,11 @@ Esta atualização vem **junto** das anteriores (PBX nativo e vozes). Aplique tu
 
 **Como o cliente liga sem ter tronco:** se a conta dele não tem tronco/fornecedor próprio, o sistema usa automaticamente os da conta do administrador (SMS, discador, IA, URA reversa). Idem para as chaves de voz. A cobrança é pelo saldo/tarifa de cada conta.
 
-**Limite importante:** *números de entrada (DID)* — o cliente com tronco compartilhado ainda não recebe ligações em número próprio, porque a chamada de entrada cai na conta do administrador. Para o cliente ter número de entrada hoje, o administrador precisa criar a rota na conta dele. (Dá para automatizar depois: tela do administrador "atribuir número a cliente".)
+## Números de entrada (DID) por cliente — NOVO
+- **Passos:** rode o SQL novo (`docs/atualizar_banco_pbx_avancado.sql`, tabela `pbx_dids`), `npx prisma generate`, reinicie.
+- **Telefonia PBX → aba "📞 Números (admin)"** (só você): 1) cadastre os números que contratou no tronco; 2) atribua a um cliente (marcando vários) ou cole uma lista `número;e-mail do cliente` para atribuir vários a vários; 3) ligue a **atribuição automática**: o cliente com telefonia no plano e sem número recebe um do estoque na primeira vez que abrir a Telefonia PBX.
+- Ao atribuir, o sistema grava a configuração no Asterisk sozinho (se o Asterisk estiver neste servidor) e o número aparece para o cliente: na lista de números das rotas de entrada e em Linhas (número de discagem usado pelo discador, robô e IA).
+- A ligação que entra no número cai na conta do cliente: rota, URA, fila, IA, gravação, saldo (ligação recebida cobrada pela tarifa dele).
+- O cliente só consegue criar rota para números dele.
+- **Padrão nativo:** cliente sem chaves de outra operadora (Twilio etc.) passa a ligar pelo serviço nativo automaticamente: discador automático, URA reversa (robô), Agente IA. O "Vendedor Humano" não usa operadora (o vendedor liga do próprio telefone).
+- Limites: não existe cobrança de mensalidade do número (só os minutos/SMS por saldo); a atribuição automática só roda quando o cliente abre a Telefonia PBX; se o Asterisk não estiver no mesmo servidor, clique "Aplicar no Asterisk" na sua conta e na do cliente.

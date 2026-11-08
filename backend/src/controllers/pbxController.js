@@ -12,9 +12,26 @@ const str = (v, n = 80) => String(v ?? '').trim().slice(0, n);
 const num = (v, d, min, max) => Math.min(max, Math.max(min, Number.isFinite(parseInt(v, 10)) ? parseInt(v, 10) : d));
 
 // ------------------------------------------------------------------ visão geral
+/** Cliente do plano com telefonia e sem número: entrega um do estoque (se o administrador ligou a atribuição automática). */
+async function autoAssignDids(userId, req) {
+  try {
+    if (req.isPlatformAdmin) return;
+    const got = await require('../services/pbx/didService').autoAssign(userId);
+    if (got.length) applyQuietly([userId, ...(await require('../services/platformService').platformAccountIds())]);
+  } catch (e) {
+    console.warn('Atribuição automática de número falhou:', e.message);
+  }
+}
+
+/** Grava os arquivos do Asterisk das contas citadas (sem derrubar nada se o Asterisk não estiver neste servidor). */
+function applyQuietly(accountIds) {
+  [...new Set(accountIds)].forEach((id) => svc.applyConfig(id).catch((e) => console.warn(`Aplicar Asterisk (${id}):`, e.message)));
+}
+
 exports.overview = async (req, res, next) => {
   try {
     const userId = req.userId;
+    await autoAssignDids(userId, req);
     const [audios, ivrs, queues, routes, trunksAll, settings, exts] = await Promise.all([
       prisma.pbxAudio.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } }),
       prisma.pbxIvr.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } }),
@@ -26,6 +43,7 @@ exports.overview = async (req, res, next) => {
     ]);
     res.json({
       tag: core.tagFor(userId),
+      dids: (await require('../services/pbx/didService').forAccount(userId)).map((d) => ({ id: d.id, number: d.number, label: d.label })),
       isPlatformAdmin: Boolean(req.isPlatformAdmin),
       audios,
       ivrs,
@@ -271,6 +289,17 @@ exports.saveRoute = async (req, res, next) => {
       closedDest = await destOk(userId, b.closedDest || { type: 'hangup' });
       if (!closedDest) return fail(res, 400, 'Destino fora do horário inválido.');
     }
+    // Sem tronco próprio, só vale número que a plataforma atribuiu à conta.
+    const didDigits = str(b.did, 30).replace(/\D/g, '');
+    if (didDigits) {
+      const ownTrunk = await prisma.sipTrunk.count({ where: { userId, enabled: true } });
+      if (!ownTrunk && !req.isPlatformAdmin) {
+        const mine = await require('../services/pbx/didService').forAccount(userId);
+        const hit = mine.find((d) => d.number === didDigits || d.number.endsWith(didDigits) || didDigits.endsWith(d.number));
+        if (!hit) return fail(res, 400, 'Esse número não está atribuído à sua conta. Escolha um dos seus números (ou peça um ao administrador do serviço).');
+        b.did = hit.number;
+      }
+    }
     let trunkId = null;
     if (b.trunkId) {
       const t = await prisma.sipTrunk.findFirst({ where: { id: String(b.trunkId), userId } });
@@ -481,6 +510,101 @@ exports.sttTest = async (req, res) => {
     res.json({ said: phrase, heard, ok: /pre[cç]o/i.test(heard) });
   } catch (e) {
     fail(res, e.status === 400 ? 400 : 502, e.message);
+  }
+};
+
+// ------------------------------------------------------------------ números (DID) — só o administrador da plataforma
+const dids = require('../services/pbx/didService');
+
+exports.adminDids = async (req, res, next) => {
+  try {
+    const [rows, accounts, members] = await Promise.all([
+      prisma.pbxDid.findMany({ orderBy: [{ createdAt: 'asc' }] }),
+      prisma.account.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' }, take: 1000 }),
+      prisma.member.findMany({ where: { role: 'owner' }, select: { accountId: true, email: true } })
+    ]);
+    const nameOf = new Map(accounts.map((a) => [a.id, a.name]));
+    const mailOf = new Map(members.map((m) => [m.accountId, m.email]));
+    res.json({
+      dids: rows.map((d) => ({ id: d.id, number: d.number, label: d.label, accountId: d.accountId, accountName: d.accountId ? nameOf.get(d.accountId) || d.accountId : null, assignedAt: d.assignedAt })),
+      accounts: accounts.map((a) => ({ id: a.id, name: a.name, email: mailOf.get(a.id) || null })),
+      settings: await dids.autoSettings()
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.adminAddDids = async (req, res, next) => {
+  try {
+    const out = await dids.addToPool(req.body.numbers, req.body.label);
+    res.json({ added: out.added.length, skipped: out.skipped });
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.adminAssignDids = async (req, res, next) => {
+  try {
+    const touched = new Set();
+    const result = { done: 0, errors: [] };
+    if (req.body.lines) {
+      const r = await dids.assignMany(req.body.lines);
+      r.done.forEach((d) => touched.add(d.accountId));
+      result.done += r.done.length;
+      result.errors.push(...r.errors);
+    }
+    if (Array.isArray(req.body.ids) && req.body.accountId) {
+      for (const id of req.body.ids.slice(0, 500)) {
+        try { await dids.assign(String(id), String(req.body.accountId)); touched.add(String(req.body.accountId)); result.done += 1; } catch (e) { result.errors.push(e.message); }
+      }
+    }
+    const plat = await require('../services/platformService').platformAccountIds();
+    if (touched.size) applyQuietly([...touched, ...plat]);
+    res.json(result);
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.adminUnassignDids = async (req, res, next) => {
+  try {
+    const ids = (Array.isArray(req.body.ids) ? req.body.ids : []).slice(0, 500);
+    const touched = new Set();
+    for (const id of ids) {
+      const d = await prisma.pbxDid.findUnique({ where: { id: String(id) } });
+      if (d?.accountId) touched.add(d.accountId);
+      if (d) await dids.unassign(d.id);
+    }
+    applyQuietly([...touched, ...(await require('../services/platformService').platformAccountIds())]);
+    res.json({ success: true });
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.adminDeleteDid = async (req, res, next) => {
+  try {
+    const d = await prisma.pbxDid.findUnique({ where: { id: req.params.id } });
+    if (!d) return fail(res, 404, 'Número não encontrado.');
+    if (d.accountId) await dids.unassign(d.id);
+    await prisma.pbxDid.delete({ where: { id: d.id } });
+    applyQuietly([d.accountId, ...(await require('../services/platformService').platformAccountIds())].filter(Boolean));
+    res.json({ success: true });
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.adminDidSettings = async (req, res, next) => {
+  try {
+    const plat = (await require('../services/platformService').platformAccountIds())[0];
+    if (!plat) return fail(res, 400, 'Nenhuma conta de administrador da plataforma encontrada (SUPERADMIN_EMAILS).');
+    const { persistCredentials } = require('../services/settingsHelpers');
+    await persistCredentials(plat, 'platform_telecom', 'native', { didAuto: req.body.auto ? 'true' : 'false', didAutoCount: String(Math.min(10, Math.max(1, parseInt(req.body.count, 10) || 1))) }, [], { exclusive: true });
+    res.json(await dids.autoSettings());
+  } catch (e) {
+    next(e);
   }
 };
 

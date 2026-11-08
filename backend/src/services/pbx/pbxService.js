@@ -30,7 +30,9 @@ async function loadPbxConfig(userId) {
       }
     }
   }
-  return buildPbxConfig({ userId, trunks, extensions, ivrs, queues, routes, settings, sharedTrunks });
+  let didDispatch = [];
+  if (await require('../platformService').isPlatformAccount(userId)) didDispatch = await require('./didService').dispatchRules();
+  return buildPbxConfig({ userId, trunks, extensions, ivrs, queues, routes, settings, sharedTrunks, didDispatch });
 }
 
 const CONF_DIR = () => process.env.ASTERISK_CONF_DIR || '/etc/asterisk';
