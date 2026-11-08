@@ -2,7 +2,7 @@
 const prisma = require('../../config/db');
 const { decrypt } = require('../crypto/settingsCrypto');
 const { getTwilioCredentials } = require('../twilioCredentials');
-const { TwilioRcsProvider, CustomHttpRcsProvider } = require('./rcsProviders');
+const { TwilioRcsProvider, CustomHttpRcsProvider, GoogleRbmProvider } = require('./rcsProviders');
 
 /** Lê Configurações > RCS (category "rcs"): provider "twilio" ou "custom". */
 async function readRcsSettings(userId) {
@@ -41,6 +41,9 @@ async function getRcsProvider(userId) {
       fallbackFrom: v.fallbackFrom,
       disableFallback: v.disableFallback === 'true'
     });
+  }
+  if (settings.provider === 'google_rbm') {
+    return new GoogleRbmProvider({ serviceAccountJson: v.secret, agentId: v.agentId });
   }
   if (settings.provider === 'custom') {
     if (!v.url || !v.bodyTemplate) {

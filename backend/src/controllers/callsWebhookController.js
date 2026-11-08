@@ -89,6 +89,7 @@ exports.handleTwilioWebhook = async (req, res, next) => {
               providerCallId: call.providerCallId,
               from: callerNumber.phoneNumber,
               agentPhoneNumber: toE164BR(agent.phoneNumber) || agent.phoneNumber,
+              agentId: agent.id,
               conferenceRoomName: conferenceRoom,
               statusCallbackUrl,
               recordingEnabled,

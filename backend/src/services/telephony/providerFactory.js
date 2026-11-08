@@ -24,7 +24,11 @@ const PROVIDER_REGISTRY = {
  * 2) Variáveis de ambiente do backend (TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN
  *    no .env) — permite usar o Twilio sem nenhuma configuração manual.
  */
-async function getActiveTelephonyProvider(userId) {
+async function getActiveTelephonyProvider(userId, { ignoreDialerChoice = false } = {}) {
+  // Discador pelo Asterisk próprio (escolha em Configurações > Telefonia do discador)
+  const dialerChoice = ignoreDialerChoice ? null : await prisma.setting.findFirst({ where: { userId, category: 'dialer_telephony', isActive: true } });
+  if (dialerChoice?.provider === 'asterisk') return new AsteriskProvider({ userId });
+
   const settings = await prisma.setting.findMany({
     where: { userId, category: 'telephony', isActive: true }
   });
@@ -85,7 +89,7 @@ async function getAiTelephonyProvider(userId) {
   const chosen = settings[0]?.provider;
 
   // Sem escolha (ou escolheu "twilio"): comportamento de sempre.
-  if (!chosen || chosen === 'twilio') return getActiveTelephonyProvider(userId);
+  if (!chosen || chosen === 'twilio') return getActiveTelephonyProvider(userId, { ignoreDialerChoice: true });
 
   const ProviderClass = AI_TELEPHONY_REGISTRY[chosen];
   if (!ProviderClass) {

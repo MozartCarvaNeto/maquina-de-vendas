@@ -17,6 +17,7 @@ export default function Configuracoes() {
   const [telephony, setTelephony] = useState({ accountSid: '', authToken: '' });
   // Operadora das ligações do Agente de IA (alternativa à Twilio)
   const [aiTelProvider, setAiTelProvider] = useState('twilio');
+  const [dialerTel, setDialerTel] = useState('twilio');
   const [telnyx, setTelnyx] = useState({ apiKey: '', applicationSid: '', accountSid: '' });
   const [jambonz, setJambonz] = useState({ apiKey: '', accountSid: '', baseUrl: 'https://api.jambonz.cloud', applicationSid: '' });
   const [telephonyEnvActive, setTelephonyEnvActive] = useState(false);
@@ -88,8 +89,11 @@ export default function Configuracoes() {
           if (aiTel.provider === 'jambonz') setJambonz((cur) => ({ ...cur, accountSid: v.accountSid || '', baseUrl: v.baseUrl || 'https://api.jambonz.cloud', applicationSid: v.applicationSid || '' }));
         }
 
+        const dialerRow = list.find((x) => x.category === 'dialer_telephony');
+        if (dialerRow?.provider === 'asterisk') setDialerTel('asterisk');
+
         const rcsRow = list.find((x) => x.category === 'rcs');
-        if (rcsRow && ['twilio', 'custom'].includes(rcsRow.provider)) {
+        if (rcsRow && ['twilio', 'custom', 'google_rbm'].includes(rcsRow.provider)) {
           const v = rcsRow.values || {};
           setRcs((cur) => ({
             ...cur,
@@ -100,6 +104,8 @@ export default function Configuracoes() {
             url: v.url || '',
             authHeader: v.authHeader || 'Authorization',
             apiKeyHint: rcsRow.hints?.apiKey || '',
+            agentId: v.agentId || '',
+            secretHint: rcsRow.hints?.secret || '',
             bodyTemplate: v.bodyTemplate || cur.bodyTemplate
           }));
         }
@@ -220,7 +226,9 @@ export default function Configuracoes() {
 
   async function saveRcs(e) {
     e.preventDefault();
-    const body = rcs.provider === 'twilio'
+    const body = rcs.provider === 'google_rbm'
+      ? { provider: 'google_rbm', agentId: rcs.agentId, secret: rcs.secret }
+      : rcs.provider === 'twilio'
       ? { provider: 'twilio', sender: rcs.sender, fallbackFrom: rcs.fallbackFrom, disableFallback: rcs.disableFallback }
       : { provider: 'custom', url: rcs.url, authHeader: rcs.authHeader, apiKey: rcs.apiKey, sender: rcs.sender, bodyTemplate: rcs.bodyTemplate };
     await submitSetting({
@@ -229,7 +237,7 @@ export default function Configuracoes() {
       body,
       okText: 'Configuração de RCS salva',
       afterOk: () => {
-        setRcs((r) => ({ ...r, apiKey: '' }));
+        setRcs((r) => ({ ...r, apiKey: '', secret: '' }));
         loadConfiguredSettings();
       }
     });
@@ -248,6 +256,16 @@ export default function Configuracoes() {
     } catch (error) {
       setMessages((m) => ({ ...m, [`${kind}Test`]: `❌ ${error.response?.data?.error || 'Erro ao enviar o teste'}` }));
     }
+  }
+
+  async function saveDialerTel(e) {
+    e.preventDefault();
+    await submitSetting({
+      area: 'dialertel',
+      url: '/settings/dialer-telephony',
+      body: { provider: dialerTel },
+      okText: dialerTel === 'asterisk' ? 'Discador configurado para o Asterisk — faça uma ligação de teste' : 'O discador voltou a usar a Twilio'
+    });
   }
 
   async function saveAiTelephony(e) {
@@ -506,9 +524,16 @@ export default function Configuracoes() {
           <form onSubmit={saveRcs}>
             <select value={rcs.provider} onChange={(e) => setRcs({ ...rcs, provider: e.target.value })}>
               <option value="twilio">Twilio (usa as chaves da Telefonia)</option>
+              <option value="google_rbm">Google RCS direto (nativo, sem intermediário)</option>
               <option value="custom">Outra empresa (API HTTP)</option>
             </select>
-            {rcs.provider === 'twilio' ? (
+            {rcs.provider === 'google_rbm' ? (
+              <>
+                <textarea rows={6} style={{ fontFamily: 'monospace', fontSize: 12 }} placeholder={rcs.secretHint ? `JSON da conta de serviço já salvo (${rcs.secretHint}) — deixe vazio para manter` : 'Cole aqui o arquivo JSON da conta de serviço do seu agente RBM (Google)'} value={rcs.secret || ''} onChange={(e) => setRcs({ ...rcs, secret: e.target.value })} />
+                <input placeholder="ID do agente (opcional; só se a sua conta tiver mais de um agente)" value={rcs.agentId || ''} onChange={(e) => setRcs({ ...rcs, agentId: e.target.value })} />
+                <p className="hint-text">Você cria o agente no Google RBM Console (ou por um parceiro), passa pela verificação da marca e baixa a chave da conta de serviço. Sem o agente aprovado o Google não entrega. Se o celular não tiver RCS, o sistema pode mandar SMS de segurança (opção nos Disparos).</p>
+              </>
+            ) : rcs.provider === 'twilio' ? (
               <>
                 <input placeholder="Messaging Service (MG…) — recomendado — ou rcs:nome_do_agente" value={rcs.sender} onChange={(e) => setRcs({ ...rcs, sender: e.target.value })} />
                 <input placeholder="Número de SMS para o fallback (opcional, +1202…)" value={rcs.fallbackFrom} onChange={(e) => setRcs({ ...rcs, fallbackFrom: e.target.value })} />
@@ -539,10 +564,27 @@ export default function Configuracoes() {
         </div>
 
         <div className="card">
+          <h3>📞 Telefonia do discador (vendedores)</h3>
+          <p className="card-desc">
+            Escolha por onde o <strong>discador manual e o automático</strong> ligam para os clientes. Com o Asterisk, o vendedor atende
+            pelo telefone do navegador (tela Telefone SIP aberta) ou, se ela estiver fechada, no celular dele pelo tronco SIP.
+            A URA reversa (robô com áudios) continua na Twilio.
+          </p>
+          <form onSubmit={saveDialerTel}>
+            <select value={dialerTel} onChange={(e) => setDialerTel(e.target.value)}>
+              <option value="twilio">Twilio (padrão)</option>
+              <option value="asterisk">Asterisk (PBX próprio do sistema — sem Twilio)</option>
+            </select>
+            <button className="btn-primary" type="submit">Salvar</button>
+            {messages.dialertel && <p className="config-msg">{messages.dialertel}</p>}
+          </form>
+        </div>
+
+        <div className="card">
           <h3>☎️ Telefonia das ligações da IA</h3>
           <p className="card-desc">
             Escolha por onde o <strong>Agente de IA</strong> faz as ligações. O padrão é a Twilio (nada muda se você
-            não mexer aqui). O discador manual com vendedor continua sempre na Twilio.
+            não mexer aqui). O discador dos vendedores tem a sua própria escolha no quadro acima.
           </p>
 
           <form onSubmit={saveAiTelephony}>

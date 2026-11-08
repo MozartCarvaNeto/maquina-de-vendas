@@ -327,7 +327,7 @@ async function executeRoboCampaign(campaignId) {
     const campaign = await prisma.roboCallCampaign.findUnique({ where: { id: campaignId } });
     if (!campaign) return;
 
-    const provider = await getActiveTelephonyProvider(campaign.userId);
+    const provider = await getActiveTelephonyProvider(campaign.userId, { ignoreDialerChoice: true });
     const audience = await resolveAudience(campaign.userId, campaign.audienceFilter, 'sms');
 
     const alreadyCalled = await prisma.call.findMany({

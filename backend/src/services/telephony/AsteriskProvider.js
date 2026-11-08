@@ -35,9 +35,15 @@ class AsteriskProvider extends ITelephonyProvider {
     return { trunk: built.active[idx], endpoint: built.trunks[idx] };
   }
 
-  async startCall({ to, from, ringTimeoutSeconds = 30, timeLimitSeconds, statusCallbackUrl, recordingStatusCallbackUrl }) {
+  async startCall({ to, from, ringTimeoutSeconds = 30, timeLimitSeconds, statusCallbackUrl, recordingStatusCallbackUrl, twiml }) {
     const callId = /callId=([0-9a-f-]{36})/i.exec(statusCallbackUrl || '')?.[1];
-    if (!callId) throw new Error('Ligação sem identificador (callId).');
+    if (twiml) {
+      const err = new Error('A URA reversa (robô com áudios) ainda usa a Twilio. Use o Asterisk no discador e nas ligações da IA; mantenha a Twilio para a URA reversa.');
+      err.status = 400;
+      err.fatal = true;
+      throw err;
+    }
+    if (!callId) return this.startDialerLeg({ to, from, ringTimeoutSeconds, timeLimitSeconds });
     const allow = await require('../walletService').voiceAllowance(this.userId);
     if (!allow.allowed) {
       const err = new Error('Saldo insuficiente para ligar. Peça uma recarga ao administrador do serviço.');
@@ -85,8 +91,109 @@ class AsteriskProvider extends ITelephonyProvider {
     return { providerCallId: `asterisk:${callId}`, status: 'queued' };
   }
 
-  async hangupCall() {
-    return { success: true }; // o Asterisk encerra pelo limite de tempo/pela própria ponte
+  async hangupCall({ providerCallId } = {}) {
+    const hex = /^ast-([0-9a-f]{32})$/.exec(String(providerCallId || ''))?.[1];
+    if (!hex) return { success: true }; // ligação da IA: a ponte/Asterisk encerra sozinho
+    const live = require('../pbx/pbxLive');
+    const { out } = await live._asterisk('core show channels concise');
+    const mine = live.parseChannels(out).filter((c) => c.channel.includes(`/${'L'}${hex}@`) || c.channel.includes(`/A${hex}@`));
+    for (const c of mine) await live._asterisk(`channel request hangup ${c.channel}`);
+    return { success: true };
+  }
+
+  // ---- discador (vendedor / automático): o lead cai numa sala de conferência e o vendedor entra depois ----
+  async dialString(digits, trunkInfo) {
+    return `PJSIP/${trunkInfo.trunk.dialPrefix || ''}${digits}@${trunkInfo.endpoint}`;
+  }
+
+  writeCallFile(name, lines) {
+    const tmp = path.join(os.tmpdir(), `${name}.${crypto.randomBytes(4).toString('hex')}`);
+    fs.writeFileSync(tmp, `${lines.join('\n')}\n`, { mode: 0o644 });
+    const dest = path.join(this.spoolDir, name);
+    try {
+      fs.renameSync(tmp, dest);
+    } catch (e) {
+      try {
+        fs.copyFileSync(tmp, dest);
+        fs.rmSync(tmp, { force: true });
+      } catch (err) {
+        fs.rmSync(tmp, { force: true });
+        const e2 = new Error(`Não consegui entregar a ligação ao Asterisk em ${this.spoolDir} (${err.code || err.message}). Confira se o sistema roda no mesmo servidor e tem permissão nessa pasta.`);
+        e2.status = 502;
+        throw e2;
+      }
+    }
+  }
+
+  async checkAllowance() {
+    const allow = await require('../walletService').voiceAllowance(this.userId);
+    if (!allow.allowed) {
+      const err = new Error('Saldo insuficiente para ligar. Peça uma recarga ao administrador do serviço.');
+      err.status = 402;
+      err.fatal = true;
+      throw err;
+    }
+    return allow;
+  }
+
+  legLines({ sid, leg, dialStr, wait, from, room, timeLimit }) {
+    const hex = sid.slice(4);
+    const num = String(from || '').replace(/\D/g, '');
+    const lines = [
+      `Channel: Local/${leg === 'lead' ? 'L' : 'A'}${hex}@turbo-dial-leg/n`,
+      `CallerID: "${String(from || '').replace(/"/g, '')}" <${num}>`,
+      `WaitTime: ${wait + 15}`,
+      'MaxRetries: 0',
+      'Application: ConfBridge',
+      `Data: ${room}`,
+      'Archive: no',
+      `Setvar: TP_SID=${sid}`,
+      `Setvar: TP_LEG=${leg}`,
+      `Setvar: TP_WAIT=${wait}`,
+      `Setvar: TP_DIALSTR=${dialStr}`,
+      `Setvar: TP_TAG=${require('../pbx/pbxCore').tagFor(this.userId)}`
+    ];
+    if (timeLimit > 0) lines.push(`Setvar: TIMEOUT(absolute)=${Math.round(timeLimit)}`);
+    return lines;
+  }
+
+  static roomFor(sid) {
+    return `dl${String(sid).replace(/^ast-/, '')}`;
+  }
+
+  async startDialerLeg({ to, from, ringTimeoutSeconds = 30, timeLimitSeconds }) {
+    const allow = await this.checkAllowance();
+    const info = await this.pickTrunk();
+    const digits = String(to).replace(/\D/g, '');
+    const sid = `ast-${crypto.randomBytes(16).toString('hex')}`;
+    const limit = [timeLimitSeconds, allow.maxSeconds].filter((x) => x > 0);
+    this.writeCallFile(`turbo-dial-${sid}.call`, this.legLines({
+      sid, leg: 'lead', dialStr: await this.dialString(digits, info), wait: Math.max(10, ringTimeoutSeconds), from, room: AsteriskProvider.roomFor(sid), timeLimit: limit.length ? Math.min(...limit) : 0
+    }));
+    return { providerCallId: sid, status: 'queued' };
+  }
+
+  /** Registrado = o telefone do navegador do vendedor está ligado e atende por ramal. */
+  async extensionOnline(ext) {
+    const { out } = await require('../pbx/pbxLive')._asterisk('pjsip show contacts');
+    return new RegExp(`Contact:\\s+${ext}/`).test(out) && !/Unavail/.test(out.split('\n').filter((l) => new RegExp(`Contact:\\s+${ext}/`).test(l)).join('\n'));
+  }
+
+  async bridgeToAgent({ providerCallId, from, agentPhoneNumber, agentId, ringTimeoutSeconds = 30 }) {
+    const prisma = require('../../config/db');
+    const info = await this.pickTrunk();
+    let dialStr = null;
+    if (agentId) {
+      const member = await prisma.member.findFirst({ where: { agentId } });
+      const ext = member ? await prisma.sipExtension.findFirst({ where: { userId: this.userId, memberId: member.id } }) : null;
+      if (ext && (await this.extensionOnline(ext.extension))) dialStr = `PJSIP/${ext.extension}`;
+    }
+    if (!dialStr) dialStr = await this.dialString(String(agentPhoneNumber || '').replace(/\D/g, ''), info);
+    const sid = `ast-${crypto.randomBytes(16).toString('hex')}`;
+    this.writeCallFile(`turbo-dial-${sid}.call`, this.legLines({
+      sid, leg: 'agent', dialStr, wait: ringTimeoutSeconds, from, room: AsteriskProvider.roomFor(providerCallId), timeLimit: 0
+    }));
+    return { agentCallSid: sid };
   }
 
   async validateCredentials() {
@@ -98,11 +205,6 @@ class AsteriskProvider extends ITelephonyProvider {
     }
   }
 
-  async bridgeToAgent() {
-    const err = new Error('A transferência para vendedor pelo Asterisk é feita pela ponte da IA (fila ou número).');
-    err.status = 400;
-    throw err;
-  }
 }
 
 module.exports = AsteriskProvider;

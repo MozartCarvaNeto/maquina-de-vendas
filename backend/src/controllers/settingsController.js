@@ -81,6 +81,26 @@ async function validateWithRegistry(Registry, provider, credentials) {
   }
 }
 
+/** Escolhe por onde o discador (manual e automático) liga: Twilio (padrão) ou Asterisk próprio. */
+exports.saveDialerTelephony = async (req, res, next) => {
+  try {
+    const provider = String(req.body.provider || 'twilio');
+    if (provider === 'twilio') {
+      await prisma.setting.deleteMany({ where: { userId: req.userId, category: 'dialer_telephony' } });
+      return res.json({ success: true, message: 'O discador volta a ligar pela Twilio.' });
+    }
+    if (provider !== 'asterisk') return res.status(400).json({ error: 'Opção inválida.' });
+    const check = await new AI_TELEPHONY_REGISTRY.asterisk({ userId: req.userId }).validateCredentials();
+    if (!check.valid && !req.body.force) {
+      return res.status(422).json({ error: 'O Asterisk não está acessível por este sistema — nada foi alterado.', details: check.error, canForce: true });
+    }
+    await persistCredentials(req.userId, 'dialer_telephony', 'asterisk', { ativo: 'true' }, [], { exclusive: true });
+    res.json({ success: true, message: 'O discador (manual e automático) vai ligar pelo seu Asterisk. A tela Telefone SIP precisa estar aberta no navegador do vendedor para ele atender pelo computador; senão o Asterisk liga no celular dele pelo tronco.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.saveTelephonySettings = async (req, res, next) => {
   try {
     const { provider, credentials, force } = req.body;
@@ -329,10 +349,21 @@ exports.saveRcsSettings = async (req, res, next) => {
       await prisma.setting.deleteMany({ where: { userId: req.userId, category: 'rcs' } });
       return res.json({ success: true, message: 'Configuração de RCS removida.' });
     }
-    if (!['twilio', 'custom'].includes(provider)) return res.status(400).json({ error: 'Provedor de RCS inválido.' });
+    if (!['twilio', 'custom', 'google_rbm'].includes(provider)) return res.status(400).json({ error: 'Provedor de RCS inválido.' });
 
     let incoming;
-    if (provider === 'twilio') {
+    if (provider === 'google_rbm') {
+      incoming = { agentId: String(fields.agentId || '').trim().slice(0, 200), secret: '' }; // vazio = mantém o salvo
+      if (fields.secret) {
+        try {
+          const sa = JSON.parse(String(fields.secret));
+          if (!sa.client_email || !sa.private_key) throw new Error('x');
+        } catch (e) {
+          return res.status(400).json({ error: 'O JSON da conta de serviço é inválido. Cole o arquivo inteiro baixado do Google (RBM).' });
+        }
+        incoming.secret = String(fields.secret);
+      }
+    } else if (provider === 'twilio') {
       const sender = String(fields.sender || '').trim();
       if (!/^(MG[0-9a-fA-F]{32}|rcs:[A-Za-z0-9_\-.@]{3,120})$/.test(sender)) {
         return res.status(400).json({ error: 'Remetente inválido. Use o ID do Messaging Service (MG…, recomendado: já tem SMS de segurança automático) ou o remetente RCS (rcs:nome_do_agente).' });

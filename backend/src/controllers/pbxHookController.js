@@ -106,6 +106,40 @@ exports.aiStart = async (req, res) => {
   }
 };
 
+/**
+ * Discador pelo Asterisk: traduz os avisos do plano de discagem para os mesmos eventos que a Twilio mandava
+ * (assim o discador, a fila automática e o repasse ao vendedor funcionam sem mudar).
+ */
+exports.dialEvent = async (req, res) => {
+  if (!guard(req, res)) return;
+  try {
+    const q = req.query;
+    const sid = clip(q.sid, 40);
+    if (!/^ast-[0-9a-f]{32}$/.test(sid)) return res.type('text/plain').send('IGNORED');
+    let status;
+    if (q.ev === 'answered') status = 'in-progress';
+    else {
+      const ds = String(q.ds || '');
+      status = ds === 'ANSWER' ? 'completed' : ds === 'BUSY' ? 'busy' : ['NOANSWER', 'CANCEL', ''].includes(ds) ? 'no-answer' : 'failed';
+    }
+    const webhook = require('./callsWebhookController');
+    const fake = { set() { return this; }, status() { return this; }, send() { return this; }, json() { return this; }, type() { return this; } };
+    await webhook.handleTwilioWebhook({ body: { CallSid: sid, CallStatus: status, Source: 'asterisk' } }, fake, (e) => { if (e) console.error('Discador Asterisk:', e.message); });
+    // cobrança da perna do cliente (a do vendedor é interna)
+    if (q.ev === 'end' && status === 'completed' && q.leg === 'lead') {
+      const secs = num(q.at);
+      const call = await prisma.call.findFirst({ where: { providerCallId: sid } });
+      if (call && secs > 0) {
+        await wallet.chargeCall(call.userId, { direction: 'saida', seconds: secs, refId: sid, description: `Ligação do discador (${secs}s)` }).catch(() => 0);
+      }
+    }
+    res.type('text/plain').send('OK');
+  } catch (e) {
+    console.error('PBX discador:', e.message);
+    res.type('text/plain').send('ERR');
+  }
+};
+
 exports.aiNext = (req, res) => {
   if (!guard(req, res)) return;
   res.type('text/plain').send(bridge.nextAction(String(req.query.callId || '')));

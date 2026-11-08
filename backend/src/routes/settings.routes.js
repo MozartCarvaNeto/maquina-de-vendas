@@ -13,6 +13,7 @@ router.get('/env-status', settingsController.getEnvStatus);
 router.get('/', settingsController.listMySettings);
 router.post('/telephony', settingsController.saveTelephonySettings);
 router.post('/ai-telephony', settingsController.saveAiTelephonySettings);
+router.post('/dialer-telephony', settingsController.saveDialerTelephony);
 router.post('/email', settingsController.saveEmailSettings);
 router.post('/sms', settingsController.saveSmsSettings);
 router.post('/sms/test', settingsController.testSms);

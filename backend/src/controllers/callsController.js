@@ -209,7 +209,7 @@ exports.clickToCall = async (req, res, next) => {
       data: {
         userId: req.userId,
         leadId: lead.id,
-        provider: 'twilio',
+        provider: provider.providerName || 'twilio',
         providerCallId,
         fromNumber: callerNumber.phoneNumber,
         toNumber: to,

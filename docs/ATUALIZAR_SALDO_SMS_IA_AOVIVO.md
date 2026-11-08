@@ -35,3 +35,23 @@ Esta atualização vem **junto** das anteriores (PBX nativo e vozes). Aplique tu
 - A cobrança de voz acontece no fim da chamada: o saldo pode ficar levemente negativo; o limite de duração reduz isso.
 - O painel ao vivo lê a saída de texto do Asterisk; versões muito diferentes podem exigir ajuste.
 - RCS segue por integração com fornecedor (não é nativo). Amazon Transcribe não foi incluído de propósito.
+
+---
+
+# Complemento: RCS direto pelo Google e discador pelo Asterisk
+
+## RCS direto (Google RBM)
+- Configurações → RCS → escolha **"Google RCS direto"**, cole o JSON da conta de serviço do seu agente RBM (e, se tiver mais de um agente, o ID dele).
+- O sistema fala direto com a API do Google (texto, cartão com imagem, botões de link/ligar e respostas rápidas). Se o celular não tem RCS, usa o SMS de segurança dos Disparos (nativo, se você ativou).
+- **Não dá para dispensar o Google:** o agente precisa ser criado e **aprovado** (verificação da marca, e liberação por operadora) no Google RBM Console ou por um parceiro. Sem isso o Google recusa o envio. Respostas dos clientes ao RCS (recebimento) ainda não estão ligadas.
+
+## Discador manual e automático pelo Asterisk
+- Configurações → "Telefonia do discador (vendedores)" → **Asterisk**. Depois clique em **Aplicar no Asterisk** (novos trechos no plano de discagem).
+- Fluxo: o Asterisk liga ao cliente pelo seu tronco SIP; quando atende, o sistema chama o vendedor — no telefone do navegador (tela Telefone SIP aberta) ou, se ela estiver fechada, no celular dele pelo tronco — e junta os dois numa sala. Fila automática, pausa por vendedor, tentativas e histórico funcionam como antes.
+- Ligações da IA e discador agora têm escolhas independentes (cada um pode ficar na Twilio ou no Asterisk).
+- Saldo pré-pago: a perna do cliente é cobrada; o limite de duração segue o saldo.
+
+## Limites
+- **URA reversa (robô com áudios) continua na Twilio** (usa arquivos de áudio e teclas; precisa de uma etapa própria).
+- **Gravação do discador pelo Asterisk ainda não foi ligada** (a opção "gravar" só vale na Twilio; as gravações do PBX e da IA continuam).
+- Não testado com Asterisk real: em especial a passagem de variáveis entre as duas metades do canal "Local" — se a ligação não sair, envie o log do Asterisk.

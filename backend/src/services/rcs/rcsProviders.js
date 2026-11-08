@@ -246,4 +246,133 @@ class CustomHttpRcsProvider {
   }
 }
 
-module.exports = { TwilioRcsProvider, CustomHttpRcsProvider, htmlToRcsText, cleanButtons, cleanSuggestions, renderBodyTemplate };
+// --- Google RBM (direto, sem agregador) ----------------------------------------------------------------------------
+const RBM_HOST = 'https://rcsbusinessmessaging.googleapis.com';
+const RBM_SCOPE = 'https://www.googleapis.com/auth/rcsbusinessmessaging';
+const b64url = (b) => Buffer.from(b).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+
+class GoogleRbmProvider {
+  /** @param {{serviceAccountJson: string, agentId?: string}} config  (JSON da conta de serviço do agente RBM) */
+  constructor(config, deps = {}) {
+    this.name = 'google_rbm';
+    this.nativeFallback = false;
+    this.agentId = config.agentId || null;
+    this.http = deps.http || axios;
+    try {
+      this.sa = typeof config.serviceAccountJson === 'string' ? JSON.parse(config.serviceAccountJson) : config.serviceAccountJson;
+    } catch (e) {
+      this.sa = null;
+    }
+    this.token = null;
+    this.tokenExp = 0;
+  }
+
+  assertConfigured() {
+    if (!this.sa || !this.sa.client_email || !this.sa.private_key) {
+      const e = new Error('Configurações > RCS: cole o arquivo JSON da conta de serviço do seu agente RBM (Google).');
+      e.configProblem = true;
+      throw e;
+    }
+  }
+
+  async accessToken() {
+    this.assertConfigured();
+    const now = Math.floor(Date.now() / 1000);
+    if (this.token && now < this.tokenExp - 60) return this.token;
+    const uri = this.sa.token_uri || 'https://oauth2.googleapis.com/token';
+    const unsigned = `${b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))}.${b64url(JSON.stringify({ iss: this.sa.client_email, scope: RBM_SCOPE, aud: uri, iat: now, exp: now + 3600 }))}`;
+    let sig;
+    try {
+      sig = crypto.createSign('RSA-SHA256').update(unsigned).sign(this.sa.private_key);
+    } catch (e) {
+      const err = new Error('A chave privada do JSON da conta de serviço é inválida.');
+      err.configProblem = true;
+      throw err;
+    }
+    try {
+      const { data } = await this.http.post(
+        uri,
+        new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: `${unsigned}.${b64url(sig)}` }).toString(),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15000 }
+      );
+      this.token = data.access_token;
+      this.tokenExp = now + (data.expires_in || 3600);
+      return this.token;
+    } catch (error) {
+      const err = new Error(`O Google recusou a conta de serviço do RCS: ${error.response?.data?.error_description || error.response?.data?.error || error.message}`);
+      err.configProblem = true;
+      throw err;
+    }
+  }
+
+  static action(b, i) {
+    const postbackData = `btn${i}`;
+    if (b.type === 'call') return { action: { text: b.label, postbackData, dialAction: { phoneNumber: normalizePhoneForCall(b.value) } } };
+    return { action: { text: b.label, postbackData, openUrlAction: { url: b.value } } };
+  }
+
+  /** Mensagem neutra -> corpo da API RBM (texto com respostas rápidas, ou cartão com imagem e botões). */
+  static buildContent(msg) {
+    const replies = (msg.suggestions || []).map((s, i) => ({ reply: { text: s, postbackData: `rep${i}_${s}`.slice(0, 120) } }));
+    const buttons = (msg.buttons || []).map((b, i) => GoogleRbmProvider.action(b, i));
+    const text = String(msg.text || '').slice(0, 3072);
+    if (!msg.title && !msg.imageUrl) {
+      const chips = [...buttons, ...replies].slice(0, 11);
+      return { text, ...(chips.length ? { suggestions: chips } : {}) };
+    }
+    const cardContent = { description: String(msg.text || '').slice(0, 2000) };
+    if (msg.title) cardContent.title = String(msg.title).slice(0, 200);
+    if (msg.imageUrl) cardContent.media = { height: 'MEDIUM', contentInfo: { fileUrl: msg.imageUrl, forceRefresh: false } };
+    if (buttons.length) cardContent.suggestions = buttons.slice(0, 4);
+    const content = { richCard: { standaloneCard: { cardOrientation: 'VERTICAL', cardContent } } };
+    if (replies.length) content.suggestions = replies.slice(0, 11);
+    return content;
+  }
+
+  async send(msg) {
+    const to = toE164BR(msg.to);
+    if (!to) throw new Error(`Telefone inválido: "${msg.to}"`);
+    const token = await this.accessToken();
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    const phone = encodeURIComponent(to.startsWith('+') ? to : `+${to}`);
+    const agent = this.agentId ? `&agentId=${encodeURIComponent(this.agentId)}` : '';
+    // Confere se o aparelho tem RCS (se a checagem falhar por outro motivo, tenta enviar mesmo assim).
+    try {
+      await this.http.get(`${RBM_HOST}/v1/phones/${phone}/capabilities?requestId=${crypto.randomUUID()}${agent}`, { headers, timeout: 15000 });
+    } catch (e) {
+      if (e.response?.status === 404) {
+        const err = new Error('Este celular não tem RCS ativo.');
+        err.notRcsCapable = true;
+        throw err;
+      }
+    }
+    const messageId = crypto.randomUUID();
+    try {
+      const { data } = await this.http.post(
+        `${RBM_HOST}/v1/phones/${phone}/agentMessages?messageId=${messageId}${agent}`,
+        { contentMessage: GoogleRbmProvider.buildContent(msg) },
+        { headers, timeout: 25000 }
+      );
+      return { providerMessageId: data?.name || messageId };
+    } catch (error) {
+      const status = error.response?.status;
+      const detail = JSON.stringify(error.response?.data?.error?.message || error.response?.data || error.message).slice(0, 300);
+      const err = new Error(`Google RCS recusou (${status || 'sem resposta'}): ${detail}`);
+      err.configProblem = status === 401 || status === 403;
+      if (err.configProblem) err.message = `O Google recusou o agente de RCS (${status}). O agente precisa estar aprovado/lançado e ter a conta de serviço correta. ${detail}`;
+      err.notRcsCapable = status === 404;
+      throw err;
+    }
+  }
+
+  async validate() {
+    try {
+      await this.accessToken();
+      return { valid: true };
+    } catch (e) {
+      return { valid: false, error: e.message };
+    }
+  }
+}
+
+module.exports = { GoogleRbmProvider, TwilioRcsProvider, CustomHttpRcsProvider, htmlToRcsText, cleanButtons, cleanSuggestions, renderBodyTemplate };

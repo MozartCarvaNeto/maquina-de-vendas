@@ -166,7 +166,7 @@ exports.start = async (req, res, next) => {
     if (!campaign) return res.status(404).json({ error: 'Campanha não encontrada.' });
 
     validatePublicUrl();
-    await getActiveTelephonyProvider(req.userId);
+    await getActiveTelephonyProvider(req.userId, { ignoreDialerChoice: true });
 
     const numbers = await prisma.callerNumber.count({ where: { userId: req.userId, isActive: true } });
     if (numbers === 0) {
