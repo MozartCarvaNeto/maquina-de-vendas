@@ -1,11 +1,14 @@
 // frontend/src/pages/GatewayTelecom.jsx
 import { useState, useEffect, useCallback } from 'react';
 import api from '../services/api';
+import { ConversasTab, SaldoTab } from '../components/gateway/GatewayExtras';
 import './GatewayTelecom.css';
 
 const TABS = [
   ['fornecedores', '📡 Fornecedores de SMS'],
   ['mensagens', '✉️ Enviar e acompanhar'],
+  ['conversas', '💬 Conversas'],
+  ['saldo', '💳 Saldo'],
   ['consumo', '💰 Consumo'],
   ['api', '🔑 API'],
   ['voz', '☎️ Voz (SIP)']
@@ -29,7 +32,8 @@ export default function GatewayTelecom() {
   const [carrier, setCarrier] = useState(null); // formulário aberto (novo ou edição)
   const [messages, setMessages] = useState([]);
   const [direction, setDirection] = useState('');
-  const [sendForm, setSendForm] = useState({ to: '', body: '', from: '' });
+  const [sendForm, setSendForm] = useState({ to: '', body: '', from: '', sendAt: '' });
+  const [hookEdit, setHookEdit] = useState({});
   const [preview, setPreview] = useState(null);
   const [usage, setUsage] = useState(null);
   const [days, setDays] = useState(30);
@@ -96,8 +100,8 @@ export default function GatewayTelecom() {
   async function sendSms(e) {
     e.preventDefault();
     try {
-      const { data } = await api.post('/gateway/send', sendForm);
-      flash(`✅ SMS na fila (${data.parts} parte(s), ${data.encoding}). Acompanhe o status abaixo.`);
+      const { data } = await api.post('/gateway/send', { ...sendForm, sendAt: sendForm.sendAt ? new Date(sendForm.sendAt).toISOString() : undefined });
+      flash(sendForm.sendAt ? `✅ SMS agendado (${data.parts} parte(s)).` : `✅ SMS na fila (${data.parts} parte(s), ${data.encoding}). Acompanhe o status abaixo.`);
       setSendForm({ ...sendForm, body: '' });
       setTimeout(loadMessages, 1500);
     } catch (err) { flash(`❌ ${errText(err)}`); }
@@ -243,7 +247,8 @@ export default function GatewayTelecom() {
             <label>Mensagem</label>
             <textarea rows={3} maxLength={1600} value={sendForm.body} onChange={(e) => setSendForm({ ...sendForm, body: e.target.value })} required />
             {preview && <small>{sendForm.body.length} caracteres · {preview.parts} parte(s) · {preview.encoding === 'ucs2' ? 'com acentos/emoji (70 letras por parte)' : 'texto simples (160 letras por parte)'}</small>}
-            <div><button className="btn-primary" type="submit">Enviar</button></div>
+            <div className="gw-row"><div><label>Agendar para (opcional)</label><input type="datetime-local" value={sendForm.sendAt} onChange={(e) => setSendForm({ ...sendForm, sendAt: e.target.value })} /></div></div>
+            <div><button className="btn-primary" type="submit">{sendForm.sendAt ? 'Agendar' : 'Enviar'}</button></div>
           </form>
           <h4 className="subsection-title">Mensagens</h4>
           <select value={direction} onChange={(e) => setDirection(e.target.value)}>
@@ -266,6 +271,9 @@ export default function GatewayTelecom() {
           </table>
         </div>
       )}
+
+      {tab === 'conversas' && <ConversasTab flash={flash} />}
+      {tab === 'saldo' && <SaldoTab flash={flash} />}
 
       {tab === 'consumo' && (
         <div className="card">
@@ -305,8 +313,8 @@ export default function GatewayTelecom() {
             <div className="gw-newkey">Copie agora, ela não aparece de novo:<br /><code>{newKey}</code> <button type="button" className="btn-secondary-small" onClick={() => { navigator.clipboard?.writeText(newKey); }}>Copiar</button></div>
           )}
           <table className="gw-table">
-            <thead><tr><th>Nome</th><th>Início da chave</th><th>Último uso</th><th /></tr></thead>
-            <tbody>{keys.map((k) => (<tr key={k.id}><td>{k.name}</td><td><code>{k.prefix}…</code></td><td>{k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleString('pt-BR') : '—'}</td><td><button type="button" className="btn-secondary-small" onClick={() => removeKey(k)}>Apagar</button></td></tr>))}</tbody>
+            <thead><tr><th>Nome</th><th>Início da chave</th><th>Último uso</th><th>Webhook (aviso de status e respostas)</th><th /></tr></thead>
+            <tbody>{keys.map((k) => (<tr key={k.id}><td>{k.name}</td><td><code>{k.prefix}…</code></td><td>{k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleString('pt-BR') : '—'}</td><td><input placeholder="https://seusite.com/webhook-sms" value={hookEdit[k.id] ?? k.webhookUrl ?? ''} onChange={(e) => setHookEdit({ ...hookEdit, [k.id]: e.target.value })} /> <button type="button" className="btn-secondary-small" onClick={async () => { try { await api.put(`/gateway/keys/${k.id}/webhook`, { url: hookEdit[k.id] ?? k.webhookUrl ?? '' }); flash('✅ Webhook salvo'); loadKeys(); } catch (err) { flash(`❌ ${errText(err)}`); } }}>Salvar</button>{k.webhookSecret && <><br /><small>Segredo da assinatura: <code>{k.webhookSecret}</code></small></>}</td><td><button type="button" className="btn-secondary-small" onClick={() => removeKey(k)}>Apagar</button></td></tr>))}</tbody>
           </table>
           <h4 className="subsection-title">Como usar</h4>
           <pre className="gw-pre">{`curl -X POST ${apiBase} \\
@@ -315,7 +323,16 @@ export default function GatewayTelecom() {
   -d '{"to":"11999998888","body":"Seu pedido saiu para entrega!","clientRef":"pedido-123"}'
 
 # Consultar o status (queued, sent, delivered, undelivered, failed):
-curl ${apiBase}/ID_DA_MENSAGEM -H "Authorization: Bearer SUA_CHAVE"`}</pre>
+curl ${apiBase}/ID_DA_MENSAGEM -H "Authorization: Bearer SUA_CHAVE"
+
+# Agendar ("sendAt") e receber aviso de status em um endereço seu ("callbackUrl"):
+#   -d '{"to":"11999998888","body":"Lembrete","sendAt":"2026-12-01T09:00:00-03:00","callbackUrl":"https://seusite.com/sms"}'
+# Cancelar um agendado:   curl -X DELETE ${apiBase}/ID_DA_MENSAGEM -H "Authorization: Bearer SUA_CHAVE"
+# Saldo (se o pré-pago estiver ligado):   curl ${apiBase.replace('/messages', '/balance')} -H "Authorization: Bearer SUA_CHAVE"
+#
+# O webhook recebe POST em JSON: {"event":"sms.status"|"sms.received","id","status","to","from","clientRef","error","at"}
+# com o cabeçalho X-Turbo-Signature: sha256=<HMAC-SHA256 do corpo usando o "Segredo da assinatura">.
+# Responda 200; em caso de falha tentamos de novo (10s, 1min, 5min, 30min, 2h).`}</pre>
         </div>
       )}
 

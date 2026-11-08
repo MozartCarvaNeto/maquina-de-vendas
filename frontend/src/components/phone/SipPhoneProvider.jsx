@@ -150,7 +150,8 @@ export default function SipPhoneProvider({ children }) {
     reject: () => raw && raw.reject(),
     hangup: () => raw && raw.hangup(),
     mute: (m) => raw && raw.setMuted(m),
-    dtmf: (t) => raw && raw.sendDtmf(t)
+    dtmf: (t) => raw && raw.sendDtmf(t),
+    transfer: (t) => raw && raw.transfer(t)
   }), [config, disabledReason, regState, regDetail, call, contactName, historyVersion, dial, raw, tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const active = call && call.state !== 'ended' ? call : null;
@@ -176,8 +177,9 @@ export default function SipPhoneProvider({ children }) {
           </div>
           <div className="sip-actions">
             {call.state === 'incoming' && <><button type="button" className="sip-btn ok" onClick={api2.answer}>Atender</button><button type="button" className="sip-btn bad" onClick={api2.reject}>Recusar</button></>}
-            {call.state !== 'incoming' && active && <><button type="button" className="sip-btn" onClick={() => api2.mute(!call.muted)}>{call.muted ? '🔇 Ativar som' : '🎤 Mudo'}</button><button type="button" className="sip-btn bad" onClick={api2.hangup}>Desligar</button></>}
+            {call.state !== 'incoming' && active && <><button type="button" className="sip-btn" onClick={() => api2.mute(!call.muted)}>{call.muted ? '🔇 Ativar som' : '🎤 Mudo'}</button>{call.state === 'connected' && <button type="button" className="sip-btn" onClick={() => { const t = window.prompt('Transferir para qual ramal ou número?'); if (t) api2.transfer(t); }}>↪️ Transferir</button>}<button type="button" className="sip-btn bad" onClick={api2.hangup}>Desligar</button></>}
           </div>
+          {call.transferError && <p className="sip-status">{call.transferError}</p>}
         </div>
       )}
     </SipContext.Provider>

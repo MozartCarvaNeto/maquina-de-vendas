@@ -7,6 +7,8 @@ const gateway = require('../services/smsgw/gateway');
 const { countSegments } = require('../services/smsgw/gsm');
 const { buildAsteriskConfig } = require('../services/smsgw/asteriskConfig');
 const { ensureAllExtensions } = require('../services/smsgw/sipExtensions');
+const wallet = require('../services/walletService');
+const smsWebhook = require('../services/smsgw/smsWebhook');
 
 const PRIVATE_HOST = /^(localhost|0\.0\.0\.0|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|::1|\[::1\]|fc|fd)/i;
 
@@ -69,6 +71,9 @@ exports.overview = async (req, res, next) => {
 
 exports.saveSettings = async (req, res, next) => {
   try {
+    if (!req.isPlatformAdmin && (await wallet.isActive(req.userId)) && req.body && req.body.priceBrl !== undefined) {
+      return res.status(403).json({ error: 'Com saldo pré-pago ligado, o preço do SMS é definido pelo administrador do serviço.' });
+    }
     await gateway.saveGatewaySettings(req.userId, {
       priceBrl: req.body.priceBrl,
       useInBroadcasts: req.body.useInBroadcasts
@@ -126,11 +131,12 @@ exports.deleteCarrier = async (req, res, next) => {
 // ---------------------------------------------------------------- mensagens
 exports.sendTest = async (req, res, next) => {
   try {
-    const { to, body, from } = req.body || {};
-    const msg = await gateway.enqueue({ userId: req.userId, to, body, from, source: 'app' });
-    res.status(202).json({ id: msg.id, status: msg.status, parts: msg.parts, encoding: msg.encoding });
+    const { to, body, from, sendAt } = req.body || {};
+    const msg = await gateway.enqueue({ userId: req.userId, to, body, from, sendAt, source: 'app' });
+    res.status(202).json({ id: msg.id, status: msg.status, parts: msg.parts, encoding: msg.encoding, scheduledFor: sendAt ? msg.nextAttemptAt : null });
   } catch (error) {
     if (error.status === 400) return badRequest(res, error.message);
+    if (error.status === 402) return res.status(402).json({ error: error.message });
     next(error);
   }
 };
@@ -181,7 +187,7 @@ exports.usage = async (req, res, next) => {
 exports.listKeys = async (req, res, next) => {
   try {
     const keys = await prisma.smsApiKey.findMany({ where: { userId: req.userId }, orderBy: { createdAt: 'desc' } });
-    res.json(keys.map(({ keyHash, ...k }) => k));
+    res.json(keys.map(({ keyHash, ...k }) => ({ ...k, webhookSecret: smsWebhook.webhookSecret(k.id) })));
   } catch (error) {
     next(error);
   }
@@ -291,6 +297,124 @@ exports.deleteTrunk = async (req, res, next) => {
 exports.asteriskConfig = async (req, res, next) => {
   try {
     res.json(await require('../services/pbx/pbxService').loadPbxConfig(req.userId));
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ---------------------------------------------------------------- webhook, cancelamento, conversas
+exports.setKeyWebhook = async (req, res, next) => {
+  try {
+    const url = String(req.body?.url || '').trim();
+    const key = await prisma.smsApiKey.findFirst({ where: { id: req.params.id, userId: req.userId } });
+    if (!key) return res.status(404).json({ error: 'Chave não encontrada.' });
+    const clean = url ? await smsWebhook.validateUrl(url) : null;
+    await prisma.smsApiKey.update({ where: { id: key.id }, data: { webhookUrl: clean } });
+    res.json({ success: true, webhookUrl: clean, webhookSecret: smsWebhook.webhookSecret(key.id) });
+  } catch (error) {
+    if (error.status === 400) return badRequest(res, error.message);
+    next(error);
+  }
+};
+
+exports.cancelMessage = async (req, res, next) => {
+  try {
+    res.json(await gateway.cancelQueued(req.userId, req.params.id));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+};
+
+const digitsKey = (v) => String(v || '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '');
+
+/** Caixa de entrada: uma conversa por número (últimas mensagens enviadas e recebidas). */
+exports.conversations = async (req, res, next) => {
+  try {
+    const rows = await prisma.smsMessage.findMany({ where: { userId: req.userId }, orderBy: { createdAt: 'desc' }, take: 1000 });
+    const map = new Map();
+    for (const m of rows) {
+      const number = m.direction === 'in' ? m.fromAddr : m.toAddr;
+      const k = digitsKey(number);
+      if (!k) continue;
+      const c = map.get(k) || { number, last: m, count: 0, received: 0 };
+      c.count += 1;
+      if (m.direction === 'in') c.received += 1;
+      map.set(k, c);
+    }
+    const list = [...map.values()].slice(0, 100).map((c) => ({ number: c.number, key: digitsKey(c.number), lastBody: c.last.body.slice(0, 120), lastAt: c.last.createdAt, lastDirection: c.last.direction, lastStatus: c.last.status, count: c.count, received: c.received }));
+    res.json(list);
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.conversation = async (req, res, next) => {
+  try {
+    const k = digitsKey(req.params.number);
+    if (k.length < 8) return badRequest(res, 'Número inválido.');
+    const rows = await prisma.smsMessage.findMany({ where: { userId: req.userId }, orderBy: { createdAt: 'desc' }, take: 1000 });
+    const msgs = rows.filter((m) => digitsKey(m.direction === 'in' ? m.fromAddr : m.toAddr) === k).slice(0, 200).reverse();
+    res.json(msgs.map((m) => ({ id: m.id, direction: m.direction, body: m.body, status: m.status, createdAt: m.createdAt, scheduledFor: m.status === 'queued' && m.nextAttemptAt > new Date() ? m.nextAttemptAt : null, error: m.errorMessage })));
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ---------------------------------------------------------------- saldo pré-pago
+exports.walletMe = async (req, res, next) => {
+  try {
+    const w = await wallet.getWallet(req.userId);
+    const txs = await prisma.walletTx.findMany({ where: { userId: req.userId }, orderBy: { createdAt: 'desc' }, take: 100 });
+    const settings = await gateway.getGatewaySettings(req.userId);
+    res.json({
+      enabled: Boolean(w?.enabled),
+      balanceBrl: w?.balanceBrl || 0,
+      rates: { smsPerPartBrl: settings.priceBrl, voiceOutPerMinBrl: w?.voiceOutPerMinBrl || 0, voiceInPerMinBrl: w?.voiceInPerMinBrl || 0, voiceIncrementSec: w?.voiceIncrementSec || 60 },
+      txs
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.walletAccounts = async (req, res, next) => {
+  try {
+    const [accounts, wallets] = await Promise.all([prisma.account.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' }, take: 500 }), prisma.wallet.findMany({})]);
+    const byUser = new Map(wallets.map((w) => [w.userId, w]));
+    const out = [];
+    for (const a of accounts) {
+      const w = byUser.get(a.id);
+      const s = await gateway.getGatewaySettings(a.id);
+      out.push({ id: a.id, name: a.name, enabled: Boolean(w?.enabled), balanceBrl: w?.balanceBrl || 0, smsPerPartBrl: s.priceBrl, voiceOutPerMinBrl: w?.voiceOutPerMinBrl || 0, voiceInPerMinBrl: w?.voiceInPerMinBrl || 0, voiceIncrementSec: w?.voiceIncrementSec || 60 });
+    }
+    res.json(out);
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.walletCredit = async (req, res, next) => {
+  try {
+    const amount = Number(req.body?.amountBrl);
+    if (!(amount > 0) || amount > 1000000) return badRequest(res, 'Informe um valor de recarga maior que zero.');
+    const acc = await prisma.account.findUnique({ where: { id: req.params.userId }, select: { id: true } });
+    if (!acc) return res.status(404).json({ error: 'Conta não encontrada.' });
+    await wallet.credit(acc.id, amount, { description: String(req.body?.description || 'Recarga manual').slice(0, 150) });
+    res.json({ success: true, balanceBrl: (await wallet.getWallet(acc.id)).balanceBrl });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.walletRates = async (req, res, next) => {
+  try {
+    const acc = await prisma.account.findUnique({ where: { id: req.params.userId }, select: { id: true } });
+    if (!acc) return res.status(404).json({ error: 'Conta não encontrada.' });
+    const b = req.body || {};
+    await wallet.saveRates(acc.id, b);
+    if (b.smsPerPartBrl !== undefined) await gateway.saveGatewaySettings(acc.id, { priceBrl: b.smsPerPartBrl });
+    res.json({ success: true });
   } catch (error) {
     next(error);
   }

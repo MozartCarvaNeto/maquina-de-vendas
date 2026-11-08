@@ -9,6 +9,8 @@ const { encrypt, decrypt } = require('../crypto/settingsCrypto');
 const { SmppSession } = require('./smpp');
 const { encodeSms, countSegments } = require('./gsm');
 const { toE164BR } = require('../../utils/phone');
+const wallet = require('../walletService');
+const smsWebhook = require('./smsWebhook');
 
 const sessions = new Map(); // carrierId -> { session, carrier }
 const events = new EventEmitter();
@@ -168,22 +170,59 @@ async function enqueue(p) {
   }
   const { parts, encoding } = countSegments(body);
   const price = await getPrice(p.userId);
-  return prisma.smsMessage.create({
-    data: {
-      userId: p.userId,
-      direction: 'out',
-      fromAddr: p.from || '',
-      toAddr: to,
-      body,
-      encoding,
-      parts,
-      status: 'queued',
-      priceBrl: price * parts,
-      source: p.source || 'app',
-      apiKeyId: p.apiKeyId || null,
-      clientRef: p.clientRef ? String(p.clientRef).slice(0, 100) : null
+  let sendAt = null;
+  if (p.sendAt) {
+    sendAt = new Date(p.sendAt);
+    if (Number.isNaN(sendAt.getTime())) {
+      const e = new Error('Data/hora de agendamento inválida.');
+      e.status = 400;
+      throw e;
     }
-  });
+    if (sendAt.getTime() > Date.now() + 30 * 24 * 3600 * 1000) {
+      const e = new Error('Só dá para agendar até 30 dias à frente.');
+      e.status = 400;
+      throw e;
+    }
+    if (sendAt.getTime() <= Date.now() + 5000) sendAt = null;
+  }
+  let callbackUrl = null;
+  if (p.callbackUrl) callbackUrl = await smsWebhook.validateUrl(p.callbackUrl);
+  // Cobra antes de enfileirar (sem saldo → erro 402). Se algo falhar depois, estorna.
+  const total = price * parts;
+  await wallet.charge(p.userId, total, { type: 'sms', description: `SMS para ${to}${sendAt ? ' (agendado)' : ''}` });
+  try {
+    return await prisma.smsMessage.create({
+      data: {
+        userId: p.userId,
+        direction: 'out',
+        fromAddr: p.from || '',
+        toAddr: to,
+        body,
+        encoding,
+        parts,
+        status: 'queued',
+        nextAttemptAt: sendAt || new Date(),
+        priceBrl: total,
+        source: p.source || 'app',
+        apiKeyId: p.apiKeyId || null,
+        callbackUrl,
+        clientRef: p.clientRef ? String(p.clientRef).slice(0, 100) : null
+      }
+    });
+  } catch (e) {
+    await wallet.refund(p.userId, total, `Estorno: falha ao enfileirar SMS para ${to}`).catch(() => null);
+    throw e;
+  }
+}
+
+/** Cancela um SMS agendado que ainda não saiu (estorna o valor). */
+async function cancelQueued(userId, id) {
+  const msg = await prisma.smsMessage.findFirst({ where: { id, userId, direction: 'out' } });
+  if (!msg) throw Object.assign(new Error('Mensagem não encontrada.'), { status: 404 });
+  const r = await prisma.smsMessage.updateMany({ where: { id, userId, status: 'queued' }, data: { status: 'failed', errorMessage: 'Cancelado pelo usuário', priceBrl: 0 } });
+  if (!r.count) throw Object.assign(new Error('Essa mensagem já saiu ou está sendo enviada: não dá mais para cancelar.'), { status: 409 });
+  await wallet.refund(userId, msg.priceBrl, 'Estorno: SMS cancelado', msg.id).catch(() => null);
+  return { success: true };
 }
 
 /** Enfileira e ESPERA o resultado (usado pelos disparos, que precisam saber se deu certo). */
@@ -195,6 +234,7 @@ async function sendAndWait(p, timeoutMs = 60000) {
       // Cancela o que ainda não saiu, para não ser enviado depois (evita duplicar quando o disparo tentar de novo).
       await prisma.smsMessage
         .updateMany({ where: { id: msg.id, status: 'queued' }, data: { status: 'failed', errorMessage: 'Cancelado: nenhum fornecedor disponível a tempo.', priceBrl: 0 } })
+        .then((r) => (r.count ? wallet.refund(msg.userId, msg.priceBrl, 'Estorno: SMS cancelado (sem fornecedor)', msg.id) : null))
         .catch(() => null);
       reject(Object.assign(new Error('O gateway não conseguiu enviar a tempo (fornecedores indisponíveis).'), { configProblem: true }));
     }, timeoutMs);
@@ -208,10 +248,12 @@ async function sendAndWait(p, timeoutMs = 60000) {
 }
 
 async function finishFailed(msg, errorCode, errorMessage, extra = {}) {
-  await prisma.smsMessage.update({
+  const failed = await prisma.smsMessage.update({
     where: { id: msg.id },
-    data: { status: 'failed', errorCode, errorMessage, attempts: (msg.attempts || 0) + 1, priceBrl: 0, ...extra }
+    data: { status: 'failed', errorCode, errorMessage, attempts: (msg.attempts || 0) + 1, priceBrl: 0 }
   });
+  await wallet.refund(msg.userId, msg.priceBrl, 'Estorno: SMS não enviado', msg.id).catch(() => null);
+  smsWebhook.notify(failed);
   events.emit(`done:${msg.id}`, { status: 'failed', errorMessage, configProblem: extra.configProblem });
 }
 
@@ -238,7 +280,14 @@ async function processMessage(msg) {
         dataCoding: enc.dataCoding,
         concat: carrier.concatMode
       });
-      await prisma.smsMessage.update({
+      const finalPrice = (await getPrice(msg.userId)) * enc.parts;
+      if (Math.abs(finalPrice - (msg.priceBrl || 0)) > 0.00001) {
+        // O número de partes mudou (ex.: acentos removidos): acerta a diferença no saldo.
+        const diff = finalPrice - (msg.priceBrl || 0);
+        if (diff > 0) await wallet.charge(msg.userId, diff, { type: 'sms', description: 'Ajuste de partes do SMS', refId: msg.id, force: true }).catch(() => null);
+        else await wallet.refund(msg.userId, -diff, 'Ajuste de partes do SMS', msg.id).catch(() => null);
+      }
+      const sentRow = await prisma.smsMessage.update({
         where: { id: msg.id },
         data: {
           status: 'sent',
@@ -248,13 +297,14 @@ async function processMessage(msg) {
           encoding: enc.encoding,
           parts: enc.parts,
           costBrl: carrier.costPerPart * enc.parts,
-          priceBrl: (await getPrice(msg.userId)) * enc.parts,
+          priceBrl: finalPrice,
           attempts: (msg.attempts || 0) + 1,
           sentAt: new Date(),
           errorCode: null,
           errorMessage: null
         }
       });
+      smsWebhook.notify(sentRow);
       events.emit(`done:${msg.id}`, { status: 'sent', providerIds: ids });
       return;
     } catch (e) {
@@ -328,14 +378,16 @@ async function handleDlr(d, attempt) {
       data: { partsDelivered: { increment: 1 } }
     });
     if (updated.partsDelivered >= updated.parts && updated.status !== 'delivered') {
-      await prisma.smsMessage.update({ where: { id: msg.id }, data: { status: 'delivered', deliveredAt: new Date() } });
+      const done = await prisma.smsMessage.update({ where: { id: msg.id }, data: { status: 'delivered', deliveredAt: new Date() } });
+      smsWebhook.notify(done);
     }
   } else if (['UNDELIV', 'REJECTD', 'EXPIRED', 'DELETED', 'UNKNOWN'].includes(d.stat)) {
     if (msg.status !== 'delivered') {
-      await prisma.smsMessage.update({
+      const und = await prisma.smsMessage.update({
         where: { id: msg.id },
         data: { status: 'undelivered', errorCode: d.err || d.stat, errorMessage: `Não entregue (${d.stat}${d.err ? `, código ${d.err}` : ''})` }
       });
+      smsWebhook.notify(und);
     }
   }
 }
@@ -348,7 +400,7 @@ function phoneVariants(raw) {
 }
 
 async function handleMo(carrier, mo) {
-  await prisma.smsMessage.create({
+  const moRow = await prisma.smsMessage.create({
     data: {
       userId: carrier.userId,
       carrierId: carrier.id,
@@ -360,6 +412,7 @@ async function handleMo(carrier, mo) {
       source: 'mo'
     }
   });
+  smsWebhook.notify(moRow);
   const word = mo.text.trim().toUpperCase().replace(/[.!]+$/, '');
   if (OPT_OUT_WORDS.has(word)) {
     const variants = phoneVariants(mo.from);
@@ -401,6 +454,7 @@ module.exports = {
   carrierRuntime,
   enqueue,
   sendAndWait,
+  cancelQueued,
   getGatewaySettings,
   saveGatewaySettings,
   candidateCarriers,

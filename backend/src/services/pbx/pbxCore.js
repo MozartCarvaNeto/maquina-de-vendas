@@ -41,7 +41,7 @@ function soundPath(tag, audioId) {
   return path.posix.join(env.asteriskSoundsDir, tag, audioId); // sem extensão: o Asterisk escolhe .wav
 }
 
-const DEFAULT_SETTINGS = { recordInbound: 'true', recordOutbound: 'true', aiHandoffQueueId: '', sttLanguage: 'pt-BR', sttProvider: 'auto' };
+const DEFAULT_SETTINGS = { recordInbound: 'true', recordOutbound: 'true', aiHandoffQueueId: '', aiInboundAgentId: '', aiInboundGreeting: '', sttLanguage: 'pt-BR', sttProvider: 'auto' };
 
 async function getPbxSettings(userId) {
   const stored = await readStoredCredentials(userId, 'pbx', 'settings').catch(() => ({}));
@@ -75,7 +75,7 @@ function hoursToRanges(hours) {
 function cleanDest(d) {
   if (!d || typeof d !== 'object') return null;
   const type = String(d.type || '');
-  if (!['queue', 'ivr', 'extension', 'number', 'voicemail', 'conference', 'hangup'].includes(type)) return null;
+  if (!['queue', 'ivr', 'extension', 'number', 'voicemail', 'conference', 'ai', 'hangup'].includes(type)) return null;
   const out = { type };
   if (d.id) out.id = String(d.id).slice(0, 80);
   if (d.value) out.value = String(d.value).replace(/[^0-9a-zA-Z+_-]/g, '').slice(0, 40);

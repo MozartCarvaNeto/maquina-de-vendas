@@ -38,6 +38,13 @@ class AsteriskProvider extends ITelephonyProvider {
   async startCall({ to, from, ringTimeoutSeconds = 30, timeLimitSeconds, statusCallbackUrl, recordingStatusCallbackUrl }) {
     const callId = /callId=([0-9a-f-]{36})/i.exec(statusCallbackUrl || '')?.[1];
     if (!callId) throw new Error('Ligação sem identificador (callId).');
+    const allow = await require('../walletService').voiceAllowance(this.userId);
+    if (!allow.allowed) {
+      const err = new Error('Saldo insuficiente para ligar. Peça uma recarga ao administrador do serviço.');
+      err.status = 402;
+      err.fatal = true;
+      throw err;
+    }
     const { trunk, endpoint } = await this.pickTrunk();
     const digits = String(to).replace(/\D/g, '');
     const lines = [
@@ -55,7 +62,8 @@ class AsteriskProvider extends ITelephonyProvider {
       `Setvar: TP_TAG=${require('../pbx/pbxCore').tagFor(this.userId)}`
     ];
     if (recordingStatusCallbackUrl) lines.push(`Setvar: TP_REC=ai-${callId}`);
-    if (timeLimitSeconds) lines.push(`Setvar: TIMEOUT(absolute)=${Math.round(timeLimitSeconds)}`);
+    const limit = [timeLimitSeconds, allow.maxSeconds].filter((x) => x > 0);
+    if (limit.length) lines.push(`Setvar: TIMEOUT(absolute)=${Math.round(Math.min(...limit))}`);
     const name = `turbo-ai-${callId}.call`;
     const tmp = path.join(os.tmpdir(), `${name}.${crypto.randomBytes(4).toString('hex')}`);
     fs.writeFileSync(tmp, `${lines.join('\n')}\n`, { mode: 0o644 });

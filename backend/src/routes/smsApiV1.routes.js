@@ -35,21 +35,41 @@ async function apiKeyAuth(req, res, next) {
 
 function present(m) {
   return {
-    id: m.id, to: m.toAddr, from: m.fromAddr, status: m.status, parts: m.parts, encoding: m.encoding,
+    id: m.id, scheduledFor: m.status === 'queued' && m.nextAttemptAt > new Date() ? m.nextAttemptAt : null, to: m.toAddr, from: m.fromAddr, status: m.status, parts: m.parts, encoding: m.encoding,
     error: m.errorMessage || null, clientRef: m.clientRef, createdAt: m.createdAt, sentAt: m.sentAt, deliveredAt: m.deliveredAt
   };
 }
 
 router.use(apiKeyAuth);
 
-// Corpo: { "to": "11999998888", "body": "Texto", "from": "MARCA" (opcional), "clientRef": "pedido-123" (opcional) }
+// Corpo: { "to": "11999998888", "body": "Texto", "from": "MARCA" (opcional), "clientRef": "pedido-123" (opcional),
+//         "sendAt": "2026-12-01T09:00:00-03:00" (agendar, opcional), "callbackUrl": "https://..." (aviso de status, opcional) }
 router.post('/messages', async (req, res, next) => {
   try {
-    const { to, body, from, clientRef } = req.body || {};
-    const msg = await gateway.enqueue({ userId: req.userId, to, body, from, clientRef, source: 'api', apiKeyId: req.apiKeyId });
+    const { to, body, from, clientRef, sendAt, callbackUrl } = req.body || {};
+    const msg = await gateway.enqueue({ userId: req.userId, to, body, from, clientRef, sendAt, callbackUrl, source: 'api', apiKeyId: req.apiKeyId });
     res.status(202).json(present(msg));
   } catch (error) {
     if (error.status === 400) return res.status(400).json({ error: error.message });
+    if (error.status === 402) return res.status(402).json({ error: error.message });
+    next(error);
+  }
+});
+
+router.delete('/messages/:id', async (req, res, next) => {
+  try {
+    res.json(await gateway.cancelQueued(req.userId, req.params.id));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+});
+
+router.get('/balance', async (req, res, next) => {
+  try {
+    const w = await require('../services/walletService').getWallet(req.userId);
+    res.json({ prepaid: Boolean(w?.enabled), balanceBrl: w?.balanceBrl || 0 });
+  } catch (error) {
     next(error);
   }
 });

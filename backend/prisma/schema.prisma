@@ -980,6 +980,7 @@ model SmsMessage {
   source         String    @default("app")
   apiKeyId       String?
   clientRef      String?
+  callbackUrl    String?
   createdAt      DateTime  @default(now())
   sentAt         DateTime?
   deliveredAt    DateTime?
@@ -996,6 +997,7 @@ model SmsApiKey {
   name       String
   prefix     String
   keyHash    String    @unique
+  webhookUrl String?
   active     Boolean   @default(true)
   lastUsedAt DateTime?
   createdAt  DateTime  @default(now())
@@ -1154,6 +1156,7 @@ model PbxCall {
   durationSeconds Int?
   recordingFile   String?
   voicemailFile   String?
+  costBrl         Float     @default(0)
   hangupCause     String?
   aiCallId        String?
   createdAt       DateTime  @default(now())
@@ -1162,3 +1165,34 @@ model PbxCall {
   @@index([userId, startedAt])
   @@map("pbx_calls")
 }
+
+// ============================ Saldo pré-pago (SMS e voz) ============================
+// Sem carteira "enabled", a conta usa tudo sem limite (como sempre foi).
+model Wallet {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  enabled           Boolean  @default(false)
+  balanceBrl        Float    @default(0)
+  voiceOutPerMinBrl Float    @default(0)
+  voiceInPerMinBrl  Float    @default(0)
+  voiceIncrementSec Int      @default(60)
+  updatedAt         DateTime @updatedAt
+  createdAt         DateTime @default(now())
+
+  @@map("wallets")
+}
+
+model WalletTx {
+  id           String   @id @default(uuid())
+  userId       String
+  type         String
+  amountBrl    Float
+  balanceAfter Float
+  description  String
+  refId        String?
+  createdAt    DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("wallet_txs")
+}
+

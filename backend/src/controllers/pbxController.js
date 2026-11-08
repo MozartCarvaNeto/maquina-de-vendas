@@ -46,12 +46,18 @@ exports.saveSettings = async (req, res, next) => {
       recordInbound: b.recordInbound === false || b.recordInbound === 'false' ? 'false' : 'true',
       recordOutbound: b.recordOutbound === false || b.recordOutbound === 'false' ? 'false' : 'true',
       aiHandoffQueueId: str(b.aiHandoffQueueId, 60),
+      aiInboundAgentId: str(b.aiInboundAgentId, 60),
+      aiInboundGreeting: str(b.aiInboundGreeting, 400),
       sttLanguage: str(b.sttLanguage, 10) || 'pt-BR',
       sttProvider: ['auto', 'gemini', 'google', 'azure', 'openai'].includes(b.sttProvider) ? b.sttProvider : 'auto'
     };
     if (clean.aiHandoffQueueId) {
       const q = await prisma.pbxQueue.findFirst({ where: { id: clean.aiHandoffQueueId, userId: req.userId } });
       if (!q) return fail(res, 400, 'Fila inválida.');
+    }
+    if (clean.aiInboundAgentId) {
+      const ag = await prisma.aiVoiceAgent.findFirst({ where: { id: clean.aiInboundAgentId, userId: req.userId } });
+      if (!ag) return fail(res, 400, 'Agente de IA inválido.');
     }
     res.json(await core.savePbxSettings(req.userId, clean));
   } catch (e) {
@@ -474,5 +480,47 @@ exports.sttTest = async (req, res) => {
     res.json({ said: phrase, heard, ok: /pre[cç]o/i.test(heard) });
   } catch (e) {
     fail(res, e.status === 400 ? 400 : 502, e.message);
+  }
+};
+
+// ------------------------------------------------------------------ painel ao vivo e supervisão
+exports.live = async (req, res, next) => {
+  try {
+    res.json(await require('../services/pbx/pbxLive').liveForUser(prisma, req.userId));
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.spy = async (req, res, next) => {
+  try {
+    const live = require('../services/pbx/pbxLive');
+    const mode = String(req.body.mode || 'listen');
+    const channel = String(req.body.channel || '');
+    const ext = await prisma.sipExtension.findFirst({ where: { userId: req.userId, memberId: req.memberId } });
+    if (!ext) return fail(res, 400, 'Você ainda não tem ramal. Abra a tela Telefone (SIP) uma vez e deixe-a aberta para ouvir.');
+    const now = await live.liveForUser(prisma, req.userId);
+    const target = (now.calls || []).find((c) => c.channel === channel && c.spyable);
+    if (!target) return fail(res, 404, 'Essa chamada não está mais ativa.');
+    if (channel.startsWith(`PJSIP/${ext.extension}-`)) return fail(res, 400, 'Você não pode escutar a própria chamada.');
+    const out = live.spyCallFile({ supervisorExt: ext.extension, target: channel, mode, tag: core.tagFor(req.userId) });
+    res.json({ success: true, message: 'Seu telefone vai tocar; ao atender você escuta a chamada.', ...out });
+  } catch (e) {
+    if (e.status) return fail(res, e.status, e.message);
+    next(e);
+  }
+};
+
+exports.hangupLive = async (req, res, next) => {
+  try {
+    const live = require('../services/pbx/pbxLive');
+    const channel = String(req.body.channel || '');
+    const now = await live.liveForUser(prisma, req.userId);
+    if (!(now.calls || []).some((c) => c.channel === channel)) return fail(res, 404, 'Essa chamada não está mais ativa.');
+    const r = await live.hangupChannel(channel);
+    res.json({ success: r.ok });
+  } catch (e) {
+    if (e.status) return fail(res, e.status, e.message);
+    next(e);
   }
 };

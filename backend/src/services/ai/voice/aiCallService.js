@@ -496,7 +496,7 @@ async function handleAnswerCall(callId) {
 async function processTurn({ callId, speech, confidence }) {
   const call = await prisma.call.findUnique({
     where: { id: callId },
-    select: { id: true, userId: true, leadId: true, fromNumber: true, providerCallId: true, answeredAt: true }
+    select: { id: true, userId: true, leadId: true, fromNumber: true, providerCallId: true, answeredAt: true, direction: true }
   });
   const session = call ? await prisma.aiCallSession.findUnique({ where: { callId } }) : null;
   const agent = session?.agentId ? await getAgentCached(session.agentId) : null;
@@ -552,6 +552,7 @@ async function processTurn({ callId, speech, confidence }) {
     result = await runAgentTurn({
       agent,
       leadName: lead?.name,
+      inbound: call.direction === 'entrada',
       transcript,
       userText: heard,
       collected: session.collected || {},

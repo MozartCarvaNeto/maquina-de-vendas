@@ -506,7 +506,18 @@ export class Call {
           this.finish('missed', 'Perdida');
         }
       } catch { /* ignore */ }
-    } else if (msg.method === 'OPTIONS' || msg.method === 'INFO' || msg.method === 'NOTIFY') {
+    } else if (msg.method === 'NOTIFY') {
+      try { c.reply(msg, 200, 'OK'); } catch { /* ignore */ }
+      // aviso do resultado da transferência (corpo "SIP/2.0 200 OK" = deu certo)
+      if (this.transferring && /sipfrag/i.test(h(msg, 'content-type') || '')) {
+        const m = /SIP\/2\.0\s+(\d{3})/.exec(msg.body || '');
+        if (m && Number(m[1]) >= 200) {
+          const ok = Number(m[1]) < 300;
+          this.transferring = false;
+          if (ok) { this.finish('answered', 'Transferida'); this.sendBye(); } else { this.transferError = `A transferência falhou (${m[1]}).`; this.listeners.forEach((fn) => fn(this)); }
+        }
+      }
+    } else if (msg.method === 'OPTIONS' || msg.method === 'INFO') {
       try { c.reply(msg, 200, 'OK'); } catch { /* ignore */ }
     }
     // ACK do 200: nada a fazer
@@ -527,6 +538,31 @@ export class Call {
     } else {
       this.finish('failed', 'Encerrada');
     }
+  }
+
+  /** Transferência "às cegas" (REFER): o outro lado passa a falar com `target` (ramal ou número) e você sai da ligação. */
+  transfer(target) {
+    const dest = String(target || '').replace(/[^0-9*#+]/g, '');
+    if (!dest || this.state !== 'connected' || this.ended) return false;
+    const c = this.client;
+    this.cseq += 1;
+    this.transferring = true;
+    this.transferError = null;
+    const lines = [
+      `REFER ${this.remoteUri} SIP/2.0`,
+      `Via: SIP/2.0/${c.transportName} ${c.contactHost};branch=${branch()}`,
+      'Max-Forwards: 70',
+      ...this.routeSet.map((r) => `Route: ${r}`),
+      `From: ${this.direction === 'out' ? c.fromHeader(this.localTag) : `${h(this.invite, 'to').replace(/;\s*tag=[^;>\s]+/i, '')};tag=${this.localTag}`}`,
+      `To: ${this.direction === 'out' ? `<${this.remoteUri.replace(/;.*$/, '')}>` + (this.remoteTag ? `;tag=${this.remoteTag}` : '') : `${h(this.invite, 'from')}`}`,
+      `Call-ID: ${this.callId}`,
+      `CSeq: ${this.cseq + (this.direction === 'in' ? 100 : 0)} REFER`,
+      `Refer-To: <sip:${dest}@${c.cfg.domain}>`,
+      `Referred-By: <${c.aor}>`,
+      'Content-Length: 0', '', ''
+    ];
+    try { c.send(lines.join('\r\n')); } catch { this.transferring = false; return false; }
+    return true;
   }
 
   sendBye() {

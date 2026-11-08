@@ -59,7 +59,7 @@ export default function TelefoneSip() {
         <div className="sip-controls">
           {!busy && <><button type="button" className="sip-call" onClick={startCall} disabled={phone.regState !== 'registered'}>📞 Ligar</button><button type="button" onClick={() => setNumber((n) => n.slice(0, -1))}>⌫</button></>}
           {busy && call.state === 'incoming' && <><button type="button" className="sip-call" onClick={phone.answer}>Atender</button><button type="button" className="sip-hang" onClick={phone.reject}>Recusar</button></>}
-          {busy && call.state !== 'incoming' && <><button type="button" onClick={() => phone.mute(!call.muted)}>{call.muted ? '🔇 Ativar som' : '🎤 Mudo'}</button><button type="button" className="sip-hang" onClick={phone.hangup}>Desligar</button></>}
+          {busy && call.state !== 'incoming' && <><button type="button" onClick={() => phone.mute(!call.muted)}>{call.muted ? '🔇 Ativar som' : '🎤 Mudo'}</button>{call.state === 'connected' && <button type="button" onClick={() => { const t = window.prompt('Transferir para qual ramal ou número?'); if (t) phone.transfer(t); }}>↪️ Transferir</button>}<button type="button" className="sip-hang" onClick={phone.hangup}>Desligar</button></>}
         </div>
         {(error || (call && call.state === 'ended' && call.endReason)) && <p className="sip-error">{error || call.endReason}</p>}
       </div>

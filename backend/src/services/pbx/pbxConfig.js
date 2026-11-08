@@ -25,7 +25,7 @@ function buildShared(base) {
   L.push('; Roda sozinho quando qualquer chamada do PBX termina: avisa o portal (histórico + gravação).');
   L.push(
     V(
-      `exten => s,1,Set(TPR=@{CURL(${hook}/event?t=${token}&tag=@{TP_TAG}&uid=@{UNIQUEID}&dir=@{TP_DIR}&from=@{URIENCODE(@{TP_FROM})}&to=@{URIENCODE(@{TP_TO})}&trunk=@{TP_TRUNK}&route=@{TP_ROUTE}&queue=@{TP_QUEUE}&ext=@{TP_EXT}&rec=@{TP_REC}&vm=@{TP_VM}&dur=@{CDR(duration)}&bill=@{CDR(billsec)}&ds=@{DIALSTATUS}&qs=@{QUEUESTATUS}&cause=@{HANGUPCAUSE})})`
+      `exten => s,1,Set(TPR=@{CURL(${hook}/event?t=${token}&tag=@{TP_TAG}&uid=@{UNIQUEID}&dir=@{TP_DIR}&from=@{URIENCODE(@{TP_FROM})}&to=@{URIENCODE(@{TP_TO})}&trunk=@{TP_TRUNK}&ai=@{TP_AI}&route=@{TP_ROUTE}&queue=@{TP_QUEUE}&ext=@{TP_EXT}&rec=@{TP_REC}&vm=@{TP_VM}&dur=@{CDR(duration)}&bill=@{CDR(billsec)}&ds=@{DIALSTATUS}&qs=@{QUEUESTATUS}&cause=@{HANGUPCAUSE})})`
     )
   );
   L.push('same => n,Return()');
@@ -95,6 +95,17 @@ function destLines(d, c, depth = 0) {
     L.push(V(`same => n,Record(${env.asteriskRecordingsDir}/@{TP_VM}.wav,3,120,k)`));
     L.push('same => n,Playback(vm-goodbye)');
     L.push('same => n,Hangup()');
+  } else if (d.type === 'ai') {
+    const hook = core.localHookBase();
+    const token = core.hookToken();
+    const lbl = `aiok${(c.n = (c.n || 0) + 1)}`;
+    L.push('same => n,Answer()');
+    L.push(V(`same => n,Set(TP_CALLID=@{CURL(${hook}/ai-start?t=${token}&tag=${tag}&from=@{URIENCODE(@{CALLERID(num)})}&to=@{URIENCODE(@{EXTEN})}&uid=@{UNIQUEID})})`));
+    L.push(V(`same => n,GotoIf($["@{TP_CALLID}" != "NO" & "@{TP_CALLID}" != ""]?${lbl})`));
+    L.push('same => n,Playback(vm-nobodyavail)');
+    L.push('same => n,Hangup()');
+    L.push(V(`same => n(${lbl}),Set(TP_AI=1)`));
+    L.push('same => n,Goto(turbo-ai,s,1)');
   } else if (d.type === 'conference') {
     L.push(V(`same => n,ConfBridge(${tag}${digitsOnly(d.value) || '1'})`));
     L.push('same => n,Hangup()');
@@ -153,11 +164,20 @@ function buildPbxConfig({ userId, trunks, extensions, ivrs = [], queues = [], ro
   E.push(hangupPush);
   E.push(...setVars('out'));
   E.push(V('same => n,Set(TP_EXT=@{CALLERID(num)})'));
+  E.push('; Saldo pré-pago: o portal responde NO (sem saldo), YES ou YES:<segundos que o saldo aguenta>.');
+  E.push(V(`same => n,Set(TPA=@{CURL(${core.localHookBase()}/allow?t=${core.hookToken()}&tag=${tag})})`));
+  E.push(V('same => n,GotoIf($["@{TPA}" = "NO"]?blocked)'));
+  E.push(V('same => n,GotoIf($["@{TPA:0:4}" = "YES:"]?limit:go)'));
+  E.push(V('same => n(limit),Set(TIMEOUT(absolute)=@{TPA:4})'));
+  E.push('same => n(go),NoOp(Saldo ok)');
   if (settings.recordOutbound !== 'false') {
     E.push(V(`same => n,Set(TP_REC=${tag}-@{UNIQUEID})`));
     E.push(V(`same => n,MixMonitor(${env.asteriskRecordingsDir}/@{TP_REC}.wav,b)`));
   }
   E.push(`same => n,Goto(turbo-out-${tag},\${EXTEN},1)`);
+  E.push('same => n(blocked),NoOp(Sem saldo pré-pago)');
+  E.push('same => n,Playback(silence/1)');
+  E.push('same => n,Hangup(21)');
   E.push('');
 
   // ---- entrada

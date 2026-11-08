@@ -243,6 +243,41 @@ function watchOrigination(callId, seconds, deps = defaultDeps) {
   origination.set(callId, timer);
 }
 
+/**
+ * Ligação recebida atendida pela IA. Acha (ou cria) o lead pelo telefone, cria a ligação "entrada" e a sessão
+ * com a saudação receptiva. Devolve o id da ligação (usado no AudioSocket) ou null se não houver agente configurado.
+ */
+async function startInbound(userId, { from, to, uniqueId }, deps = defaultDeps) {
+  const prisma = deps.prisma;
+  const s = await deps.settings(userId);
+  if (!s.aiInboundAgentId) return null;
+  const agent = await prisma.aiVoiceAgent.findFirst({ where: { id: s.aiInboundAgentId, userId } });
+  if (!agent) return null;
+  const digits = String(from || '').replace(/\D/g, '');
+  const variants = new Set([digits]);
+  if (digits.startsWith('55')) variants.add(digits.slice(2));
+  else if (digits.length >= 10) variants.add(`55${digits}`);
+  let lead = digits ? await prisma.lead.findFirst({ where: { userId, phone: { in: [...variants].filter(Boolean) } } }) : null;
+  if (!lead) {
+    lead = await prisma.lead.create({
+      data: { userId, name: digits ? `Ligação ${digits}` : 'Ligação sem número', phone: digits || null, consentSource: 'ligacao_receptiva', source: 'ligacao_receptiva', status: 'novo' }
+    });
+  }
+  const greetingRaw = (s.aiInboundGreeting || '').trim() || `Olá, aqui é a ${agent.agentName} da ${agent.companyName}. Como posso ajudar você?`;
+  let greeting = greetingRaw.replace(/\{\{?\s*(agentName|agente)\s*\}?\}/g, agent.agentName).replace(/\{\{?\s*(companyName|empresa)\s*\}?\}/g, agent.companyName);
+  if (agent.recordCalls && !/gravad/i.test(greeting)) greeting = `${greeting} Esta ligação pode ser gravada.`;
+  const callId = require('crypto').randomUUID();
+  const now = new Date();
+  await prisma.call.create({
+    data: { id: callId, userId, leadId: lead.id, provider: 'asterisk', fromNumber: digits || 'desconhecido', toNumber: String(to || ''), direction: 'entrada', answeredBy: 'ia', status: 'atendida', startedAt: now, answeredAt: now }
+  });
+  const raw = JSON.stringify({ say: greeting, action: 'continue', outcome: null, collected: {}, callbackAt: null, callbackNote: null, summary: '' });
+  await prisma.aiCallSession.create({
+    data: { userId, callId, agentId: agent.id, leadId: lead.id, transcript: [{ role: 'agent', text: greeting, raw, at: now.toISOString() }] }
+  });
+  return callId;
+}
+
 /** O que o Asterisk deve fazer depois que a IA terminou de falar ("QUEUE:nome", "DIAL:numero" ou "HANGUP"). */
 function nextAction(callId) {
   const p = pendingNext.get(callId);
@@ -259,4 +294,4 @@ function start({ port, host = '127.0.0.1' } = {}) {
   return server;
 }
 
-module.exports = { start, handleSession, runCall, endCall, watchOrigination, nextAction, Conversation, _pending: pendingNext };
+module.exports = { start, startInbound, handleSession, runCall, endCall, watchOrigination, nextAction, Conversation, _pending: pendingNext };

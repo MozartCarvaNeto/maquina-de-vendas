@@ -82,7 +82,7 @@ function asList(value) {
 
 // ------------------------------------------------------------------ prompt
 
-function buildSystemPrompt({ agent, leadName, catalogContext, collected, turnCount, now }) {
+function buildSystemPrompt({ agent, leadName, catalogContext, collected, turnCount, now, inbound = false }) {
   const glossary = asList(agent.glossary).filter((g) => g && g.term);
   const fields = asList(agent.qualificationFields).filter((f) => f && f.key);
 
@@ -100,7 +100,7 @@ function buildSystemPrompt({ agent, leadName, catalogContext, collected, turnCou
       ? '\nATENÇÃO: a ligação está chegando ao limite de falas. Conclua agora: ou passe para o consultor (se o lead estiver pronto) ou encerre com educação combinando o próximo passo.'
       : '';
 
-  return `Você é ${agent.agentName}, assistente VIRTUAL de vendas da ${agent.companyName}, fazendo uma LIGAÇÃO TELEFÔNICA para ${leadName || 'o cliente'}.
+  return `Você é ${agent.agentName}, assistente VIRTUAL de vendas da ${agent.companyName}, ${inbound ? `ATENDENDO uma LIGAÇÃO TELEFÔNICA RECEBIDA: ${leadName && !/^Ligação /.test(leadName) ? leadName : 'o cliente'} ligou para a empresa. Você NÃO está ligando para vender: atenda, descubra o motivo da ligação e ajude. Nunca diga "estou ligando" nem se apresente como quem iniciou o contato.` : `fazendo uma LIGAÇÃO TELEFÔNICA para ${leadName || 'o cliente'}.`}
 Data e hora atuais (Brasília): ${formatNowBrasilia(now)}.
 
 OBJETIVO DA LIGAÇÃO
@@ -276,7 +276,7 @@ function withTimeout(promise, ms) {
  * @param {object} p.collected    - dados já coletados
  * @param {number} p.turnCount
  */
-async function runAgentTurn({ agent, leadName, transcript, userText, collected = {}, turnCount = 0, now = new Date() }) {
+async function runAgentTurn({ agent, leadName, inbound = false, transcript, userText, collected = {}, turnCount = 0, now = new Date() }) {
   const provider = await getProviderCached(agent.userId, agent.aiProvider);
   if (!provider) {
     const err = new Error('Nenhuma IA configurada. Cadastre a chave do Gemini ou OpenAI em Configurações > Inteligência Artificial.');
@@ -286,7 +286,7 @@ async function runAgentTurn({ agent, leadName, transcript, userText, collected =
 
   const lastAgentText = [...asList(transcript)].reverse().find((t) => t.role === 'agent')?.text || '';
   const catalogContext = buildCatalogContext(agent, `${userText} ${lastAgentText}`);
-  const systemPrompt = buildSystemPrompt({ agent, leadName, catalogContext, collected, turnCount, now });
+  const systemPrompt = buildSystemPrompt({ agent, leadName, catalogContext, collected, turnCount, now, inbound });
   const history = buildHistory(transcript);
 
   const rawText = await withTimeout(provider.generateReply(systemPrompt, history, userText), LLM_TIMEOUT_MS);

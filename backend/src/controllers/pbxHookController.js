@@ -4,6 +4,7 @@ const prisma = require('../config/db');
 const core = require('../services/pbx/pbxCore');
 const svc = require('../services/pbx/pbxService');
 const bridge = require('../services/pbx/aiBridge');
+const wallet = require('../services/walletService');
 
 function guard(req, res) {
   if (!core.safeEqual(req.query.t, core.hookToken())) {
@@ -21,6 +22,7 @@ exports.event = async (req, res) => {
   try {
     const q = req.query;
     const tag = clip(q.tag, 8);
+    if (q.ai === '1') return res.type('text/plain').send('IGNORED'); // ligação da IA é registrada no aiEnd
     const userId = await svc.userIdByTag(tag);
     if (!userId || !q.uid) return res.type('text/plain').send('IGNORED');
     const dir = q.dir === 'out' ? 'saida' : 'entrada';
@@ -58,6 +60,11 @@ exports.event = async (req, res) => {
       voicemailFile: vm,
       hangupCause: clip(q.cause, 16) || null
     };
+    // Saldo pré-pago: cobra a chamada atendida uma única vez (a chamada já aconteceu, então o saldo pode ficar negativo).
+    const before = await prisma.pbxCall.findUnique({ where: { userId_uniqueId: { userId, uniqueId: clip(q.uid, 40) } } });
+    if (answered && bill > 0 && !(before && before.costBrl > 0)) {
+      data.costBrl = await wallet.chargeCall(userId, { direction: dir, seconds: bill, refId: clip(q.uid, 40), description: `Ligação ${dir === 'saida' ? 'para' : 'de'} ${clip(dir === 'saida' ? q.to : q.from, 20) || '—'} (${bill}s)` }).catch((e) => { console.error('Cobrança da chamada:', e.message); return 0; });
+    }
     await prisma.pbxCall.upsert({
       where: { userId_uniqueId: { userId, uniqueId: clip(q.uid, 40) } },
       update: data,
@@ -69,6 +76,33 @@ exports.event = async (req, res) => {
   } catch (e) {
     console.error('PBX evento:', e.message);
     res.type('text/plain').send('ERR');
+  }
+};
+
+/** O Asterisk pergunta antes de discar: tem saldo? Resposta: NO | YES | YES:<segundos máximos>. Se este aviso falhar, a ligação segue (não derruba a telefonia). */
+exports.allow = async (req, res) => {
+  if (!guard(req, res)) return;
+  try {
+    const userId = await svc.userIdByTag(clip(req.query.tag, 8));
+    if (!userId) return res.type('text/plain').send('YES');
+    const a = await wallet.voiceAllowance(userId);
+    res.type('text/plain').send(!a.allowed ? 'NO' : a.maxSeconds == null ? 'YES' : `YES:${Math.min(a.maxSeconds, 14400)}`);
+  } catch (e) {
+    res.type('text/plain').send('YES');
+  }
+};
+
+/** Ligação RECEBIDA atendida pela IA: cria lead/ligação/sessão e devolve o id para o AudioSocket. */
+exports.aiStart = async (req, res) => {
+  if (!guard(req, res)) return;
+  try {
+    const userId = await svc.userIdByTag(clip(req.query.tag, 8));
+    if (!userId) return res.type('text/plain').send('NO');
+    const out = await bridge.startInbound(userId, { from: clip(req.query.from, 32), to: clip(req.query.to, 32), uniqueId: clip(req.query.uid, 40) });
+    res.type('text/plain').send(out || 'NO');
+  } catch (e) {
+    console.error('PBX IA recebida:', e.message);
+    res.type('text/plain').send('NO');
   }
 };
 
@@ -87,12 +121,19 @@ exports.aiEnd = async (req, res) => {
     await bridge.endCall(callId, { dialStatus: answered ? 'ANSWER' : clip(req.query.ds, 16) });
     // a gravação da ligação da IA entra no histórico do PBX
     const fresh = await prisma.call.findUnique({ where: { id: callId } });
+    const uniqueId = `ai-${callId}`.slice(0, 40);
+    const existing = await prisma.pbxCall.findUnique({ where: { userId_uniqueId: { userId: call.userId, uniqueId } } });
+    let costBrl = existing?.costBrl || 0;
+    if (!existing && fresh?.answeredAt && fresh.durationSeconds > 0) {
+      costBrl = await wallet.chargeCall(call.userId, { direction: fresh.direction === 'entrada' ? 'entrada' : 'saida', seconds: fresh.durationSeconds, refId: uniqueId, description: `Ligação da IA (${fresh.durationSeconds}s)` }).catch(() => 0);
+    }
     await prisma.pbxCall.upsert({
-      where: { userId_uniqueId: { userId: call.userId, uniqueId: `ai-${callId}`.slice(0, 40) } },
+      where: { userId_uniqueId: { userId: call.userId, uniqueId } },
       update: {},
       create: {
         userId: call.userId,
-        uniqueId: `ai-${callId}`.slice(0, 40),
+        uniqueId,
+        costBrl,
         direction: 'ia',
         fromNumber: call.fromNumber,
         toNumber: call.toNumber,

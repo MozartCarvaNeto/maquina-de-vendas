@@ -9,6 +9,7 @@ const TABS = [
   ['ura', '🎛️ URA (menu de voz)'],
   ['filas', '👥 Filas de atendimento'],
   ['audios', '🔊 Áudios'],
+  ['aovivo', '🔴 Ao vivo'],
   ['chamadas', '🎙️ Chamadas e gravações'],
   ['vozes', '🗣️ Vozes e fala'],
   ['instalar', '⚙️ Instalação e IA']
@@ -28,9 +29,9 @@ const errText = (e) => e.response?.data?.error || e.message || 'Erro';
 const fmtDur = (s) => (s ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : '—');
 const emptyHours = () => ({ enabled: false, tz: 'America/Sao_Paulo', days: Object.fromEntries(DAYS.map(([k]) => [k, ['mon', 'tue', 'wed', 'thu', 'fri'].includes(k) ? [['09:00', '18:00']] : []])) });
 
-function DestPicker({ value, onChange, data, allow = ['queue', 'ivr', 'extension', 'number', 'voicemail', 'conference', 'hangup'] }) {
+function DestPicker({ value, onChange, data, allow = ['queue', 'ivr', 'extension', 'number', 'voicemail', 'conference', 'ai', 'hangup'] }) {
   const v = value || { type: 'hangup' };
-  const LABEL = { queue: 'Fila de atendimento', ivr: 'URA (menu)', extension: 'Ramal de uma pessoa', number: 'Número externo', voicemail: 'Caixa de recados', conference: 'Sala de conferência', hangup: 'Desligar' };
+  const LABEL = { queue: 'Fila de atendimento', ivr: 'URA (menu)', extension: 'Ramal de uma pessoa', number: 'Número externo', voicemail: 'Caixa de recados', conference: 'Sala de conferência', ai: 'Atendente de IA (voz)', hangup: 'Desligar' };
   return (
     <span className="pbx-dest">
       <select value={v.type} onChange={(e) => onChange({ type: e.target.value })}>
@@ -98,8 +99,26 @@ export default function PbxCentral() {
   const loadCalls = useCallback(async () => {
     try { setCalls((await api.get('/pbx/calls', { params: { direction: filter.direction || undefined, q: filter.q || undefined } })).data); } catch (e) { flash(`❌ ${errText(e)}`); }
   }, [filter]);
+  const [aiAgents, setAiAgents] = useState([]);
+  useEffect(() => { api.get('/ai-calls/agents').then((r) => setAiAgents(Array.isArray(r.data) ? r.data : r.data?.agents || [])).catch(() => {}); }, []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (tab === 'chamadas') loadCalls(); }, [tab, loadCalls]);
+  const [live, setLive] = useState(null);
+  useEffect(() => {
+    if (tab !== 'aovivo') return undefined;
+    let stop = false;
+    const tick = async () => { try { const { data: d } = await api.get('/pbx/live'); if (!stop) setLive(d); } catch (e) { if (!stop) setLive({ available: false, error: errText(e), calls: [], queues: [] }); } };
+    tick();
+    const t = setInterval(tick, 4000);
+    return () => { stop = true; clearInterval(t); };
+  }, [tab]);
+  const spy = async (channel, mode) => {
+    try { const { data: r } = await api.post('/pbx/live/spy', { channel, mode }); flash(`✅ ${r.message}`); } catch (e) { flash(`❌ ${errText(e)}`); }
+  };
+  const hangLive = async (channel) => {
+    if (!window.confirm('Derrubar esta chamada?')) return;
+    try { await api.post('/pbx/live/hangup', { channel }); flash('✅ Chamada encerrada.'); } catch (e) { flash(`❌ ${errText(e)}`); }
+  };
   useEffect(() => {
     if (tab !== 'vozes') return;
     api.get('/pbx/voice-engines').then((r) => setEngines(r.data)).catch((e) => flash(`❌ ${errText(e)}`));
@@ -196,7 +215,7 @@ export default function PbxCentral() {
   const nameOf = { queue: (id) => data.queues.find((x) => x.id === id)?.name, ivr: (id) => data.ivrs.find((x) => x.id === id)?.name, extension: (id) => data.members.find((x) => x.memberId === id)?.name };
   const destText = (d) => {
     if (!d) return '—';
-    const t = { queue: `Fila ${nameOf.queue(d.id) || '?'}`, ivr: `URA ${nameOf.ivr(d.id) || '?'}`, extension: `Ramal ${nameOf.extension(d.id) || d.value || '?'}`, number: `Número ${d.value}`, voicemail: 'Caixa de recados', conference: `Sala ${d.value || 1}`, hangup: 'Desligar' };
+    const t = { queue: `Fila ${nameOf.queue(d.id) || '?'}`, ivr: `URA ${nameOf.ivr(d.id) || '?'}`, extension: `Ramal ${nameOf.extension(d.id) || d.value || '?'}`, number: `Número ${d.value}`, voicemail: 'Caixa de recados', conference: `Sala ${d.value || 1}`, ai: 'Atendente de IA', hangup: 'Desligar' };
     return t[d.type] || d.type;
   };
 
@@ -389,6 +408,40 @@ export default function PbxCentral() {
         </div>
       )}
 
+      {tab === 'aovivo' && (
+        <div className="card">
+          <h3>Chamadas em andamento</h3>
+          {live && !live.available && <p className="hint-text">⚠️ {live.error}</p>}
+          <table className="pbx-table">
+            <thead><tr><th>Quem</th><th>Número</th><th>Estado</th><th>Tempo</th><th>Supervisão</th></tr></thead>
+            <tbody>
+              {(live?.calls || []).map((c) => (
+                <tr key={c.channel}>
+                  <td>{c.who || c.channel}</td><td>{c.callerId}</td><td>{c.state}{c.app ? ` · ${c.app}` : ''}</td>
+                  <td>{Math.floor(c.seconds / 60)}:{String(c.seconds % 60).padStart(2, '0')}</td>
+                  <td>{c.spyable ? <>
+                    <button type="button" className="btn-secondary-small" onClick={() => spy(c.channel, 'listen')}>👂 Escutar</button>{' '}
+                    <button type="button" className="btn-secondary-small" onClick={() => spy(c.channel, 'whisper')}>🤫 Sussurrar</button>{' '}
+                    <button type="button" className="btn-secondary-small" onClick={() => spy(c.channel, 'barge')}>🎤 Entrar</button>{' '}
+                    <button type="button" className="btn-secondary-small" onClick={() => hangLive(c.channel)}>⛔ Derrubar</button></> : '—'}</td>
+                </tr>
+              ))}
+              {live && !live.calls.length && <tr><td colSpan={5}>Nenhuma chamada agora.</td></tr>}
+            </tbody>
+          </table>
+          <p className="hint-text">Ao clicar, o seu ramal toca (deixe a tela Telefone SIP aberta e atenda): "Escutar" só ouve; "Sussurrar" fala só com o vendedor; "Entrar" fala com os dois. Avise a equipe que a supervisão existe.</p>
+          <h3>Filas</h3>
+          {(live?.queues || []).map((q) => (
+            <div key={q.name} className="pbx-queue-live">
+              <strong>{q.label}</strong> — {q.waiting} esperando
+              <div>{q.members.map((m) => <span key={m.member} className="pbx-chip">{m.member}: {m.status}{m.paused ? ' (pausado)' : ''}</span>)}</div>
+              {q.callers.map((c) => <div key={c.channel}>⏳ {c.channel} aguardando {c.wait}</div>)}
+            </div>
+          ))}
+          {live && !live.queues.length && <p className="hint-text">Sem filas ativas.</p>}
+        </div>
+      )}
+
       {tab === 'chamadas' && (
         <div className="card">
           <h3>Chamadas e gravações</h3>
@@ -471,6 +524,14 @@ export default function PbxCentral() {
             <option value="">Transferir para o número do vendedor</option>
             {data.queues.map((q) => <option key={q.id} value={q.id}>Fila: {q.name}</option>)}
           </select>
+          <h4>IA atendendo ligações recebidas</h4>
+          <p className="hint-text">Escolha o agente que atende quando uma rota de entrada (ou opção da URA) apontar para "Atendente de IA". Cada pessoa que ligar vira um lead (ou é reconhecida pelo telefone) e a conversa fica no histórico.</p>
+          <select value={data.settings.aiInboundAgentId || ''} onChange={(e) => saveSettings({ aiInboundAgentId: e.target.value })}>
+            <option value="">— nenhum agente —</option>
+            {aiAgents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          <label>Saudação ao atender (opcional; use {'{agente}'} e {'{empresa}'})</label>
+          <input defaultValue={data.settings.aiInboundGreeting || ''} placeholder="Olá, aqui é a {agente} da {empresa}. Como posso ajudar?" onBlur={(e) => { if (e.target.value !== (data.settings.aiInboundGreeting || '')) saveSettings({ aiInboundGreeting: e.target.value }); }} />
           <h4>Aplicar no Asterisk</h4>
           <p className="hint-text">Depois de fazer a instalação única do guia, o botão abaixo grava os arquivos e manda o Asterisk recarregar (as chamadas em andamento não caem).</p>
           <button className="btn-primary" onClick={apply}>Aplicar no Asterisk</button>

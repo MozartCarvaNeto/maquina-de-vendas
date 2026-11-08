@@ -16,3 +16,19 @@
 .gw-pre { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 8px; overflow: auto; font-size: 12px; max-height: 360px; }
 .gw-newkey { margin: 12px 0; padding: 12px; border-radius: 8px; background: var(--warning-bg, #fff7e0); word-break: break-all; }
 @media (max-width: 700px) { .gateway-page { padding: 16px; } }
+
+/* conversas de SMS e saldo */
+.gw-chat { display: flex; gap: 12px; margin-top: 12px; min-height: 360px; }
+.gw-chat-list { width: 260px; max-height: 480px; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.gw-chat-list button { text-align: left; padding: 8px 10px; border: 1px solid var(--gray-200, #e5e7eb); border-radius: 8px; background: #fff; cursor: pointer; display: flex; flex-direction: column; }
+.gw-chat-list button.active { border-color: var(--primary-600, #2563eb); background: var(--primary-50, #eff6ff); }
+.gw-chat-list small { color: var(--gray-500, #6b7280); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gw-chat-thread { flex: 1; min-width: 0; }
+.gw-chat-msgs { display: flex; flex-direction: column; gap: 6px; max-height: 360px; overflow: auto; padding: 6px; background: var(--gray-50, #f9fafb); border-radius: 8px; }
+.gw-bubble { max-width: 75%; padding: 8px 10px; border-radius: 10px; word-break: break-word; }
+.gw-bubble.in { align-self: flex-start; background: #fff; border: 1px solid var(--gray-200, #e5e7eb); }
+.gw-bubble.out { align-self: flex-end; background: var(--primary-100, #dbeafe); }
+.gw-bubble small { display: block; color: var(--gray-500, #6b7280); margin-top: 2px; }
+.gw-balance { font-size: 32px; font-weight: 700; margin: 4px 0; }
+.btn-link { background: none; border: none; color: var(--primary-600, #2563eb); cursor: pointer; padding: 0; text-decoration: underline; }
+@media (max-width: 700px) { .gw-chat { flex-direction: column; } .gw-chat-list { width: 100%; max-height: 180px; } }
