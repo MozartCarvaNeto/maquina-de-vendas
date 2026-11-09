@@ -43,7 +43,7 @@ exports.overview = async (req, res, next) => {
     ]);
     res.json({
       tag: core.tagFor(userId),
-      dids: (await require('../services/pbx/didService').forAccount(userId)).map((d) => ({ id: d.id, number: d.number, label: d.label })),
+      dids: await (async () => { const dd = require('../services/pbx/didService'); const s = await dd.autoSettings(); return (await dd.forAccount(userId)).map((d) => ({ id: d.id, number: d.number, label: d.label, suspended: Boolean(d.suspendedAt), overdue: Boolean(d.overdueSince), monthlyFeeBrl: s.billing ? (d.monthlyFeeBrl ?? s.feeBrl) : 0, nextBillAt: s.billing ? d.nextBillAt : null })); })(),
       isPlatformAdmin: Boolean(req.isPlatformAdmin),
       audios,
       ivrs,
@@ -132,9 +132,10 @@ exports.audioFile = async (req, res, next) => {
     const a = await prisma.pbxAudio.findFirst({ where: { id: req.params.id, userId: req.userId } });
     if (!a) return fail(res, 404, 'Áudio não encontrado.');
     const p = svc.audioFilePath(req.userId, a.id);
-    if (!fs.existsSync(p)) return fail(res, 404, 'Arquivo do áudio não está no servidor.');
+    const ah = require('../services/pbx/asteriskHost');
+    if (!(await ah.exists(p))) return fail(res, 404, 'Arquivo do áudio não está no servidor.');
     res.type('audio/wav');
-    fs.createReadStream(p).pipe(res);
+    ah.readStream(p).pipe(res);
   } catch (e) {
     next(e);
   }
@@ -149,7 +150,7 @@ exports.deleteAudio = async (req, res, next) => {
     if (used) return fail(res, 409, 'Esse áudio está em uso por uma URA ou fila. Troque antes de apagar.');
     const r = await prisma.pbxAudio.deleteMany({ where: { id, userId: req.userId } });
     if (!r.count) return fail(res, 404, 'Áudio não encontrado.');
-    svc.removeAudioFile(req.userId, id);
+    await svc.removeAudioFile(req.userId, id);
     res.json({ success: true });
   } catch (e) {
     next(e);
@@ -349,10 +350,12 @@ exports.listCalls = async (req, res, next) => {
     if (['entrada', 'saida', 'ia'].includes(req.query.direction)) where.direction = req.query.direction;
     if (req.query.status) where.status = String(req.query.status);
     if (req.query.q) where.OR = [{ fromNumber: { contains: String(req.query.q) } }, { toNumber: { contains: String(req.query.q) } }];
+    const ah = require('../services/pbx/asteriskHost');
+    const names = await ah.listNames(ah.dirs().rec);
     const rows = (await prisma.pbxCall.findMany({ where, orderBy: { startedAt: 'desc' }, take: 200 })).map((c) => {
       const has = (f) => {
         const p = f && svc.recordingPath(req.userId, f);
-        return !!p && fs.existsSync(p);
+        return !!p && names.has(`${f}.wav`);
       };
       return { ...c, hasRecording: has(c.recordingFile), hasVoicemail: has(c.voicemailFile) };
     });
@@ -368,8 +371,9 @@ exports.streamRecording = async (req, res, next) => {
     if (!c) return fail(res, 404, 'Chamada não encontrada.');
     const file = req.query.kind === 'voicemail' ? c.voicemailFile : c.recordingFile;
     const p = file && svc.recordingPath(req.userId, file);
-    if (!p || !fs.existsSync(p)) return fail(res, 404, 'Gravação não encontrada no servidor.');
-    const size = fs.statSync(p).size;
+    const ah = require('../services/pbx/asteriskHost');
+    const size = p ? await ah.size(p) : -1;
+    if (!p || size < 0) return fail(res, 404, 'Gravação não encontrada no servidor.');
     const range = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
     res.set('Content-Type', 'audio/wav');
     res.set('Accept-Ranges', 'bytes');
@@ -379,10 +383,10 @@ exports.streamRecording = async (req, res, next) => {
       const end = range[2] ? Math.min(size - 1, parseInt(range[2], 10)) : size - 1;
       if (start > end || start >= size) return res.status(416).end();
       res.status(206).set({ 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1 });
-      return fs.createReadStream(p, { start, end }).pipe(res);
+      return ah.readStream(p, { start, end }).pipe(res);
     }
     res.set('Content-Length', size);
-    fs.createReadStream(p).pipe(res);
+    ah.readStream(p).pipe(res);
   } catch (e) {
     next(e);
   }
@@ -413,25 +417,13 @@ exports.clickToCall = async (req, res, next) => {
     if (number.length < 8) return fail(res, 400, 'Número inválido.');
     const ext = await prisma.sipExtension.findFirst({ where: { userId: req.userId, memberId: req.memberId } });
     if (!ext) return fail(res, 400, 'Você ainda não tem ramal. Abra a tela Telefone uma vez.');
-    const fs2 = require('fs');
-    const path = require('path');
-    const os = require('os');
-    const env = require('../config/env');
     const tag = core.tagFor(req.userId);
     const name = `turbo-c2c-${crypto.randomUUID()}.call`;
     const body = [`Channel: PJSIP/${ext.extension}`, `CallerID: "Ligando para ${number}" <${number}>`, 'WaitTime: 30', 'MaxRetries: 0', `Context: turbo-agent-${tag}`, `Extension: ${number}`, 'Priority: 1', 'Archive: no'].join('\n') + '\n';
-    const tmp = path.join(os.tmpdir(), name);
-    fs2.writeFileSync(tmp, body);
     try {
-      try {
-        fs2.renameSync(tmp, path.join(env.asteriskSpoolDir, name));
-      } catch (_) {
-        fs2.copyFileSync(tmp, path.join(env.asteriskSpoolDir, name));
-        fs2.rmSync(tmp, { force: true });
-      }
+      await require('../services/pbx/asteriskHost').putCallFile(name, body);
     } catch (e) {
-      fs2.rmSync(tmp, { force: true });
-      return fail(res, 502, 'Não consegui entregar a ligação ao Asterisk (ele precisa estar no mesmo servidor).');
+      return fail(res, 502, e.message);
     }
     res.json({ success: true, message: 'Seu telefone vai tocar; ao atender, ligamos para o cliente.' });
   } catch (e) {
@@ -526,7 +518,7 @@ exports.adminDids = async (req, res, next) => {
     const nameOf = new Map(accounts.map((a) => [a.id, a.name]));
     const mailOf = new Map(members.map((m) => [m.accountId, m.email]));
     res.json({
-      dids: rows.map((d) => ({ id: d.id, number: d.number, label: d.label, accountId: d.accountId, accountName: d.accountId ? nameOf.get(d.accountId) || d.accountId : null, assignedAt: d.assignedAt })),
+      dids: rows.map((d) => ({ id: d.id, number: d.number, label: d.label, accountId: d.accountId, accountName: d.accountId ? nameOf.get(d.accountId) || d.accountId : null, assignedAt: d.assignedAt, monthlyFeeBrl: d.monthlyFeeBrl, nextBillAt: d.nextBillAt, lastBilledAt: d.lastBilledAt, overdueSince: d.overdueSince, suspendedAt: d.suspendedAt })),
       accounts: accounts.map((a) => ({ id: a.id, name: a.name, email: mailOf.get(a.id) || null })),
       settings: await dids.autoSettings()
     });
@@ -556,7 +548,9 @@ exports.adminAssignDids = async (req, res, next) => {
     }
     if (Array.isArray(req.body.ids) && req.body.accountId) {
       for (const id of req.body.ids.slice(0, 500)) {
-        try { await dids.assign(String(id), String(req.body.accountId)); touched.add(String(req.body.accountId)); result.done += 1; } catch (e) { result.errors.push(e.message); }
+        try {
+          const before = await prisma.pbxDid.findUnique({ where: { id: String(id) } });
+          if (before?.accountId) touched.add(before.accountId); await dids.assign(String(id), String(req.body.accountId)); touched.add(String(req.body.accountId)); result.done += 1; } catch (e) { result.errors.push(e.message); }
       }
     }
     const plat = await require('../services/platformService').platformAccountIds();
@@ -598,11 +592,91 @@ exports.adminDeleteDid = async (req, res, next) => {
 
 exports.adminDidSettings = async (req, res, next) => {
   try {
-    const plat = (await require('../services/platformService').platformAccountIds())[0];
-    if (!plat) return fail(res, 400, 'Nenhuma conta de administrador da plataforma encontrada (SUPERADMIN_EMAILS).');
-    const { persistCredentials } = require('../services/settingsHelpers');
-    await persistCredentials(plat, 'platform_telecom', 'native', { didAuto: req.body.auto ? 'true' : 'false', didAutoCount: String(Math.min(10, Math.max(1, parseInt(req.body.count, 10) || 1))) }, [], { exclusive: true });
-    res.json(await dids.autoSettings());
+    const s = await dids.saveSettings(req.body || {});
+    const { platformId, ...rest } = s;
+    res.json(rest);
+  } catch (e) {
+    if (e.status) return fail(res, e.status, e.message);
+    next(e);
+  }
+};
+
+exports.adminUpdateDid = async (req, res, next) => {
+  try {
+    const before = await prisma.pbxDid.findUnique({ where: { id: req.params.id } });
+    const row = await dids.updateDid(req.params.id, req.body || {});
+    const plat = await require('../services/platformService').platformAccountIds();
+    if (before?.accountId && (req.body.number !== undefined || req.body.suspended !== undefined)) applyQuietly([before.accountId, ...plat]);
+    res.json(row);
+  } catch (e) {
+    if (e.status) return fail(res, e.status, e.message);
+    next(e);
+  }
+};
+
+exports.adminDidHistory = async (req, res, next) => {
+  try {
+    const rows = await prisma.walletTx.findMany({ where: { type: 'did_fee', refId: req.params.id }, orderBy: { createdAt: 'desc' }, take: 60 });
+    res.json(rows.map((r) => ({ id: r.id, at: r.createdAt, amountBrl: r.amountBrl, description: r.description })));
+  } catch (e) {
+    next(e);
+  }
+};
+
+/** Roda agora: "sweep" (atribuição automática) ou "billing" (mensalidades). */
+exports.adminRunDidJob = async (req, res, next) => {
+  try {
+    const jobs = require('../jobs/didJob');
+    const what = req.body.what === 'billing' ? 'billing' : 'sweep';
+    res.json(what === 'billing' ? await jobs.runBillingNow() : await jobs.runSweepNow());
+  } catch (e) {
+    next(e);
+  }
+};
+
+// ------------------------------------------------------------------ onde está o Asterisk (este servidor ou outro, por SSH)
+exports.adminAsteriskHost = async (req, res, next) => {
+  try {
+    const host = require('../services/pbx/asteriskHost');
+    await host.reload();
+    res.json({ ...host.publicView(), hookBaseDefault: `http://127.0.0.1:${require('../config/env').port}/api/pbx-hook`, audioSocketPort: require('../config/env').audioSocketPort });
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.adminSaveAsteriskHost = async (req, res, next) => {
+  try {
+    const host = require('../services/pbx/asteriskHost');
+    await host.save(req.body || {});
+    res.json(host.publicView());
+  } catch (e) {
+    if (e.status) return fail(res, e.status, e.message);
+    next(e);
+  }
+};
+
+exports.adminTestAsteriskHost = async (req, res, next) => {
+  try {
+    res.json(await require('../services/pbx/asteriskHost').test());
+  } catch (e) {
+    next(e);
+  }
+};
+
+/** Regrava e recarrega a configuração de TODAS as contas que usam telefonia (útil após trocar de servidor). */
+exports.adminApplyAll = async (req, res, next) => {
+  try {
+    const plat = await require('../services/platformService').platformAccountIds();
+    const ids = new Set(plat);
+    for (const t of await prisma.sipTrunk.findMany({ select: { userId: true } })) ids.add(t.userId);
+    for (const d of await prisma.pbxDid.findMany({ where: { accountId: { not: null } }, select: { accountId: true } })) ids.add(d.accountId);
+    for (const e of await prisma.sipExtension.findMany({ select: { userId: true } })) ids.add(e.userId);
+    const results = [];
+    for (const id of ids) {
+      try { const r = await svc.applyConfig(id); results.push({ id, ok: true, warnings: r.warnings || [] }); } catch (e) { results.push({ id, ok: false, error: e.message }); }
+    }
+    res.json({ total: results.length, ok: results.filter((r) => r.ok).length, results });
   } catch (e) {
     next(e);
   }
@@ -628,7 +702,7 @@ exports.spy = async (req, res, next) => {
     const target = (now.calls || []).find((c) => c.channel === channel && c.spyable);
     if (!target) return fail(res, 404, 'Essa chamada não está mais ativa.');
     if (channel.startsWith(`PJSIP/${ext.extension}-`)) return fail(res, 400, 'Você não pode escutar a própria chamada.');
-    const out = live.spyCallFile({ supervisorExt: ext.extension, target: channel, mode, tag: core.tagFor(req.userId) });
+    const out = await live.spyCallFile({ supervisorExt: ext.extension, target: channel, mode, tag: core.tagFor(req.userId) });
     res.json({ success: true, message: 'Seu telefone vai tocar; ao atender você escuta a chamada.', ...out });
   } catch (e) {
     if (e.status) return fail(res, e.status, e.message);

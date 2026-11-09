@@ -271,6 +271,13 @@ async function handleWebhook(headers, body) {
   const payment = body?.payment;
   if (!event || !payment?.id) return { http: 200, body: { ignored: true } };
 
+  // recarga de saldo (cobrança avulsa): NUNCA pode renovar o plano
+  const topupSvc = require('../walletTopupService');
+  if (topupSvc.isTopupPayment(payment)) {
+    if (event === 'PAYMENT_CONFIRMED' || event === 'PAYMENT_RECEIVED') return { http: 200, body: await topupSvc.applyPaid(payment) };
+    return { http: 200, body: { handled: event, topup: true } };
+  }
+
   const account = await findAccountForPayment(payment);
   if (!account) {
     console.warn(`Webhook Asaas (${event}) sem conta correspondente — pagamento ${payment.id}`);

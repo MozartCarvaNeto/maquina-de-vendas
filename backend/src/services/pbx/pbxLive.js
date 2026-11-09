@@ -4,14 +4,12 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { execFile } = require('child_process');
+const host = require('./asteriskHost');
 const core = require('./pbxCore');
 const env = require('../../config/env');
 
 function asterisk(cmd) {
-  return new Promise((resolve) => {
-    execFile('asterisk', ['-rx', cmd], { timeout: 8000 }, (err, stdout, stderr) => resolve({ ok: !err, out: `${stdout || ''}${stderr || ''}` }));
-  });
+  return host.cli(cmd, 8000);
 }
 
 /** "core show channels concise": Canal!Contexto!Ramal!Prioridade!Estado!App!Dados!CallerID!Conta!Peer!AMA!Duração!Ligado-a */
@@ -86,7 +84,7 @@ async function liveForUser(prisma, userId) {
 const MODES = { listen: 'q', whisper: 'qw', barge: 'qB' };
 
 /** Pede ao Asterisk que ligue para o ramal do supervisor e o coloque escutando a chamada. */
-function spyCallFile({ supervisorExt, target, mode, tag }) {
+async function spyCallFile({ supervisorExt, target, mode, tag }) {
   const opts = MODES[mode];
   if (!opts) throw Object.assign(new Error('Modo inválido.'), { status: 400 });
   if (!/^PJSIP\/[A-Za-z0-9_.@-]+$/.test(target)) throw Object.assign(new Error('Canal inválido.'), { status: 400 });
@@ -101,15 +99,7 @@ function spyCallFile({ supervisorExt, target, mode, tag }) {
     `Setvar: TP_TAG=${tag}`
   ];
   const name = `turbo-spy-${crypto.randomUUID()}.call`;
-  const tmp = path.join(os.tmpdir(), name);
-  fs.writeFileSync(tmp, `${lines.join('\n')}\n`, { mode: 0o644 });
-  const dest = path.join(env.asteriskSpoolDir, name);
-  try {
-    try { fs.renameSync(tmp, dest); } catch (_) { fs.copyFileSync(tmp, dest); fs.rmSync(tmp, { force: true }); }
-  } catch (e) {
-    fs.rmSync(tmp, { force: true });
-    throw Object.assign(new Error('Não consegui entregar o pedido ao Asterisk (ele precisa estar no mesmo servidor).'), { status: 502 });
-  }
+  await host.putCallFile(name, `${lines.join('\n')}\n`);
   return { file: name, data: `${target},${opts}` };
 }
 

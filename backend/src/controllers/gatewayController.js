@@ -375,12 +375,86 @@ exports.walletMe = async (req, res, next) => {
     const w = await wallet.getWallet(req.userId);
     const txs = await prisma.walletTx.findMany({ where: { userId: req.userId }, orderBy: { createdAt: 'desc' }, take: 100 });
     const settings = await gateway.getGatewaySettings(req.userId);
+    const rules = await require('../services/platformBillingSettings').get();
+    const topup = await require('../services/walletTopupService');
+    const lowLimit = w?.lowBalanceBrl ?? rules.walletLowDefaultBrl;
     res.json({
       enabled: Boolean(w?.enabled),
       balanceBrl: w?.balanceBrl || 0,
+      lowBalanceBrl: w?.lowBalanceBrl ?? null,
+      lowDefaultBrl: rules.walletLowDefaultBrl,
+      lowBalance: Boolean(w?.enabled && lowLimit > 0 && (w?.balanceBrl || 0) <= lowLimit),
+      topup: await topup.config(),
+      topups: await topup.listTopups(req.userId),
       rates: { smsPerPartBrl: settings.priceBrl, voiceOutPerMinBrl: w?.voiceOutPerMinBrl || 0, voiceInPerMinBrl: w?.voiceInPerMinBrl || 0, voiceIncrementSec: w?.voiceIncrementSec || 60 },
       txs
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.walletLow = async (req, res, next) => {
+  try {
+    const w = await wallet.getWallet(req.userId);
+    const rules = await require('../services/platformBillingSettings').get();
+    const limit = w?.lowBalanceBrl ?? rules.walletLowDefaultBrl;
+    res.json({ low: Boolean(!req.isPlatformAdmin && w?.enabled && limit > 0 && w.balanceBrl <= limit), balanceBrl: w?.balanceBrl || 0 });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.walletTopup = async (req, res, next) => {
+  try {
+    res.status(201).json(await require('../services/walletTopupService').createTopup({ accountId: req.userId, amountBrl: req.body?.amountBrl, cpfCnpj: req.body?.cpfCnpj }));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+};
+
+exports.walletLowBalance = async (req, res, next) => {
+  try {
+    const v = req.body?.lowBalanceBrl;
+    const value = v === null || v === '' || v === undefined ? null : Math.max(0, Math.min(100000, Number(String(v).replace(',', '.'))));
+    if (value !== null && !Number.isFinite(value)) return badRequest(res, 'Valor inválido.');
+    await prisma.wallet.upsert({ where: { userId: req.userId }, update: { lowBalanceBrl: value, lowNotifiedAt: null }, create: { userId: req.userId, lowBalanceBrl: value } });
+    res.json({ success: true, lowBalanceBrl: value });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.walletStatement = async (req, res, next) => {
+  try {
+    const rep = require('../services/walletReportService');
+    const st = await rep.statement(req.userId, { from: req.query.from, to: req.query.to });
+    if (req.query.format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="extrato.csv"');
+      return res.send(rep.statementCsv(st));
+    }
+    res.json(st);
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.adminBillingRules = async (req, res, next) => {
+  try {
+    const s = require('../services/platformBillingSettings');
+    if (req.method === 'PUT') return res.json(await s.save(req.body || {}));
+    res.json(await s.get(true));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+};
+
+exports.adminProfit = async (req, res, next) => {
+  try {
+    res.json(await require('../services/walletReportService').profit({ months: parseInt(req.query.months, 10) || 6, month: /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : null }));
   } catch (error) {
     next(error);
   }
@@ -409,6 +483,8 @@ exports.walletCredit = async (req, res, next) => {
     const acc = await prisma.account.findUnique({ where: { id: req.params.userId }, select: { id: true } });
     if (!acc) return res.status(404).json({ error: 'Conta não encontrada.' });
     await wallet.credit(acc.id, amount, { description: String(req.body?.description || 'Recarga manual').slice(0, 150) });
+    // pagou: tenta cobrar a mensalidade de número em atraso e reativa o número
+    require('../jobs/didJob').runBillingNow().catch((e) => console.warn('Mensalidade após recarga:', e.message));
     res.json({ success: true, balanceBrl: (await wallet.getWallet(acc.id)).balanceBrl });
   } catch (error) {
     next(error);

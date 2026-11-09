@@ -193,7 +193,7 @@ async function enqueue(p) {
   if (p.callbackUrl) callbackUrl = await smsWebhook.validateUrl(p.callbackUrl);
   // Cobra antes de enfileirar (sem saldo → erro 402). Se algo falhar depois, estorna.
   const total = price * parts;
-  await wallet.charge(p.userId, total, { type: 'sms', description: `SMS para ${to}${sendAt ? ' (agendado)' : ''}` });
+  await wallet.charge(p.userId, total, { type: 'sms', description: `SMS para ${to}${sendAt ? ' (agendado)' : ''}`, quantity: parts });
   try {
     return await prisma.smsMessage.create({
       data: {

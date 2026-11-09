@@ -55,6 +55,7 @@ export default function AgenteIA() {
   const [callsByCampaign, setCallsByCampaign] = useState({});
   const [transcriptId, setTranscriptId] = useState(null);
   const [error, setError] = useState('');
+  const [attempt, setAttempt] = useState(0);
 
   const loadAgents = useCallback(async () => {
     const { data } = await api.get('/ai-calls/agents');
@@ -73,7 +74,11 @@ export default function AgenteIA() {
   }, []);
 
   useEffect(() => {
-    (async () => {
+    let alive = true;
+    const watchdog = new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error('timeout'), { timeout: true })), 20000));
+    const load = async () => {
+      setLoading(true);
+      setError('');
       try {
         const [opts, agentList] = await Promise.all([api.get('/ai-calls/options'), loadAgents()]);
         setOptions(opts.data);
@@ -89,12 +94,21 @@ export default function AgenteIA() {
         setCallerNumbers((numbersRes.data.callerNumbers || []).filter((n) => n.isActive));
         setAiConfigured((aiRes.data.providers || []).length > 0);
       } catch (err) {
+        if (!alive) return;
         setError(err.response?.data?.error || 'Não foi possível carregar o Agente IA. Atualize os arquivos do backend e reinicie o servidor.');
-      } finally {
-        setLoading(false);
       }
-    })();
-  }, [loadAgents, loadCampaigns]);
+    };
+    // Nunca fica preso em "Carregando…": passou de 20 s mostra o aviso com o botão de tentar de novo.
+    Promise.race([load(), watchdog])
+      .catch((err) => {
+        if (!alive) return;
+        setError(err.timeout
+          ? 'O servidor demorou mais de 20 segundos para responder. Confira se o SQL de atualização foi rodado e se o backend foi reiniciado (comando prisma generate + reiniciar). Se continuar, abra o console do navegador (F12 > Console) e veja o erro vermelho.'
+          : `Não foi possível carregar o Agente IA: ${err.message}`);
+      })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [loadAgents, loadCampaigns, attempt]);
 
   // Atualiza os números a cada 10 s enquanto houver campanha ligando e a aba estiver visível.
   const hasRunning = campaigns.some((c) => c.status === 'discando');
@@ -219,6 +233,14 @@ export default function AgenteIA() {
   }
 
   if (loading) return <div className="ia-page"><p className="ia-muted">Carregando…</p></div>;
+  if (error && !agents.length && !campaigns.length && !options) {
+    return (
+      <div className="ia-page">
+        <div className="ia-alert ia-alert-error">{error}</div>
+        <button type="button" className="ia-btn" onClick={() => setAttempt((n) => n + 1)}>Tentar de novo</button>
+      </div>
+    );
+  }
 
   return (
     <div className="ia-page">

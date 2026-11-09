@@ -39,7 +39,9 @@ async function request(method, path, body) {
 
 const createCustomer = (payload) => request('POST', '/customers', payload);
 const createSubscription = (payload) => request('POST', '/subscriptions', payload);
+const createPayment = (payload) => request('POST', '/payments', payload);
+const getPayment = (id) => request('GET', `/payments/${encodeURIComponent(id)}`);
 const deleteSubscription = (id) => request('DELETE', `/subscriptions/${encodeURIComponent(id)}`);
 const listSubscriptionPayments = (id) => request('GET', `/subscriptions/${encodeURIComponent(id)}/payments`);
 
-module.exports = { isEnabled, baseUrl, createCustomer, createSubscription, deleteSubscription, listSubscriptionPayments };
+module.exports = { isEnabled, baseUrl, createPayment, getPayment, createCustomer, createSubscription, deleteSubscription, listSubscriptionPayments };

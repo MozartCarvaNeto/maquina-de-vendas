@@ -24,7 +24,7 @@ function safeEqual(a, b) {
 
 /** Endereço que o Asterisk (no mesmo servidor) usa para avisar o sistema. */
 function localHookBase() {
-  return `http://127.0.0.1:${env.port}/api/pbx-hook`;
+  return require('./asteriskHost').hookBase();
 }
 
 function slug(name, fallback = 'x') {
@@ -38,7 +38,7 @@ const ivrContext = (tag, ivr) => `turbo-ivr-${tag}-${short(ivr.id)}`;
 const routeContext = (tag, r) => `turbo-rt-${tag}-${short(r.id)}`;
 
 function soundPath(tag, audioId) {
-  return path.posix.join(env.asteriskSoundsDir, tag, audioId); // sem extensão: o Asterisk escolhe .wav
+  return path.posix.join(require('./asteriskHost').dirs().sounds, tag, audioId); // sem extensão: o Asterisk escolhe .wav
 }
 
 const DEFAULT_SETTINGS = { recordInbound: 'true', recordOutbound: 'true', aiHandoffQueueId: '', aiInboundAgentId: '', aiInboundGreeting: '', sttLanguage: 'pt-BR', sttProvider: 'auto' };

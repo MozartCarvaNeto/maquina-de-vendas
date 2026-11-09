@@ -7,13 +7,13 @@ const path = require('path');
 const crypto = require('crypto');
 const ITelephonyProvider = require('./ITelephonyProvider');
 const env = require('../../config/env');
+const host = require('../pbx/asteriskHost');
 
 class AsteriskProvider extends ITelephonyProvider {
   constructor(credentials = {}) {
     super();
     this.userId = credentials.userId;
     this.trunkId = credentials.trunkId || '';
-    this.spoolDir = credentials.spoolDir || env.asteriskSpoolDir;
     this.providerName = 'asterisk';
     this.dialect = 'asterisk'; // não usa endereços de retorno (webhooks): a conversa passa pela ponte
   }
@@ -82,22 +82,7 @@ class AsteriskProvider extends ITelephonyProvider {
     const limit = [timeLimitSeconds, allow.maxSeconds].filter((x) => x > 0);
     if (limit.length) lines.push(`Setvar: TIMEOUT(absolute)=${Math.round(Math.min(...limit))}`);
     const name = `turbo-ai-${callId}.call`;
-    const tmp = path.join(os.tmpdir(), `${name}.${crypto.randomBytes(4).toString('hex')}`);
-    fs.writeFileSync(tmp, `${lines.join('\n')}\n`, { mode: 0o644 });
-    const dest = path.join(this.spoolDir, name);
-    try {
-      fs.renameSync(tmp, dest);
-    } catch (e) {
-      try {
-        fs.copyFileSync(tmp, dest); // pastas em discos diferentes
-        fs.rmSync(tmp, { force: true });
-      } catch (err) {
-        fs.rmSync(tmp, { force: true });
-        const e2 = new Error(`Não consegui entregar a ligação ao Asterisk em ${this.spoolDir} (${err.code || err.message}). Confira se o sistema roda no mesmo servidor e tem permissão nessa pasta.`);
-        e2.status = 502;
-        throw e2;
-      }
-    }
+    await host.putCallFile(name, `${lines.join('\n')}\n`);
     require('../pbx/aiBridge').watchOrigination(callId, Math.max(10, ringTimeoutSeconds) + 20);
     return { providerCallId: `asterisk:${callId}`, status: 'queued' };
   }
@@ -117,23 +102,8 @@ class AsteriskProvider extends ITelephonyProvider {
     return `PJSIP/${trunkInfo.trunk.dialPrefix || ''}${digits}@${trunkInfo.endpoint}`;
   }
 
-  writeCallFile(name, lines) {
-    const tmp = path.join(os.tmpdir(), `${name}.${crypto.randomBytes(4).toString('hex')}`);
-    fs.writeFileSync(tmp, `${lines.join('\n')}\n`, { mode: 0o644 });
-    const dest = path.join(this.spoolDir, name);
-    try {
-      fs.renameSync(tmp, dest);
-    } catch (e) {
-      try {
-        fs.copyFileSync(tmp, dest);
-        fs.rmSync(tmp, { force: true });
-      } catch (err) {
-        fs.rmSync(tmp, { force: true });
-        const e2 = new Error(`Não consegui entregar a ligação ao Asterisk em ${this.spoolDir} (${err.code || err.message}). Confira se o sistema roda no mesmo servidor e tem permissão nessa pasta.`);
-        e2.status = 502;
-        throw e2;
-      }
-    }
+  async writeCallFile(name, lines) {
+    await host.putCallFile(name, `${lines.join('\n')}\n`);
   }
 
   async checkAllowance() {
@@ -178,7 +148,7 @@ class AsteriskProvider extends ITelephonyProvider {
     const digits = String(to).replace(/\D/g, '');
     const sid = `ast-${crypto.randomBytes(16).toString('hex')}`;
     const limit = [timeLimitSeconds, allow.maxSeconds].filter((x) => x > 0);
-    this.writeCallFile(`turbo-dial-${sid}.call`, this.legLines({
+    await this.writeCallFile(`turbo-dial-${sid}.call`, this.legLines({
       sid, leg: 'lead', dialStr: await this.dialString(digits, info), wait: Math.max(10, ringTimeoutSeconds), from, room: AsteriskProvider.roomFor(sid), timeLimit: limit.length ? Math.min(...limit) : 0
     }));
     return { providerCallId: sid, status: 'queued' };
@@ -192,20 +162,19 @@ class AsteriskProvider extends ITelephonyProvider {
     if (!m) throw Object.assign(new Error('Áudio de abertura da campanha não encontrado.'), { status: 400, fatal: true });
     const src = path.join(__dirname, '../../../uploads/robocall-audio', m[1], decodeURIComponent(m[2]));
     if (!fs.existsSync(src)) throw Object.assign(new Error('O arquivo de áudio de abertura da campanha não existe mais no servidor.'), { status: 400, fatal: true });
-    const dir = path.join(env.asteriskSoundsDir, 'robo');
-    const base = path.join(dir, `${m[1]}-${Math.round(fs.statSync(src).mtimeMs)}`);
-    if (!fs.existsSync(`${base}.wav`)) {
+    const dir = path.posix.join(host.dirs().sounds, 'robo');
+    const base = path.posix.join(dir, `${m[1]}-${Math.round(fs.statSync(src).mtimeMs)}`);
+    if (!(await host.exists(`${base}.wav`))) {
       const { wav } = await require('../pbx/wav').normalizeToAsteriskWav(fs.readFileSync(src), src).catch((e) => {
         throw Object.assign(e, { status: 400, fatal: true });
       });
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(`${base}.wav`, wav);
+      await host.writeFile(`${base}.wav`, wav, { mkdir: true });
     }
     const sid = `ast-${crypto.randomBytes(16).toString('hex')}`;
     const limit = [timeLimitSeconds, allow.maxSeconds].filter((x) => x > 0);
-    this.writeCallFile(`turbo-dial-${sid}.call`, this.legLines({
+    await this.writeCallFile(`turbo-dial-${sid}.call`, this.legLines({
       sid, leg: 'lead', dialStr: await this.dialString(String(to).replace(/\D/g, ''), info), wait: Math.max(10, ringTimeoutSeconds), from, room: '', timeLimit: limit.length ? Math.min(...limit) : 0,
-      robo: { callId, intro: base, rec: record ? `${env.asteriskRecordingsDir}/robo-${callId}` : '' }
+      robo: { callId, intro: base, rec: record ? `${host.dirs().rec}/robo-${callId}` : '' }
     }));
     return { providerCallId: sid, status: 'queued' };
   }
@@ -227,7 +196,7 @@ class AsteriskProvider extends ITelephonyProvider {
     }
     if (!dialStr) dialStr = await this.dialString(String(agentPhoneNumber || '').replace(/\D/g, ''), info);
     const sid = `ast-${crypto.randomBytes(16).toString('hex')}`;
-    this.writeCallFile(`turbo-dial-${sid}.call`, this.legLines({
+    await this.writeCallFile(`turbo-dial-${sid}.call`, this.legLines({
       sid, leg: 'agent', dialStr, wait: ringTimeoutSeconds, from, room: AsteriskProvider.roomFor(providerCallId), timeLimit: 0
     }));
     let recordingUrl;
@@ -238,7 +207,7 @@ class AsteriskProvider extends ITelephonyProvider {
       const { out } = await live._asterisk('core show channels concise');
       const ch = live.parseChannels(out).find((c) => c.channel.includes(`/L${hex}@`) && c.channel.endsWith(';1'));
       if (ch) {
-        const r = await live._asterisk(`mixmonitor start ${ch.channel} ${env.asteriskRecordingsDir}/dial-${hex}.wav`);
+        const r = await live._asterisk(`mixmonitor start ${ch.channel} ${host.dirs().rec}/dial-${hex}.wav`);
         if (r.ok) recordingUrl = `local:dial-${hex}.wav`;
       }
     }
@@ -246,12 +215,18 @@ class AsteriskProvider extends ITelephonyProvider {
   }
 
   async validateCredentials() {
-    try {
-      fs.accessSync(this.spoolDir, fs.constants.W_OK);
-      return { valid: true };
-    } catch (e) {
-      return { valid: false, error: `O sistema não consegue escrever em ${this.spoolDir}. O Asterisk precisa estar instalado no mesmo servidor (e a pasta liberada para o usuário do sistema).` };
+    if (!host.isRemote()) {
+      try {
+        fs.accessSync(host.dirs().spool, fs.constants.W_OK);
+        return { valid: true };
+      } catch (e) {
+        return { valid: false, error: `O sistema não consegue escrever em ${host.dirs().spool}. Instale o Asterisk neste servidor ou cadastre o servidor dele em Telefonia PBX > Servidor Asterisk (admin).` };
+      }
     }
+    const r = await host.test();
+    if (r.ok) return { valid: true };
+    const bad = r.steps.filter((x) => !x.ok).map((x) => `${x.name}: ${x.detail}`).join('; ');
+    return { valid: false, error: `O Asterisk não está pronto (${bad}). Confira em Telefonia PBX > Servidor Asterisk.` };
   }
 
 }

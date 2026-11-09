@@ -133,7 +133,7 @@ exports.dialEvent = async (req, res) => {
     }
     if (cid && q.ev === 'end') {
       const f = `robo-${cid}.wav`;
-      if (require('fs').existsSync(require('path').join(env.asteriskRecordingsDir, f))) {
+      if (await require('../services/pbx/asteriskHost').exists(`${require('../services/pbx/asteriskHost').dirs().rec}/${f}`)) {
         await prisma.call.update({ where: { id: cid }, data: { recordingUrl: `local:${f}` } }).catch(() => null);
       }
     }

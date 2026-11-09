@@ -309,10 +309,11 @@ exports.getRecording = async (req, res, next) => {
     // Gravação feita pelo Asterisk próprio: arquivo local (nome validado; nada de caminhos soltos)
     const local = /^local:((?:dial|robo)-[0-9a-f-]{32,36}\.wav)$/.exec(call.recordingUrl);
     if (local) {
-      const file = require('path').join(env.asteriskRecordingsDir, local[1]);
-      if (!require('fs').existsSync(file)) return res.status(404).json({ error: 'A gravação ainda não está disponível.' });
+      const ah = require('../services/pbx/asteriskHost');
+      const file = `${ah.dirs().rec}/${local[1]}`;
+      if (!(await ah.exists(file))) return res.status(404).json({ error: 'A gravação ainda não está disponível.' });
       res.setHeader('Content-Type', 'audio/wav');
-      return require('fs').createReadStream(file).pipe(res);
+      return ah.readStream(file).pipe(res);
     }
     const telephonyProvider = await getActiveTelephonyProvider(req.userId);
     const telephonySettings = { accountSid: telephonyProvider.accountSid, authToken: telephonyProvider.authToken };

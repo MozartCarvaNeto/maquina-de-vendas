@@ -47,6 +47,8 @@ const adminRoutes = require('./routes/admin.routes');
 const billingRoutes = require('./routes/billing.routes');
 const billingController = require('./controllers/billingController');
 const { startAccessSweepJob } = require('./jobs/accessSweepJob');
+const { startDidJobs } = require('./jobs/didJob');
+const { startWalletAlertJob } = require('./jobs/walletAlertJob');
 const { ensureAdminAccounts } = require('./services/accessService');
 
 // Rede de segurança contra crashes vindos de bibliotecas de terceiros.
@@ -160,11 +162,14 @@ server.listen(env.port, async () => {
   startAiCallWatchdogJob();
   startDialerAutoJob();
   startAccessSweepJob();
+  startDidJobs();
+  startWalletAlertJob();
   // Libera as contas dos administradores ANTES de restaurar as sessões de WhatsApp.
   await ensureAdminAccounts().catch((err) => console.error('Erro ao liberar administradores:', err.message));
   nativeWhatsappService.bootstrapExistingSessions();
   smsGateway.start().catch((err) => console.error('Gateway SMS:', err.message));
-  if (process.env.ASTERISK_AI_BRIDGE !== 'off') aiBridge.start({ port: env.audioSocketPort });
+  await require('./services/pbx/asteriskHost').reload();
+  if (process.env.ASTERISK_AI_BRIDGE !== 'off') aiBridge.start({ port: env.audioSocketPort, host: require('./services/pbx/asteriskHost').audioSocketBind() });
 });
 
 /**

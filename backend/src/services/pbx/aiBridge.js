@@ -352,7 +352,8 @@ function nextAction(callId) {
 let server = null;
 function start({ port, host = '127.0.0.1' } = {}) {
   if (server) return server;
-  server = createAudioSocketServer((session) => handleSession(session), { host });
+  const ah = require('./asteriskHost');
+  server = createAudioSocketServer((session) => handleSession(session), { host, allow: (addr) => ah.audioAllowed(addr) });
   server.on('error', (e) => console.error('AudioSocket (IA no Asterisk):', e.message));
   server.listen(port, host, () => console.log(`🎙️  Ponte da IA com o Asterisk ouvindo em ${host}:${port}`));
   return server;

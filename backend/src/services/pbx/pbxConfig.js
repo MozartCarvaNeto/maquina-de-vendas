@@ -12,7 +12,7 @@ function digitsOnly(s) {
 }
 
 function recPath(tag) {
-  return `${env.asteriskRecordingsDir}/${tag}-@{UNIQUEID}.wav`;
+  return `${require('./asteriskHost').dirs().rec}/${tag}-@{UNIQUEID}.wav`;
 }
 
 /** Arquivo compartilhado por todas as contas: portas, gancho de fim de chamada e ponte da IA. */
@@ -35,8 +35,8 @@ function buildShared(base) {
   L.push(V('exten => s,1,NoOp(IA @{TP_CALLID})'));
   L.push('same => n,Set(CHANNEL(hangup_handler_push)=turbo-ai-hangup,s,1)');
   L.push(V(`same => n,GotoIf($["@{TP_REC}" = ""]?norec)`));
-  L.push(V(`same => n,MixMonitor(${env.asteriskRecordingsDir}/@{TP_REC}.wav)`));
-  L.push(V(`same => n(norec),AudioSocket(@{TP_CALLID},127.0.0.1:${env.audioSocketPort})`));
+  L.push(V(`same => n,MixMonitor(${require('./asteriskHost').dirs().rec}/@{TP_REC}.wav)`));
+  L.push(V(`same => n(norec),AudioSocket(@{TP_CALLID},${require('./asteriskHost').audioSocketAddr()})`));
   L.push(V(`same => n,Set(NEXT=@{CURL(${hook}/ai-next?t=${token}&callId=@{TP_CALLID})})`));
   L.push(V('same => n,GotoIf($["@{NEXT:0:6}" = "QUEUE:"]?queue)'));
   L.push(V('same => n,GotoIf($["@{NEXT:0:5}" = "DIAL:"]?dial)'));
@@ -61,7 +61,7 @@ function buildShared(base) {
   L.push(V('same => n(norec),Wait(0.5)'));
   L.push(V('same => n,Read(TPD,@{TP_INTRO},1,,1,8)'));
   L.push(V(`same => n,Set(TPR=@{CURL(${hook}/robo-digit?t=${token}&callId=@{TP_CALLID}&d=@{TPD})})`));
-  L.push(V(`same => n,AudioSocket(@{TP_CALLID},127.0.0.1:${env.audioSocketPort})`));
+  L.push(V(`same => n,AudioSocket(@{TP_CALLID},${require('./asteriskHost').audioSocketAddr()})`));
   L.push('same => n,Hangup()');
   L.push('');
   L.push('[turbo-dial-ans]');
@@ -117,7 +117,7 @@ function destLines(d, c, depth = 0) {
     L.push('same => n,Answer()');
     L.push('same => n,Wait(1)');
     L.push('same => n,Playback(vm-intro)');
-    L.push(V(`same => n,Record(${env.asteriskRecordingsDir}/@{TP_VM}.wav,3,120,k)`));
+    L.push(V(`same => n,Record(${require('./asteriskHost').dirs().rec}/@{TP_VM}.wav,3,120,k)`));
     L.push('same => n,Playback(vm-goodbye)');
     L.push('same => n,Hangup()');
   } else if (d.type === 'ai') {
@@ -202,7 +202,7 @@ function buildPbxConfig({ userId, trunks, extensions, ivrs = [], queues = [], ro
   E.push('same => n(go),NoOp(Saldo ok)');
   if (settings.recordOutbound !== 'false') {
     E.push(V(`same => n,Set(TP_REC=${tag}-@{UNIQUEID})`));
-    E.push(V(`same => n,MixMonitor(${env.asteriskRecordingsDir}/@{TP_REC}.wav,b)`));
+    E.push(V(`same => n,MixMonitor(${require('./asteriskHost').dirs().rec}/@{TP_REC}.wav,b)`));
   }
   E.push(`same => n,Goto(turbo-out-${tag},\${EXTEN},1)`);
   E.push('same => n(blocked),NoOp(Sem saldo pré-pago)');
@@ -267,7 +267,7 @@ function buildPbxConfig({ userId, trunks, extensions, ivrs = [], queues = [], ro
     E.push('same => n,Answer()');
     if (r.record !== false && settings.recordInbound !== 'false') {
       E.push(V(`same => n,Set(TP_REC=${tag}-@{UNIQUEID})`));
-      E.push(V(`same => n,MixMonitor(${env.asteriskRecordingsDir}/@{TP_REC}.wav,b)`));
+      E.push(V(`same => n,MixMonitor(${require('./asteriskHost').dirs().rec}/@{TP_REC}.wav,b)`));
     }
     E.push(...destLines(r.dest, c));
     E.push('');
@@ -336,7 +336,7 @@ function buildPbxConfig({ userId, trunks, extensions, ivrs = [], queues = [], ro
     if (!members.length) warnings.push(`A fila "${q.name}" não tem atendentes.`);
     Q.push('');
     if (q.mohAudioId) {
-      M.push(`[turbo-${tag}-${core.short(q.mohAudioId)}]\nmode=files\ndirectory=${env.asteriskSoundsDir}/${tag}/moh-${q.mohAudioId}\nsort=alpha\n`);
+      M.push(`[turbo-${tag}-${core.short(q.mohAudioId)}]\nmode=files\ndirectory=${require('./asteriskHost').dirs().sounds}/${tag}/moh-${q.mohAudioId}\nsort=alpha\n`);
     }
   });
 

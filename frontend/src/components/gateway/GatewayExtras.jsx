@@ -2,6 +2,7 @@
 // Abas extras do Gateway de telecom: caixa de entrada de SMS (conversas) e saldo pré-pago.
 import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../../services/api';
+import { TopupBox, ExtratoBox, RegrasBox, LucroBox } from './SaldoExtras';
 
 const brl = (n) => Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 4 });
 const errText = (e) => e.response?.data?.error || e.message || 'Erro';
@@ -134,18 +135,12 @@ export function SaldoTab({ flash: flashProp }) {
               <p className="hint-text">SMS: {brl(me.rates.smsPerPartBrl)} por parte · Ligação feita: {brl(me.rates.voiceOutPerMinBrl)}/min · Ligação recebida: {brl(me.rates.voiceInPerMinBrl)}/min (cobrança a cada {me.rates.voiceIncrementSec}s). Ao zerar, os envios e as ligações são bloqueados até uma nova recarga.</p>
             </>
           ) : <p className="hint-text">Sua conta usa o serviço sem limite de saldo (pré-pago desligado).</p>}
-          <table className="gw-table">
-            <thead><tr><th>Quando</th><th>Tipo</th><th>Descrição</th><th>Valor</th><th>Saldo</th></tr></thead>
-            <tbody>
-              {me.txs.map((t) => (
-                <tr key={t.id}><td>{new Date(t.createdAt).toLocaleString('pt-BR')}</td><td>{t.type}</td><td>{t.description}</td>
-                  <td style={{ color: t.amountBrl < 0 ? '#b91c1c' : '#15803d' }}>{brl(t.amountBrl)}</td><td>{brl(t.balanceAfter)}</td></tr>
-              ))}
-              {!me.txs.length && <tr><td colSpan={5}>Sem movimentações.</td></tr>}
-            </tbody>
-          </table>
+          {(me.enabled || me.topup?.enabled) && <TopupBox me={me} flash={flash} reload={loadMe} />}
+          <ExtratoBox flash={flash} />
         </>
       )}
+      {user.isPlatformAdmin && <RegrasBox flash={flash} />}
+      {user.isPlatformAdmin && <LucroBox flash={flash} />}
       {user.isPlatformAdmin && (
         <div className="gw-form">
           <h3>Administração dos saldos (só você, administrador da plataforma)</h3>

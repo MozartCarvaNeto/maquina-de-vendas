@@ -55,8 +55,10 @@ class AudioSocketSession extends EventEmitter {
 }
 
 /** Servidor TCP (só aceita o próprio servidor, 127.0.0.1). onSession(session) é chamado após receber o UUID. */
-function createAudioSocketServer(onSession, { host = '127.0.0.1' } = {}) {
+function createAudioSocketServer(onSession, { host = '127.0.0.1', allow = null } = {}) {
   const server = net.createServer((socket) => {
+    // sem senha no protocolo: com o Asterisk em outro servidor, só aceita o IP dele
+    if (allow && !allow(socket.remoteAddress)) { socket.destroy(); return; }
     socket.setNoDelay(true);
     let buf = Buffer.alloc(0);
     let session = null;

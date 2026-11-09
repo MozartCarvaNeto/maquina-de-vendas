@@ -27,3 +27,27 @@ CREATE TABLE IF NOT EXISTS "pbx_dids" (
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS "pbx_dids_accountId_idx" ON "pbx_dids" ("accountId");
+
+-- Mensalidade dos números (cobrança no saldo, carência e suspensão)
+ALTER TABLE "pbx_dids" ADD COLUMN IF NOT EXISTS "monthlyFeeBrl" DOUBLE PRECISION;
+ALTER TABLE "pbx_dids" ADD COLUMN IF NOT EXISTS "nextBillAt" TIMESTAMP(3);
+ALTER TABLE "pbx_dids" ADD COLUMN IF NOT EXISTS "lastBilledAt" TIMESTAMP(3);
+ALTER TABLE "pbx_dids" ADD COLUMN IF NOT EXISTS "overdueSince" TIMESTAMP(3);
+ALTER TABLE "pbx_dids" ADD COLUMN IF NOT EXISTS "suspendedAt" TIMESTAMP(3);
+
+-- Recarga pelo cliente, aviso de saldo baixo e painel de lucro
+ALTER TABLE "wallets" ADD COLUMN IF NOT EXISTS "lowBalanceBrl" DOUBLE PRECISION;
+ALTER TABLE "wallets" ADD COLUMN IF NOT EXISTS "lowNotifiedAt" TIMESTAMP(3);
+ALTER TABLE "wallet_txs" ADD COLUMN IF NOT EXISTS "costBrl" DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE "wallet_txs" ADD COLUMN IF NOT EXISTS "quantity" DOUBLE PRECISION NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS "wallet_topups" (
+  "id" TEXT PRIMARY KEY,
+  "accountId" TEXT NOT NULL,
+  "amountCents" INTEGER NOT NULL,
+  "status" TEXT NOT NULL DEFAULT 'pending',
+  "asaasPaymentId" TEXT UNIQUE,
+  "invoiceUrl" TEXT,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "paidAt" TIMESTAMP(3)
+);
+CREATE INDEX IF NOT EXISTS "wallet_topups_accountId_createdAt_idx" ON "wallet_topups"("accountId","createdAt");

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../services/api';
 import PbxNumeros from '../components/pbx/PbxNumeros';
+import PbxServidor from '../components/pbx/PbxServidor';
 import './PbxCentral.css';
 
 const TABS = [
@@ -13,6 +14,7 @@ const TABS = [
   ['aovivo', '🔴 Ao vivo'],
   ['chamadas', '🎙️ Chamadas e gravações'],
   ['numeros', '📞 Números (admin)'],
+  ['servidor', '🖥️ Servidor Asterisk (admin)'],
   ['vozes', '🗣️ Vozes e fala'],
   ['instalar', '⚙️ Instalação e IA']
 ];
@@ -229,9 +231,12 @@ export default function PbxCentral() {
         <p>Central telefônica própria: URA, filas de atendimento, horário comercial, gravação das chamadas e ligações da IA — tudo rodando no seu Asterisk, sem Twilio.</p>
       </header>
       {msg && <p className="pbx-flash">{msg}</p>}
-      <div className="pbx-tabs">{TABS.filter(([k]) => isPlatform || !['vozes', 'numeros'].includes(k)).map(([k, l]) => <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{l}</button>)}</div>
+      <div className="pbx-tabs">{TABS.filter(([k]) => isPlatform || !['vozes', 'numeros', 'servidor'].includes(k)).map(([k, l]) => <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{l}</button>)}</div>
       {player && <div className="pbx-player"><audio controls autoPlay src={player.url} /> <button className="btn-secondary-small" onClick={() => setPlayer(null)}>Fechar</button></div>}
 
+      {tab === 'rotas' && !isPlatform && (data.dids || []).some((d) => d.suspended || d.overdue) && (
+        <div className="card"><p><strong>⚠️ Número {data.dids.some((d) => d.suspended) ? 'suspenso' : 'com mensalidade em atraso'}.</strong> Faça uma recarga de saldo: a mensalidade é cobrada automaticamente e o número volta sozinho.</p></div>
+      )}
       {tab === 'rotas' && (
         <div className="card">
           <h3>Rotas de entrada</h3>
@@ -259,7 +264,7 @@ export default function PbxCentral() {
               <div className="pbx-row">
                 <div><label>Tronco (deixe vazio para qualquer)</label>
                   <select value={route.trunkId} onChange={(e) => setRoute({ ...route, trunkId: e.target.value })}><option value="">Qualquer tronco</option>{data.trunks.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
-                <div><label>Número que o cliente ligou{(data.dids || []).length ? '' : ' (opcional)'}</label>{(data.dids || []).length && !isPlatform ? (<select value={route.did} onChange={(e) => setRoute({ ...route, did: e.target.value })}><option value="">Qualquer um dos meus números</option>{data.dids.map((d) => <option key={d.id} value={d.number}>{d.number}{d.label ? ` — ${d.label}` : ''}</option>)}</select>) : (<input placeholder="551140001234" value={route.did} onChange={(e) => setRoute({ ...route, did: e.target.value })} />)}</div>
+                <div><label>Número que o cliente ligou{(data.dids || []).length ? '' : ' (opcional)'}</label>{(data.dids || []).length && !isPlatform ? (<select value={route.did} onChange={(e) => setRoute({ ...route, did: e.target.value })}><option value="">Qualquer um dos meus números</option>{data.dids.map((d) => <option key={d.id} value={d.number}>{d.number}{d.label ? ` — ${d.label}` : ''}{d.suspended ? ' (SUSPENSO)' : ''}</option>)}</select>) : (<input placeholder="551140001234" value={route.did} onChange={(e) => setRoute({ ...route, did: e.target.value })} />)}</div>
               </div>
               <label>Quando estiver aberto, a ligação vai para</label>
               <DestPicker value={route.dest} onChange={(dest) => setRoute({ ...route, dest })} data={data} />
@@ -412,6 +417,7 @@ export default function PbxCentral() {
       )}
 
       {tab === 'numeros' && isPlatform && <PbxNumeros flash={flash} />}
+      {tab === 'servidor' && isPlatform && <PbxServidor flash={flash} />}
 
       {tab === 'aovivo' && (
         <div className="card">
