@@ -9,6 +9,7 @@ import './Auth.css';
 export default function ResetPassword() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token') || '';
+  const oobCode = searchParams.get('oobCode') || '';
 
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -25,14 +26,14 @@ export default function ResetPassword() {
       setError('As senhas não coincidem');
       return;
     }
-    if (!token) {
+    if (!token && !oobCode) {
       setError('Link de redefinição inválido. Solicite um novo em "Esqueci minha senha".');
       return;
     }
 
     setLoading(true);
     try {
-      await api.post('/auth/reset-password', { token, newPassword });
+      await api.post('/auth/reset-password', oobCode ? { oobCode, newPassword } : { token, newPassword });
       setSuccess(true);
       setTimeout(() => navigate('/login'), 2000);
     } catch (err) {

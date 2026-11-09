@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const prisma = require('../config/db');
 const env = require('../config/env');
+const firebaseReset = require('../services/email/firebaseResetService');
 const { sendSystemEmail, buildActionEmail } = require('../services/email/systemMailer');
 const { createFailureLimiter, minutesText } = require('../middlewares/rateLimit');
 const billingAsaas = require('../services/billing/asaasClient');
@@ -260,6 +261,17 @@ exports.forgotPassword = async (req, res, next) => {
       return res.json(genericResponse);
     }
 
+    // 1) Automático: o Firebase envia o e-mail (sem configurar SMTP).
+    if (firebaseReset.isConfigured()) {
+      try {
+        await firebaseReset.sendPasswordReset(member.email);
+        return res.json(genericResponse);
+      } catch (fbError) {
+        console.error(`⚠️ Firebase não enviou o e-mail de redefinição (${fbError.message}); usando o e-mail do sistema.`);
+      }
+    }
+
+    // 2) Alternativa: link próprio enviado pelo e-mail do sistema.
     const rawToken = crypto.randomBytes(32).toString('hex');
     const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
@@ -296,13 +308,35 @@ exports.forgotPassword = async (req, res, next) => {
 
 exports.resetPassword = async (req, res, next) => {
   try {
-    const { token, newPassword } = req.body;
+    const { token, oobCode, newPassword } = req.body;
 
-    if (!token || !newPassword) {
-      return res.status(400).json({ error: 'token e newPassword são obrigatórios' });
+    if ((!token && !oobCode) || !newPassword) {
+      return res.status(400).json({ error: 'Link e newPassword são obrigatórios' });
     }
     if (newPassword.length < 6) {
       return res.status(400).json({ error: 'A nova senha deve ter pelo menos 6 caracteres' });
+    }
+
+    // Link enviado pelo Firebase (código de uso único).
+    if (oobCode) {
+      if (!firebaseReset.isConfigured()) {
+        return res.status(400).json({ error: 'Link de redefinição inválido. Solicite um novo.' });
+      }
+      let email;
+      try {
+        email = await firebaseReset.consumeOobCode(String(oobCode));
+      } catch (e) {
+        return res.status(400).json({ error: 'Link de redefinição inválido ou expirado. Solicite um novo.' });
+      }
+      const fbMember = email ? await findMemberByEmail(email) : null;
+      if (!fbMember) {
+        return res.status(400).json({ error: 'Link de redefinição inválido ou expirado. Solicite um novo.' });
+      }
+      await prisma.member.update({
+        where: { id: fbMember.id },
+        data: { passwordHash: await bcrypt.hash(newPassword, 10), resetToken: null, resetTokenExpiresAt: null }
+      });
+      return res.json({ success: true, message: 'Senha redefinida com sucesso. Você já pode fazer login.' });
     }
 
     const hashedToken = crypto.createHash('sha256').update(token).digest('hex');

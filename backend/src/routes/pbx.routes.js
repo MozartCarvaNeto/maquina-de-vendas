@@ -57,7 +57,7 @@ router.put('/voice-engines/:provider', requirePlatformAdmin, c.saveVoiceEngine);
 router.delete('/voice-engines/:provider', requirePlatformAdmin, c.deleteVoiceEngine);
 router.post('/voices/test', requirePlatformAdmin, c.voiceTest);
 router.post('/voices/stt-test', requirePlatformAdmin, c.sttTest);
-router.get('/config', admin, c.config);
-router.post('/apply', admin, c.apply);
+router.get('/config', requirePlatformAdmin, c.config);
+router.post('/apply', requirePlatformAdmin, c.apply);
 
 module.exports = router;

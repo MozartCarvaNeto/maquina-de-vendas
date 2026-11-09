@@ -6,6 +6,8 @@ const router = express.Router();
 const whatsappController = require('../controllers/whatsappController');
 const auth = require('../middlewares/auth');
 const { requireFeature } = require('../services/featureService');
+const requireRole = require('../middlewares/requireRole');
+const manager = requireRole(['owner', 'admin']);
 
 const chatMediaService = require('../services/whatsapp/chatMediaService');
 
@@ -29,10 +31,10 @@ function handleChatUpload(req, res, next) {
 router.use(auth);
 
 router.get('/connections', requireFeature('conexoes'), whatsappController.listConnections);
-router.post('/connections', requireFeature('conexoes'), whatsappController.createConnection);
+router.post('/connections', manager, requireFeature('conexoes'), whatsappController.createConnection);
 router.get('/connections/:id/status', requireFeature('conexoes'), whatsappController.checkStatus);
-router.post('/connections/:id/reconnect', requireFeature('conexoes'), whatsappController.reconnectConnection);
-router.delete('/connections/:id', requireFeature('conexoes'), whatsappController.deleteConnection);
+router.post('/connections/:id/reconnect', manager, requireFeature('conexoes'), whatsappController.reconnectConnection);
+router.delete('/connections/:id', manager, requireFeature('conexoes'), whatsappController.deleteConnection);
 
 router.get('/conversations', requireFeature('chat'), whatsappController.listConversations);
 router.get('/conversations/:leadId', requireFeature('chat'), whatsappController.listConversation);
