@@ -17,5 +17,6 @@ router.post('/login', authController.login);
 router.post('/forgot-password', limitForgotByIp, limitForgotByEmail, authController.forgotPassword);
 router.post('/reset-password', limitReset, authController.resetPassword);
 router.get('/me', auth, authController.me);
+router.post('/accept-terms', auth, authController.acceptTerms);
 
 module.exports = router;

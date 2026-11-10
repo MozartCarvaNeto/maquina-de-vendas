@@ -2,6 +2,8 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import Legal from './pages/Legal';
+import Bloqueios from './pages/Bloqueios';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import Layout from './components/layout/Layout';
@@ -39,6 +41,8 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/registrar" element={<Register />} />
+        <Route path="/termos" element={<Legal kind="terms" />} />
+        <Route path="/privacidade" element={<Legal kind="privacy" />} />
         <Route path="/esqueci-senha" element={<ForgotPassword />} />
         <Route path="/redefinir-senha" element={<ResetPassword />} />
         {/* Fora do Layout: clientes com assinatura vencida só enxergam esta tela. */}
@@ -69,6 +73,7 @@ export default function App() {
           <Route path="robo-ligacoes" element={<FeatureRoute feature={['robo', 'discador', 'agente_ia']}><Ligacoes /></FeatureRoute>} />
           <Route path="linhas" element={<FeatureRoute feature={['discador', 'robo', 'agente_ia']}><Linhas /></FeatureRoute>} />
           <Route path="equipe" element={<Equipe />} />
+          <Route path="bloqueios" element={<Bloqueios />} />
           <Route path="contatos" element={<FeatureRoute feature="contatos"><Contatos /></FeatureRoute>} />
           <Route path="configuracoes" element={<Configuracoes />} />
           <Route

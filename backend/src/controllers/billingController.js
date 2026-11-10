@@ -19,6 +19,10 @@ function serializePlan(plan) {
     maxWhatsappConnections: plan.maxWhatsappConnections,
     maxMembers: plan.maxMembers,
     maxMonthlyMessages: plan.maxMonthlyMessages,
+    maxMonthlySms: plan.maxMonthlySms,
+    maxMonthlyVoiceMinutes: plan.maxMonthlyVoiceMinutes,
+    maxDids: plan.maxDids,
+    maxAiAgents: plan.maxAiAgents,
     // null = todas as funcionalidades; senão, lista de módulos incluídos.
     features: planFeatureList(plan)
   };

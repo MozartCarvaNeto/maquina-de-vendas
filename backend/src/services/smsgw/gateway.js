@@ -193,7 +193,15 @@ async function enqueue(p) {
   if (p.callbackUrl) callbackUrl = await smsWebhook.validateUrl(p.callbackUrl);
   // Cobra antes de enfileirar (sem saldo → erro 402). Se algo falhar depois, estorna.
   const total = price * parts;
+  if (await require('../optOutService').isBlocked(p.userId, to, 'sms')) {
+    const e = new Error(`O número ${to} está na lista de bloqueio (pediu para não receber mensagens).`);
+    e.status = 422;
+    e.optedOut = true;
+    throw e;
+  }
+  await require('../telecomLimitService').assertSms(p.userId, parts);
   await wallet.charge(p.userId, total, { type: 'sms', description: `SMS para ${to}${sendAt ? ' (agendado)' : ''}`, quantity: parts });
+  await require('../telecomLimitService').recordSms(p.userId, parts);
   try {
     return await prisma.smsMessage.create({
       data: {
@@ -427,6 +435,7 @@ async function handleMo(carrier, mo) {
       return variants.some((x) => v === x || v.endsWith(x) || x.endsWith(v));
     }).map((l) => l.id);
     if (ids.length) await prisma.lead.updateMany({ where: { id: { in: ids } }, data: { optOut: true } });
+    await require('../optOutService').addQuiet(carrier.userId, mo.from, { channel: 'all', source: 'sms_reply', reason: `Respondeu "${word}" por SMS` });
   }
 }
 

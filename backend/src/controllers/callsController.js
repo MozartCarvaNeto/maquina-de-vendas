@@ -168,7 +168,7 @@ exports.clickToCall = async (req, res, next) => {
     if (!lead) {
       return res.status(404).json({ error: 'Lead não encontrado' });
     }
-    if (lead.optOut) {
+    if (lead.optOut || (lead.phone && (await require('../services/optOutService').isBlocked(req.userId, lead.phone, 'voice')))) {
       return res.status(400).json({ error: 'Este lead solicitou opt-out' });
     }
     if (!lead.phone) {

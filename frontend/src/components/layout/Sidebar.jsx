@@ -25,6 +25,7 @@ const MENU_ITEMS = [
   { path: '/linhas', label: '🔀 Linhas', feature: ['discador', 'robo', 'agente_ia'], adminOnly: true },
   { path: '/equipe', label: '🧑‍🤝‍🧑 Equipe', adminOnly: true },
   { path: '/contatos', label: '👥 Contatos', feature: ['contatos'], adminOnly: false },
+  { path: '/bloqueios', label: '🚫 Lista de bloqueio', adminOnly: false },
   { path: '/configuracoes', label: '⚙️ Configurações', adminOnly: true },
   { path: '/assinatura', label: '💳 Minha assinatura', adminOnly: true, hideForPlatformAdmin: true },
   { path: '/admin', label: '🛡️ Administração', platformAdminOnly: true }

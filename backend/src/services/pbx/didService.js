@@ -46,6 +46,10 @@ async function assign(didId, accountId) {
   if (!did) throw Object.assign(new Error('Número não encontrado.'), { status: 404 });
   const acc = await prisma.account.findUnique({ where: { id: accountId }, select: { id: true } });
   if (!acc) throw Object.assign(new Error('Cliente não encontrado.'), { status: 404 });
+  if (did.accountId !== accountId) {
+    const lim = await require('../telecomLimitService').checkDids(accountId, 1);
+    if (!lim.ok) throw Object.assign(new Error(lim.message), { status: 409 });
+  }
   if (did.accountId && did.accountId !== accountId) await syncCallerNumber(did.accountId, did.number, false);
   const now = new Date();
   const moved = did.accountId !== accountId;

@@ -55,10 +55,14 @@ async function refund(userId, amount, description, refId) {
 
 /** Quanto tempo de ligação o saldo aguenta. maxSeconds = null → sem limite. */
 async function voiceAllowance(userId) {
+  // limite de minutos do plano (por mês)
+  const planLeft = await require('./telecomLimitService').voiceSecondsLeft(userId).catch(() => null);
+  if (planLeft !== null && planLeft < 6) return { allowed: false, maxSeconds: 0, planLimit: true };
   const w = await isActive(userId);
-  if (!w || !(w.voiceOutPerMinBrl > 0)) return { allowed: true, maxSeconds: null };
+  if (!w || !(w.voiceOutPerMinBrl > 0)) return { allowed: true, maxSeconds: planLeft };
   if (w.balanceBrl <= 0) return { allowed: false, maxSeconds: 0 };
-  const maxSeconds = Math.floor((w.balanceBrl / w.voiceOutPerMinBrl) * 60);
+  let maxSeconds = Math.floor((w.balanceBrl / w.voiceOutPerMinBrl) * 60);
+  if (planLeft !== null) maxSeconds = Math.min(maxSeconds, planLeft);
   return { allowed: maxSeconds >= 6, maxSeconds };
 }
 
@@ -70,6 +74,7 @@ function voiceCost(ratePerMin, seconds, incrementSec = 60) {
 
 /** Cobra uma ligação encerrada (uma vez só: quem chama confere se já cobrou). Devolve o valor cobrado. */
 async function chargeCall(userId, { direction, seconds, refId, description }) {
+  await require('./telecomLimitService').recordVoice(userId, seconds);
   const w = await isActive(userId);
   if (!w) return 0;
   const rate = direction === 'entrada' ? w.voiceInPerMinBrl : w.voiceOutPerMinBrl;

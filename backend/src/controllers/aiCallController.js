@@ -288,6 +288,7 @@ exports.getAgent = async (req, res, next) => {
 exports.createAgent = async (req, res, next) => {
   try {
     const data = await sanitizeAgentBody(req.body || {}, req.userId);
+    await require('../services/telecomLimitService').assertAiAgent(req.userId);
     const agent = await prisma.aiVoiceAgent.create({ data: { ...data, userId: req.userId } });
     res.status(201).json({ agent });
   } catch (error) {

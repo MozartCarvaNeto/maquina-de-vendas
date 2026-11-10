@@ -95,6 +95,8 @@ app.get('/api/health', (req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/account', require('./routes/account.routes'));
+app.use('/api/legal', require('./routes/legal.routes'));
 app.use('/api/billing', billingRoutes);
 // Públicas (sem login): configurações da tela de entrada e aviso de pagamento do Asaas.
 app.get('/api/public/config', billingController.publicConfig);

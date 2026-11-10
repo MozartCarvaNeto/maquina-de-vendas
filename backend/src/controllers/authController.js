@@ -60,11 +60,15 @@ function serializeAccess(access) {
 
 exports.register = async (req, res, next) => {
   try {
-    const { name, email, password, companyName } = req.body;
+    const { name, email, password, companyName, acceptTerms } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'Nome, e-mail e senha são obrigatórios' });
     }
+    if (acceptTerms !== true) {
+      return res.status(400).json({ error: 'Para criar a conta é preciso aceitar os Termos de Uso e a Política de Privacidade.', code: 'TERMS_REQUIRED' });
+    }
+    const legal = await require('../services/legalService').load();
     if (password.length < 6) {
       return res.status(400).json({ error: 'A senha deve ter pelo menos 6 caracteres' });
     }
@@ -106,6 +110,9 @@ exports.register = async (req, res, next) => {
     const account = await prisma.account.create({
       data: {
         name: companyName || name,
+        termsAcceptedAt: new Date(),
+        termsVersion: legal.version,
+        termsAcceptedIp: String(req.ip || '').slice(0, 60),
         ...accessData,
         members: {
           create: { name, email, passwordHash, role: 'owner', status: 'ativo' }
@@ -232,10 +239,23 @@ exports.me = async (req, res, next) => {
     if (!member) {
       return res.status(404).json({ error: 'Usuário não encontrado' });
     }
+    const legal = await require('../services/legalService').load();
+    const isAdmin = isPlatformAdminEmail(member.email);
     res.json({
       user: serializeMember(member, member.account.name),
-      access: serializeAccess(checkMemberAccess(member, member.account))
+      access: serializeAccess(checkMemberAccess(member, member.account)),
+      terms: { version: legal.version, acceptedVersion: member.account.termsVersion || null, needsAccept: !isAdmin && member.account.termsVersion !== legal.version }
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.acceptTerms = async (req, res, next) => {
+  try {
+    const legal = await require('../services/legalService').load();
+    await prisma.account.update({ where: { id: req.userId }, data: { termsAcceptedAt: new Date(), termsVersion: legal.version, termsAcceptedIp: String(req.ip || '').slice(0, 60) } });
+    res.json({ success: true, version: legal.version });
   } catch (error) {
     next(error);
   }

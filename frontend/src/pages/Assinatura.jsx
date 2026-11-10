@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import FiscalReceipts from '../components/account/FiscalReceipts';
 import './Assinatura.css';
 
 const CYCLE_LABEL = { 1: 'mês', 3: 'trimestre', 6: 'semestre', 12: 'ano' };
@@ -46,6 +47,8 @@ export default function Assinatura() {
   const [waiting, setWaiting] = useState(false);
   const [paidMessage, setPaidMessage] = useState('');
   const baselinePayments = useRef(0);
+  const [tel, setTel] = useState(null);
+  useEffect(() => { if (token) api.get('/account/plan-usage').then((r) => setTel(r.data)).catch(() => {}); }, [token]);
 
   const load = useCallback(async () => {
     const [s, p] = await Promise.all([api.get('/billing/status'), api.get('/billing/plans')]);
@@ -168,6 +171,14 @@ export default function Assinatura() {
             <UsageBar label="Conexões de WhatsApp" used={usage.connections} limit={limits?.maxWhatsappConnections ?? null} />
             <UsageBar label="Usuários" used={usage.members} limit={limits?.maxMembers ?? null} />
             <UsageBar label={`Mensagens de disparos em ${usage.period}`} used={usage.messages} limit={limits?.maxMonthlyMessages ?? null} />
+            {tel && (
+              <>
+                <UsageBar label="SMS no mês" used={tel.usage.sms} limit={tel.limits?.maxMonthlySms ?? null} />
+                <UsageBar label="Minutos de ligação no mês" used={tel.usage.voiceMinutes} limit={tel.limits?.maxMonthlyVoiceMinutes ?? null} />
+                <UsageBar label="Números de telefone" used={tel.usage.dids} limit={tel.limits?.maxDids ?? null} />
+                <UsageBar label="Agentes de IA de voz" used={tel.usage.aiAgents} limit={tel.limits?.maxAiAgents ?? null} />
+              </>
+            )}
           </section>
         )}
 
@@ -202,6 +213,10 @@ export default function Assinatura() {
                     <li>📱 {p.maxWhatsappConnections ?? 'Até 10'} conexão(ões) de WhatsApp</li>
                     <li>👥 {p.maxMembers ?? 'Ilimitados'} usuário(s)</li>
                     <li>📣 {p.maxMonthlyMessages !== null ? `${p.maxMonthlyMessages.toLocaleString('pt-BR')} mensagens/mês` : 'Mensagens ilimitadas'}</li>
+                    {p.maxMonthlySms != null && <li>✉️ {p.maxMonthlySms.toLocaleString('pt-BR')} SMS/mês</li>}
+                    {p.maxMonthlyVoiceMinutes != null && <li>☎️ {p.maxMonthlyVoiceMinutes.toLocaleString('pt-BR')} min de ligação/mês</li>}
+                    {p.maxDids != null && <li>🔢 {p.maxDids} número(s) de telefone</li>}
+                    {p.maxAiAgents != null && <li>🤖 {p.maxAiAgents} agente(s) de IA</li>}
                   </ul>
                   <button className="btn-primary" onClick={() => { setChosen(p); setError(''); }}>
                     {plan?.id === p.id ? (account.allowed ? 'Renovar este plano' : 'Pagar este plano') : 'Escolher'}
@@ -211,6 +226,8 @@ export default function Assinatura() {
             </div>
           </section>
         )}
+
+        {account.allowed && status.canManage && <FiscalReceipts />}
 
         {status.billingEnabled && !status.canManage && (
           <div className="sub-note">Só o proprietário ou administrador da conta pode contratar ou renovar o plano.</div>

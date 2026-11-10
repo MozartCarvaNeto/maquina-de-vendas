@@ -12,6 +12,7 @@ export default function Register() {
   const [companyName, setCompanyName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [acceptTerms, setAcceptTerms] = useState(false);
   const [error, setError] = useState('');
   const [pendingMessage, setPendingMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -23,7 +24,7 @@ export default function Register() {
     setError('');
     setLoading(true);
     try {
-      const { data } = await api.post('/auth/register', { name, companyName, email, password });
+      const { data } = await api.post('/auth/register', { name, companyName, email, password, acceptTerms });
       // Cadastro aguardando aprovação do administrador: não há login ainda.
       if (data.pending) {
         setPendingMessage(data.message);
@@ -93,7 +94,12 @@ export default function Register() {
             required
           />
 
-          <button className="btn-primary" type="submit" disabled={loading}>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, margin: '8px 0' }}>
+            <input type="checkbox" checked={acceptTerms} onChange={(e) => setAcceptTerms(e.target.checked)} required style={{ width: 'auto', marginTop: 3 }} />
+            <span>Li e concordo com os <Link to="/termos" target="_blank">Termos de Uso</Link> e a <Link to="/privacidade" target="_blank">Política de Privacidade</Link>.</span>
+          </label>
+
+          <button className="btn-primary" type="submit" disabled={loading || !acceptTerms}>
             {loading ? 'Criando...' : 'Criar conta'}
           </button>
         </form>

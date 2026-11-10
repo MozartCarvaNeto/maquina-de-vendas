@@ -841,6 +841,7 @@ async function applyOutcomeEffects(sessionId) {
   try {
     if (outcome === 'optout') {
       await prisma.lead.update({ where: { id: lead.id }, data: { optOut: true } });
+      if (lead.phone) await require('../../optOutService').addQuiet(lead.userId, lead.phone, { channel: 'all', source: 'ia', reason: 'Pediu para não receber ligações (IA)' });
       effects.remark = 'Contato marcado para não receber mais ligações.';
       const lost = await markLeadLost({ userId: lead.userId, lead, reason: 'Pediu para não receber ligações (IA)', note });
       if (lost) effects.lostColumn = lost.name;
@@ -1291,8 +1292,9 @@ async function executeAiCampaign(campaignId) {
           }
 
           const lead = queue.shift();
-          const current = await prisma.lead.findUnique({ where: { id: lead.id }, select: { optOut: true, status: true } });
+          const current = await prisma.lead.findUnique({ where: { id: lead.id }, select: { optOut: true, status: true, phone: true } });
           if (!current || current.optOut || current.status === 'perdido') continue;
+          if (current.phone && (await require('../../optOutService').isBlocked(campaign.userId, current.phone, 'voice'))) continue;
 
           try {
             await heartbeat(campaignId, `Ligando para ${lead.name}${lead.attempt > 1 ? ` (tentativa ${lead.attempt} de ${maxAttempts})` : ''}…`);

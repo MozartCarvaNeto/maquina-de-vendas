@@ -61,6 +61,10 @@ function PlanForm({ plan, catalog, onClose, onSaved }) {
     maxWhatsappConnections: plan?.maxWhatsappConnections ?? '',
     maxMembers: plan?.maxMembers ?? '',
     maxMonthlyMessages: plan?.maxMonthlyMessages ?? '',
+    maxMonthlySms: plan?.maxMonthlySms ?? '',
+    maxMonthlyVoiceMinutes: plan?.maxMonthlyVoiceMinutes ?? '',
+    maxDids: plan?.maxDids ?? '',
+    maxAiAgents: plan?.maxAiAgents ?? '',
     isPublic: plan ? plan.isPublic : true,
     isActive: plan ? plan.isActive : true,
     sortOrder: plan?.sortOrder ?? 0
@@ -116,6 +120,10 @@ function PlanForm({ plan, catalog, onClose, onSaved }) {
         maxWhatsappConnections: form.maxWhatsappConnections,
         maxMembers: form.maxMembers,
         maxMonthlyMessages: form.maxMonthlyMessages,
+        maxMonthlySms: form.maxMonthlySms,
+        maxMonthlyVoiceMinutes: form.maxMonthlyVoiceMinutes,
+        maxDids: form.maxDids,
+        maxAiAgents: form.maxAiAgents,
         isPublic: form.isPublic,
         isActive: form.isActive,
         sortOrder: Number(form.sortOrder) || 0
@@ -203,6 +211,22 @@ function PlanForm({ plan, catalog, onClose, onSaved }) {
             <div>
               <label className="adm-label">Mensagens de disparo por mês</label>
               <input type="number" min="0" placeholder="vazio = ilimitado" value={form.maxMonthlyMessages} onChange={set('maxMonthlyMessages')} />
+            </div>
+            <div>
+              <label className="adm-label">SMS por mês</label>
+              <input type="number" min="0" placeholder="vazio = ilimitado" value={form.maxMonthlySms} onChange={set('maxMonthlySms')} />
+            </div>
+            <div>
+              <label className="adm-label">Minutos de ligação por mês</label>
+              <input type="number" min="0" placeholder="vazio = ilimitado" value={form.maxMonthlyVoiceMinutes} onChange={set('maxMonthlyVoiceMinutes')} />
+            </div>
+            <div>
+              <label className="adm-label">Números de telefone</label>
+              <input type="number" min="0" placeholder="vazio = ilimitado" value={form.maxDids} onChange={set('maxDids')} />
+            </div>
+            <div>
+              <label className="adm-label">Agentes de IA de voz</label>
+              <input type="number" min="0" placeholder="vazio = ilimitado" value={form.maxAiAgents} onChange={set('maxAiAgents')} />
             </div>
             <div>
               <label className="adm-label">Ordem na vitrine</label>
@@ -299,7 +323,7 @@ export default function PlansPanel() {
                 <td data-label="Módulos"><FeatureChips features={p.features} catalog={catalog} /></td>
                 <td data-label="WhatsApps">{p.maxWhatsappConnections ?? 'até 10'}</td>
                 <td data-label="Usuários">{p.maxMembers ?? '∞'}</td>
-                <td data-label="Msgs/mês">{p.maxMonthlyMessages !== null ? p.maxMonthlyMessages.toLocaleString('pt-BR') : '∞'}</td>
+                <td data-label="Msgs/mês">{p.maxMonthlyMessages !== null ? p.maxMonthlyMessages.toLocaleString('pt-BR') : '∞'}<div className="adm-muted">SMS {p.maxMonthlySms ?? '∞'} · min {p.maxMonthlyVoiceMinutes ?? '∞'} · nºs {p.maxDids ?? '∞'} · IA {p.maxAiAgents ?? '∞'}</div></td>
                 <td data-label="Clientes">{p._count?.accounts ?? 0}</td>
                 <td data-label="Situação">
                   <span className={`adm-badge ${p.isActive ? 'adm-ativa' : 'adm-bloqueada'}`}>{p.isActive ? 'Ativo' : 'Inativo'}</span>

@@ -6,6 +6,7 @@ import Brand from '../brand/Brand';
 import NavButtons from './NavButtons';
 import SubscriptionBanner from './SubscriptionBanner';
 import LowBalanceBanner from './LowBalanceBanner';
+import TermsGate from './TermsGate';
 import './Layout.css';
 
 export default function Layout() {
@@ -35,6 +36,7 @@ export default function Layout() {
       <main className="app-main-content">
         <SubscriptionBanner onUserRefreshed={() => setUserVersion((v) => v + 1)} />
         <LowBalanceBanner />
+        <TermsGate />
         <div className="desktop-nav">
           <NavButtons />
         </div>

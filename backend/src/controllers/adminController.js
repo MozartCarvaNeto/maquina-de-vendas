@@ -449,7 +449,7 @@ exports.resetOwnerPassword = async (req, res, next) => {
 // PLANOS e COBRANÇA
 // ===========================================================================
 
-const LIMIT_FIELDS = ['maxWhatsappConnections', 'maxMembers', 'maxMonthlyMessages'];
+const LIMIT_FIELDS = ['maxWhatsappConnections', 'maxMembers', 'maxMonthlyMessages', 'maxMonthlySms', 'maxMonthlyVoiceMinutes', 'maxDids', 'maxAiAgents'];
 const VALID_CYCLES = [1, 3, 6, 12];
 
 function parsePlanBody(body, { partial }) {

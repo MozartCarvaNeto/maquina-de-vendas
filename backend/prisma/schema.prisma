@@ -39,6 +39,16 @@ model Account {
   billingCustomerId     String?          // id do cliente no provedor de cobrança
   billingSubscriptionId String?          // id da assinatura recorrente no provedor
   billingPayments       BillingPayment[]
+  // ---- Aceite dos termos (LGPD) e dados fiscais ----
+  termsAcceptedAt       DateTime?
+  termsVersion          String?
+  termsAcceptedIp       String?
+  legalName             String?          // razão social / nome completo
+  taxId                 String?          // CPF ou CNPJ (só dígitos)
+  fiscalEmail           String?
+  fiscalAddress         String?
+  onboardingDismissed   Boolean          @default(false)
+  optOuts               OptOut[]
   usageCounters         UsageCounter[]
 
   members            Member[]
@@ -75,6 +85,10 @@ model Plan {
   maxWhatsappConnections Int?
   maxMembers             Int?
   maxMonthlyMessages     Int?     // mensagens de disparos por mês
+  maxMonthlySms          Int?     // SMS (partes) por mês pelo gateway
+  maxMonthlyVoiceMinutes Int?     // minutos de voz (entrada + saída, ligações e IA) por mês
+  maxDids                Int?     // números de telefone (DIDs) ao mesmo tempo
+  maxAiAgents            Int?     // agentes de IA de voz
   features               Json?    // módulos liberados (lista de chaves). null = TODOS (plano completo)
   isActive               Boolean  @default(true)
   isPublic               Boolean  @default(true) // aparece para o cliente escolher
@@ -98,6 +112,8 @@ model BillingPayment {
   paidAt      DateTime?
   appliedAt   DateTime?
   invoiceUrl  String?
+  nfseNumber  String?   // número da nota fiscal emitida (preenchido pelo administrador)
+  nfseUrl     String?   // link do PDF/prefeitura da nota
   createdAt   DateTime  @default(now())
 
   @@index([accountId, createdAt])
@@ -1209,6 +1225,8 @@ model WalletTopup {
   status         String    @default("pending") // pending | paid | cancelled
   asaasPaymentId String?   @unique
   invoiceUrl     String?
+  nfseNumber     String?
+  nfseUrl        String?
   createdAt      DateTime  @default(now())
   paidAt         DateTime?
 
@@ -1234,4 +1252,21 @@ model PbxDid {
 
   @@index([accountId])
   @@map("pbx_dids")
+}
+
+
+// Números que NÃO devem receber SMS, ligações ou disparos (pedido do titular, LGPD).
+model OptOut {
+  id        String   @id @default(uuid())
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  phone     String   // só dígitos, com 55 na frente
+  channel   String   @default("all") // all | sms | voice | whatsapp
+  source    String   @default("manual") // manual | sms_reply | robo | ia | lead | import | api
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@unique([accountId, phone, channel])
+  @@index([accountId, phone])
+  @@map("opt_outs")
 }

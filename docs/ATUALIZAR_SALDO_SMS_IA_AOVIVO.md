@@ -149,3 +149,25 @@ Tudo abaixo é feito **só pelo administrador** (conta em `SUPERADMIN_EMAILS`), 
 ### Limites
 - Nada foi testado com o Asaas de verdade (sandbox/produção): teste primeiro no sandbox com uma recarga pequena.
 - O custo das ligações é uma estimativa pela tarifa que você informa, não a fatura real da operadora.
+
+---
+
+## Atualização: termos, limites de telefonia, lista de bloqueio, financeiro e notas
+
+### O que mudou
+1. **Termos de Uso e Privacidade (LGPD):** páginas públicas `/termos` e `/privacidade`; o cadastro exige marcar o aceite; contas antigas veem uma janela pedindo o aceite no próximo acesso. O texto é um **modelo**: leve a um advogado e edite em **Administração → Termos e privacidade** (salvar muda a versão e todos aceitam de novo). Opcional no `.env`: `LEGAL_COMPANY_NAME`, `LEGAL_COMPANY_TAX_ID`, `LEGAL_CONTACT_EMAIL`.
+2. **Limites de telefonia por plano:** no editor de planos (Administração → Planos) há 4 campos novos: SMS por mês, minutos de ligação por mês, números de telefone e agentes de IA. Vazio = ilimitado. O SMS e a ligação param ao estourar o limite do mês; número e agente de IA não passam do limite. O cliente vê o uso em **Minha assinatura**.
+3. **Lista de bloqueio:** menu **🚫 Lista de bloqueio**. Quem responde SAIR/PARAR/STOP a um SMS, ou pede para sair no robô ou na IA, entra sozinho. SMS, ligações (manual, discador, robô, IA) e disparos pulam esses números.
+4. **Primeiro acesso:** cartão "Comece por aqui" no Dashboard do dono/admin, só com os passos dos módulos do plano.
+5. **Financeiro (Administração → 📈 Financeiro):** receita recorrente (MRR), clientes pagantes, em teste, inadimplentes, cancelamentos dos últimos 30 dias, receita por mês e por plano.
+6. **Recibos e notas:** em **Minha assinatura** o cliente preenche razão social, CPF/CNPJ e endereço e vê/imprime recibos. No Financeiro você baixa a planilha do mês para o contador, emite as notas no sistema da prefeitura e registra aqui o número e o link; o cliente vê no recibo. **O sistema não emite a nota sozinho.**
+
+### Como atualizar
+1. Rode no Supabase o arquivo `docs/atualizar_banco_pbx_avancado.sql` (os comandos novos estão no fim; pode rodar de novo sem problema).
+2. No servidor: `bash deploy/atualizar-servidor.sh --banco`.
+
+### Cuidados
+- Cadastros novos só entram marcando o aceite; teste com um e-mail novo.
+- Quem já usa o sistema vê a janela dos termos uma vez. Só dono/admin consegue aceitar.
+- Limites contam por mês (horário de Brasília). Os minutos contam as ligações encerradas.
+- O CPF/CNPJ é validado pelos dígitos. Se o cliente digitar errado, o sistema avisa.

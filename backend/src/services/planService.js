@@ -29,7 +29,11 @@ async function getAccountLimits(accountId) {
     planName: plan?.name || account.plan || null,
     maxWhatsappConnections: plan?.maxWhatsappConnections ?? null,
     maxMembers: plan?.maxMembers ?? null,
-    maxMonthlyMessages: plan?.maxMonthlyMessages ?? null
+    maxMonthlyMessages: plan?.maxMonthlyMessages ?? null,
+    maxMonthlySms: plan?.maxMonthlySms ?? null,
+    maxMonthlyVoiceMinutes: plan?.maxMonthlyVoiceMinutes ?? null,
+    maxDids: plan?.maxDids ?? null,
+    maxAiAgents: plan?.maxAiAgents ?? null
   };
 }
 

@@ -350,8 +350,9 @@ async function executeRoboCampaign(campaignId) {
         if (!fresh || fresh.status !== 'discando') return;
 
         const lead = queue.shift();
-        const current = await prisma.lead.findUnique({ where: { id: lead.id }, select: { optOut: true } });
+        const current = await prisma.lead.findUnique({ where: { id: lead.id }, select: { optOut: true, phone: true } });
         if (!current || current.optOut) continue;
+        if (current.phone && (await require('./optOutService').isBlocked(campaign.userId, current.phone, 'voice'))) continue;
 
         try {
           await heartbeat(campaignId, `Ligando para ${lead.name}…`);
@@ -436,6 +437,8 @@ async function registerResponse(call, { digits, speech, confidence, raw }) {
 
     if (optOut) {
       await prisma.lead.update({ where: { id: call.leadId }, data: { optOut: true } });
+      const ol = await prisma.lead.findUnique({ where: { id: call.leadId }, select: { phone: true } }).catch(() => null);
+      if (ol?.phone) await require('./optOutService').addQuiet(call.userId, ol.phone, { channel: 'all', source: 'robo', reason: 'Pediu para não receber ligações (robô)' });
     }
 
     // Recusou ("sem interesse"): vai para "Perdidos" no CRM e não é chamado de novo.

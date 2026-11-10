@@ -4,6 +4,7 @@ import api from '../services/api';
 import FollowUpPanel from '../components/crm/FollowUpPanel';
 import useCurrentUser from '../hooks/useCurrentUser';
 import { userHasFeature } from '../utils/features';
+import OnboardingCard from '../components/account/OnboardingCard';
 import './Dashboard.css';
 
 export default function Dashboard() {
@@ -47,6 +48,8 @@ export default function Dashboard() {
         <h1>Visão Geral</h1>
         <p>Acompanhe suas métricas de qualificação e vendas.</p>
       </header>
+
+      {(user.role === 'owner' || user.role === 'admin') && !user.isPlatformAdmin && <OnboardingCard />}
 
       {hasCrm && <FollowUpPanel />}
 

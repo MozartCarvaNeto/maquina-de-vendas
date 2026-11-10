@@ -1,0 +1,32 @@
+/* frontend/src/components/account/Account.css */
+.acc-card { background: #fff; border: 1px solid var(--gray-200, #e5e7eb); border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+.acc-card h2, .acc-card h3 { margin: 0 0 8px; }
+.acc-muted { color: var(--gray-500, #6b7280); font-size: 13px; }
+.acc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 10px 0; }
+.acc-grid label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+.acc-grid input, .acc-grid textarea, .acc-grid select, .acc-card textarea { width: 100%; box-sizing: border-box; }
+.acc-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.acc-table-wrap { overflow-x: auto; }
+.acc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.acc-table th, .acc-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--gray-200, #e5e7eb); vertical-align: top; }
+.acc-ok { color: #15803d; font-weight: 600; }
+.acc-warn { color: #b45309; font-weight: 600; }
+.acc-bad { color: #b91c1c; font-weight: 600; }
+.acc-msg { padding: 8px 12px; border-radius: 8px; background: #ecfdf5; color: #065f46; margin: 8px 0; font-size: 13px; }
+.acc-msg.is-error { background: #fef2f2; color: #991b1b; }
+.acc-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.acc-kpi { border: 1px solid var(--gray-200, #e5e7eb); border-radius: 10px; padding: 12px; background: #fff; }
+.acc-kpi span { display: block; font-size: 12px; color: var(--gray-500, #6b7280); }
+.acc-kpi strong { font-size: 22px; }
+.acc-bar { height: 8px; background: var(--gray-200, #e5e7eb); border-radius: 4px; overflow: hidden; }
+.acc-bar > div { height: 100%; background: #0b6b5d; }
+.acc-steps { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.acc-steps li { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--gray-200, #e5e7eb); border-radius: 8px; }
+.acc-steps li.is-done { opacity: .6; }
+.acc-steps li.is-done strong { text-decoration: line-through; }
+.acc-modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 16px; }
+.acc-modal { background: #fff; border-radius: 12px; padding: 20px; max-width: 560px; width: 100%; max-height: 90vh; overflow-y: auto; }
+.legal-page { max-width: 780px; margin: 0 auto; padding: 24px 16px 60px; line-height: 1.6; }
+.legal-page h1 { margin-bottom: 4px; }
+.legal-page h2 { font-size: 18px; margin: 22px 0 6px; }
+.legal-note { font-size: 12px; color: var(--gray-500, #6b7280); }

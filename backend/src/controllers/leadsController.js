@@ -413,6 +413,7 @@ exports.optOut = async (req, res, next) => {
     }
 
     await prisma.lead.update({ where: { id: lead.id }, data: { optOut: true } });
+    if (lead.phone) await require('../services/optOutService').addQuiet(req.userId, lead.phone, { channel: 'all', source: 'lead', reason: 'Marcado como opt-out' });
 
     await prisma.callQueueItem.updateMany({
       where: { leadId: lead.id, status: 'pendente' },
@@ -531,7 +532,7 @@ exports.bulkEnqueueCalls = async (req, res, next) => {
     const skippedReasons = [];
 
     for (const lead of leads) {
-      if (lead.optOut) {
+      if (lead.optOut || (lead.phone && (await require('../services/optOutService').isBlocked(req.userId, lead.phone, 'voice')))) {
         skipped += 1;
         skippedReasons.push(`${lead.name}: solicitou opt-out`);
         continue;

@@ -21,6 +21,13 @@ router.post('/accounts/:id/plan', adminController.assignPlan);
 router.post('/accounts/:id/charge', adminController.charge);
 router.post('/accounts/:id/cancel-billing', adminController.cancelBilling);
 
+const account = require('../controllers/accountController');
+router.get('/revenue', account.adminRevenue);
+router.get('/fiscal', account.adminFiscalList);
+router.put('/fiscal/:kind/:id', account.adminFiscalMark);
+router.get('/legal', account.adminLegalGet);
+router.put('/legal', account.adminLegalSave);
+
 router.post('/system-email/test', adminController.testSystemEmail);
 
 router.get('/plans', adminController.listPlans);

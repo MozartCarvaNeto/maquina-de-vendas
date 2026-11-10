@@ -591,7 +591,9 @@ async function executeBroadcast(broadcastId) {
         break;
       }
 
-      if (!lead || lead.optOut) {
+      const chan = broadcast.channel === 'sms' || broadcast.channel === 'rcs' ? 'sms' : broadcast.channel === 'whatsapp' ? 'whatsapp' : null;
+      const blockedNum = lead && lead.phone && chan ? await require('./optOutService').isBlocked(broadcast.userId, lead.phone, chan) : false;
+      if (!lead || lead.optOut || blockedNum) {
         await markRecipient(rec.id, { status: 'falhou', errorMessage: 'Contato descadastrado (não receber mensagens).' });
         failedCount += 1;
         continue;
