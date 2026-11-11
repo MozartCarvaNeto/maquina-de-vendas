@@ -281,43 +281,29 @@ exports.forgotPassword = async (req, res, next) => {
       return res.json(genericResponse);
     }
 
-    // 1) Automático: o Firebase envia o e-mail (sem configurar SMTP).
-    if (firebaseReset.isConfigured()) {
+    // 1) Link próprio, enviado pelo e-mail do sistema (SMTP do sistema, depois e-mail da conta, depois e-mail do administrador).
+    const resetSvc = require('../services/email/passwordResetService');
+    const resetUrl = await resetSvc.issueLink(member);
+    let delivery = await resetSvc.sendLink(member, resetUrl);
+
+    // 2) Se nenhum e-mail do sistema funcionou, tenta o Firebase como reserva.
+    if (!delivery.ok && firebaseReset.isConfigured()) {
       try {
         await firebaseReset.sendPasswordReset(member.email);
-        return res.json(genericResponse);
+        delivery = { ok: true, via: 'firebase' };
       } catch (fbError) {
-        console.error(`⚠️ Firebase não enviou o e-mail de redefinição (${fbError.message}); usando o e-mail do sistema.`);
+        console.error(`⚠️ Firebase também não enviou a redefinição (${fbError.message}).`);
+        delivery.error = `${delivery.error} | Firebase: ${fbError.message}`;
       }
     }
+    if (!delivery.ok) {
+      console.error(`❌ Não foi possível enviar e-mail de redefinição para ${member.email}: ${delivery.error}. Teste em Administração > E-mail do sistema.`);
+    }
 
-    // 2) Alternativa: link próprio enviado pelo e-mail do sistema.
-    const rawToken = crypto.randomBytes(32).toString('hex');
-    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
-
-    await prisma.member.update({
-      where: { id: member.id },
-      data: { resetToken: hashedToken, resetTokenExpiresAt: expiresAt }
-    });
-
-    try {
-      const resetUrl = `${env.frontendUrl}/redefinir-senha?token=${rawToken}`;
-      await sendSystemEmail({
-        to: member.email,
-        accountId: member.accountId,
-        subject: `Redefinição de senha — ${env.appName}`,
-        html: buildActionEmail({
-          greeting: `Olá, ${member.name}.`,
-          intro: 'Recebemos um pedido para criar uma nova senha. O link vale por 1 hora.',
-          buttonText: 'Criar nova senha',
-          url: resetUrl,
-          footer: 'Se você não pediu isso, ignore este e-mail: sua senha continua a mesma.'
-        })
-      });
-    } catch (emailError) {
-      // Não contamos ao visitante (seria revelar que o e-mail existe); o administrador vê no log.
-      console.error(`❌ Não foi possível enviar e-mail de redefinição para ${member.email}: ${emailError.message}. Teste em Administração > E-mail do sistema.`);
+    // Registra no histórico da conta e avisa o administrador (sem atrasar a resposta ao visitante).
+    addLog(member.accountId, 'senha_pedido', delivery.ok ? `Link enviado a ${member.email} (${delivery.via})` : `Falha ao enviar a ${member.email}: ${String(delivery.error || '').slice(0, 180)}`, member.email).catch(() => {});
+    if (!isPlatformAdminEmail(member.email)) {
+      resetSvc.notifyAdmins(member, delivery, { ip: String(req.ip || ''), url: resetUrl }).catch(() => {});
     }
 
     res.json(genericResponse);

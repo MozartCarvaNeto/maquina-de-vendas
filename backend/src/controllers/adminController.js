@@ -415,6 +415,29 @@ exports.unblock = async (req, res, next) => {
   }
 };
 
+/** Envia ao usuário o link para ELE criar a própria senha (pelo e-mail do sistema). Devolve o link para o admin copiar se o e-mail falhar. */
+exports.sendResetLink = async (req, res, next) => {
+  try {
+    const account = await loadAccount(req.params.id);
+    if (!account) return res.status(404).json({ error: 'Conta não encontrada' });
+    const target =
+      account.members.find((m) => m.id === req.body?.memberId) ||
+      account.members.find((m) => m.role === 'owner') ||
+      account.members[0];
+    if (!target) return res.status(404).json({ error: 'Nenhum usuário nesta conta' });
+    if (isPlatformAdminEmail(target.email) && target.id !== req.memberId) {
+      return res.status(400).json({ error: 'Não é possível redefinir a senha de outro administrador.' });
+    }
+    const svc = require('../services/email/passwordResetService');
+    const link = await svc.issueLink(target, 24 * 60); // enviado pelo admin: vale 24 horas
+    const delivery = await svc.sendLink(target, link, { byAdmin: true });
+    await addLog(account.id, 'senha_link', delivery.ok ? `Link enviado a ${target.email} (${delivery.via})` : `Falha ao enviar a ${target.email}`, req.member.email);
+    res.json({ ok: delivery.ok, via: delivery.via || null, error: delivery.error || null, attempts: delivery.attempts, email: target.email, link, validHours: 24 });
+  } catch (error) {
+    next(error);
+  }
+};
+
 /** Define uma senha temporária para o responsável (útil quando o cliente não recebe e-mails). */
 exports.resetOwnerPassword = async (req, res, next) => {
   try {

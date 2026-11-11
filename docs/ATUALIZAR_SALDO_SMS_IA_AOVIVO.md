@@ -178,3 +178,15 @@ Tudo abaixo é feito **só pelo administrador** (conta em `SUPERADMIN_EMAILS`), 
 - **Números automáticos respeitam o limite do plano:** se o plano permite 1 número, o sistema não entrega 2.
 - **Limite de minutos:** vale para as ligações que passam pelo seu Asterisk (as que você revende). Quem liga com a própria conta Twilio paga direto à Twilio e não conta nesse limite.
 - **Chaves das operadoras:** conferido que ficam criptografadas e a API só devolve versão mascarada.
+
+### Redefinição de senha por e-mail (corrigida)
+**O que estava errado:** quando o Firebase estava configurado, o sistema confiava nele primeiro. O Firebase responde "enviado" mesmo quando o e-mail cai no spam ou não chega, e o sistema nunca tentava o e-mail próprio. Agora a ordem é:
+1. Link próprio enviado pelo **e-mail do sistema** (SMTP do sistema → e-mail da conta do cliente → e-mail configurado na conta do administrador).
+2. Só se tudo isso falhar, o Firebase entra como reserva.
+
+**Novidades:**
+- **Aviso ao administrador:** a cada pedido de redefinição você recebe um e-mail (nos e-mails dos administradores, `SUPERADMIN_EMAILS`) dizendo quem pediu, quando, de qual IP e se o e-mail chegou ao usuário. Se o envio ao usuário falhou, o aviso já traz o link pronto para você repassar. No máximo 1 aviso a cada 10 minutos por usuário.
+- **Histórico:** em Administração → abrir a conta → Histórico aparecem "Pediu redefinição de senha" e "Link de senha enviado".
+- **Enviar link ao cliente:** em Administração → abrir a conta, botão **📧 Enviar link de redefinição por e-mail** (para o responsável) e **📧 Enviar link** ao lado de cada usuário. O link vale 24 horas. Se o e-mail falhar, o painel mostra o link para você copiar e mandar pelo WhatsApp.
+
+**Para funcionar:** configure o e-mail em Administração → E-mail do sistema (ou `SYSTEM_SMTP_HOST/PORT/USER/PASS` e `SYSTEM_MAIL_FROM` no `.env`) e use o botão de teste lá. Confira também que `FRONTEND_URL` é o endereço real (https://app.turboprospect.com.br), senão o link sai errado.

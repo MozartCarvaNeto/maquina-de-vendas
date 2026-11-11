@@ -17,6 +17,7 @@ router.post('/accounts/:id/extend', adminController.extend);
 router.post('/accounts/:id/block', adminController.block);
 router.post('/accounts/:id/unblock', adminController.unblock);
 router.post('/accounts/:id/reset-password', adminController.resetOwnerPassword);
+router.post('/accounts/:id/send-reset-link', adminController.sendResetLink);
 router.post('/accounts/:id/plan', adminController.assignPlan);
 router.post('/accounts/:id/charge', adminController.charge);
 router.post('/accounts/:id/cancel-billing', adminController.cancelBilling);

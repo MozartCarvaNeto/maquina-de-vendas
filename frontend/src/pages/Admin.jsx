@@ -31,6 +31,8 @@ const ACTION_LABEL = {
   desbloqueada: '🔓 Desbloqueada',
   editada: '✏️ Editada',
   senha_redefinida: '🔑 Senha redefinida',
+  senha_pedido: '📨 Pediu redefinição de senha',
+  senha_link: '📧 Link de senha enviado',
   pagamento: '💰 Pagamento',
   cobranca: '🧾 Cobrança',
   plano: '💼 Plano',
@@ -80,6 +82,7 @@ function AccountModal({ accountId, onClose, onChanged, onCredentials }) {
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [resetInfo, setResetInfo] = useState(null);
   const [customDays, setCustomDays] = useState('');
   const [approveDays, setApproveDays] = useState('30');
   const [blockReason, setBlockReason] = useState('');
@@ -184,6 +187,20 @@ function AccountModal({ accountId, onClose, onChanged, onCredentials }) {
   const cancelBilling = () => {
     if (!window.confirm('Cancelar a cobrança recorrente? O cliente mantém o acesso até o vencimento atual.')) return;
     return run(() => api.post(`/admin/accounts/${account.id}/cancel-billing`));
+  };
+
+  const sendResetLink = async (memberId) => {
+    setBusy(true);
+    setResetInfo(null);
+    try {
+      const { data: res } = await api.post(`/admin/accounts/${account.id}/send-reset-link`, memberId ? { memberId } : {});
+      setResetInfo(res);
+      await load();
+    } catch (e) {
+      alert(errorMessage(e, 'Erro ao gerar o link'));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const resetPassword = async () => {
@@ -384,8 +401,20 @@ function AccountModal({ accountId, onClose, onChanged, onCredentials }) {
               </div>
             )}
             <div className="adm-row">
+              <button className="btn-primary" disabled={busy} onClick={() => sendResetLink()}>📧 Enviar link de redefinição por e-mail</button>
               <button className="btn-outline" disabled={busy} onClick={resetPassword}>🔑 Gerar nova senha para o responsável</button>
             </div>
+            {resetInfo && (
+              <div className="adm-muted" style={{ marginTop: 8 }}>
+                {resetInfo.ok
+                  ? `✅ Link enviado para ${resetInfo.email} (válido por ${resetInfo.validHours} horas).`
+                  : `⚠️ Não consegui enviar o e-mail para ${resetInfo.email}: ${resetInfo.error}. Copie o link abaixo e mande pelo WhatsApp.`}
+                <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                  <input readOnly value={resetInfo.link} onFocus={(e) => e.target.select()} aria-label="Link de redefinição" />
+                  <button className="btn-outline" onClick={() => navigator.clipboard?.writeText(resetInfo.link)}>Copiar</button>
+                </div>
+              </div>
+            )}
           </section>
         )}
 
@@ -395,6 +424,7 @@ function AccountModal({ accountId, onClose, onChanged, onCredentials }) {
             {members.map((m) => (
               <li key={m.id}>
                 <strong>{m.name}</strong> — {m.email} <em>({m.role}{m.status !== 'ativo' ? ', desativado' : ''})</em>
+                {!locked && <button className="btn-outline" style={{ marginLeft: 8 }} disabled={busy} onClick={() => sendResetLink(m.id)}>📧 Enviar link</button>}
               </li>
             ))}
           </ul>
