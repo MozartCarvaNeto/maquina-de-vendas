@@ -190,3 +190,37 @@ Tudo abaixo é feito **só pelo administrador** (conta em `SUPERADMIN_EMAILS`), 
 - **Enviar link ao cliente:** em Administração → abrir a conta, botão **📧 Enviar link de redefinição por e-mail** (para o responsável) e **📧 Enviar link** ao lado de cada usuário. O link vale 24 horas. Se o e-mail falhar, o painel mostra o link para você copiar e mandar pelo WhatsApp.
 
 **Para funcionar:** configure o e-mail em Administração → E-mail do sistema (ou `SYSTEM_SMTP_HOST/PORT/USER/PASS` e `SYSTEM_MAIL_FROM` no `.env`) e use o botão de teste lá. Confira também que `FRONTEND_URL` é o endereço real (https://app.turboprospect.com.br), senão o link sai errado.
+
+### Telas do cliente mais limpas
+- Em **Configurações**, o cliente deixa de ver Telefonia (Twilio), SMS (Twilio), RCS, telefonia do discador e telefonia da IA. Em vez disso vê um aviso de que SMS e ligações já funcionam pela telefonia do plano. Quem já tinha configurado algo disso antes continua vendo, para não perder o acesso. O administrador sempre vê tudo.
+- No **PBX → Instalação e IA**, os textos que falavam do "guia de instalação" e de escolher o Asterisk em Configurações só aparecem para o administrador. O botão **Aplicar no Asterisk** continua disponível ao cliente (ele aplica só a própria central).
+- A configuração gerada do Asterisk (que traz o token interno) continua só do administrador.
+
+---
+
+## Backup automático do banco
+
+O Supabase guarda cópias próprias conforme o seu plano, mas é bom ter uma sua. O script `deploy/backup-banco.sh` faz uma cópia compactada do banco (e dos anexos enviados) no próprio servidor.
+
+### Como ligar (uma vez, no servidor)
+```
+cd ~/maquina-de-vendas
+apt-get update && apt-get install -y postgresql-client
+bash deploy/backup-banco.sh --instalar
+```
+Isso agenda um backup por dia, às 03:30, guarda 14 dias em `~/backups-maquina` e já faz o primeiro agora, para testar.
+
+### Comandos úteis
+- Backup agora: `bash deploy/backup-banco.sh`
+- Ver os guardados: `bash deploy/backup-banco.sh --listar`
+- Mudar quantos dias guardar: `BACKUP_DIAS=30 bash deploy/backup-banco.sh --instalar`
+- Cópia fora do servidor (recomendado): configure o `rclone` com seu Google Drive e rode com `BACKUP_RCLONE_REMOTE=drive:backups`. Um backup só no servidor se perde junto com ele.
+
+### Se der erro de versão
+Se aparecer "server version mismatch", o `pg_dump` do servidor é mais antigo que o banco. Instale um mais novo (`apt-get install -y postgresql-client-17` ou `-16`; pode ser preciso adicionar o repositório oficial do PostgreSQL).
+
+### Como restaurar (só em emergência)
+```
+gunzip -c ~/backups-maquina/banco_AAAA-MM-DD_HHMM.sql.gz | psql "URL_DO_BANCO_SEM_PARAMETROS"
+```
+Restaurar apaga e recria as tabelas. Faça isso num banco de teste antes, e peça ajuda para o banco de produção.

@@ -425,6 +425,9 @@ export default function Configuracoes() {
   }
 
   const telephonyConfiguredInDb = configuredSettings.some((s) => s.category === 'telephony');
+  // Telefonia própria (Twilio, discador, IA, RCS): só para o administrador da plataforma ou para quem já tinha configurado antes.
+  const isPlatformUser = (() => { try { return Boolean(JSON.parse(localStorage.getItem('mdv_user') || '{}').isPlatformAdmin); } catch { return false; } })();
+  const showOwnTelecom = isPlatformUser || configuredSettings.some((s) => ['telephony', 'ai_telephony', 'dialer_telephony', 'sms', 'rcs'].includes(s.category));
 
   return (
     <div className="config-page">
@@ -463,6 +466,7 @@ export default function Configuracoes() {
       )}
 
       <div className="config-grid">
+        {showOwnTelecom && (<>
         <div className="card">
           <h3>📞 Telefonia (Twilio)</h3>
           <p className="card-desc">Usada para o Discador e envio de SMS.</p>
@@ -656,6 +660,13 @@ export default function Configuracoes() {
             depois de trocar de operadora (Ligações → Agente de IA).
           </p>
         </div>
+        </>)}
+        {!showOwnTelecom && (
+          <div className="card">
+            <h3>📞 Telefonia, SMS e ligações</h3>
+            <p className="card-desc">Os envios de SMS e as ligações já funcionam com a telefonia do seu plano, cobrados do saldo, e não precisam de configuração aqui. Veja saldo e consumo em <strong>Gateway de telecom</strong> e peça números ao suporte.</p>
+          </div>
+        )}
 
         <div className="card">
           <h3>📧 E-mail</h3>

@@ -530,7 +530,7 @@ export default function PbxCentral() {
           <label><input type="checkbox" checked={data.settings.recordOutbound !== 'false'} onChange={(e) => saveSettings({ recordOutbound: e.target.checked })} /> Gravar chamadas feitas pelos vendedores</label>
           <p className="hint-text">Avise o cliente que a ligação pode ser gravada (exigência comum no Brasil — grave um aviso na aba Áudios e coloque no começo da URA).</p>
           <h4>Ligações da IA</h4>
-          <p className="hint-text">Para a IA ligar pelo Asterisk, escolha "Asterisk (PBX próprio)" em Configurações → Telefonia das ligações da IA. Quando a IA decidir passar para um humano, a ligação vai para esta fila (ou, sem fila, para o telefone do vendedor).</p>
+          <p className="hint-text">{isPlatform ? 'Para a IA ligar pelo Asterisk, escolha "Asterisk (PBX próprio)" em Configurações → Telefonia das ligações da IA. ' : ''}Quando a IA decidir passar para um humano, a ligação vai para esta fila (ou, sem fila, para o telefone do vendedor).</p>
           <select value={data.settings.aiHandoffQueueId || ''} onChange={(e) => saveSettings({ aiHandoffQueueId: e.target.value })}>
             <option value="">Transferir para o número do vendedor</option>
             {data.queues.map((q) => <option key={q.id} value={q.id}>Fila: {q.name}</option>)}
@@ -544,7 +544,7 @@ export default function PbxCentral() {
           <label>Saudação ao atender (opcional; use {'{agente}'} e {'{empresa}'})</label>
           <input defaultValue={data.settings.aiInboundGreeting || ''} placeholder="Olá, aqui é a {agente} da {empresa}. Como posso ajudar?" onBlur={(e) => { if (e.target.value !== (data.settings.aiInboundGreeting || '')) saveSettings({ aiInboundGreeting: e.target.value }); }} />
           <h4>Aplicar no Asterisk</h4>
-          <p className="hint-text">Depois de fazer a instalação única do guia, o botão abaixo grava os arquivos e manda o Asterisk recarregar (as chamadas em andamento não caem).</p>
+          <p className="hint-text">{isPlatform ? 'Depois de fazer a instalação única do guia, o botão abaixo grava os arquivos e manda o Asterisk recarregar (as chamadas em andamento não caem).' : 'Depois de criar ou mudar rotas, filas e áudios, clique abaixo para a central passar a usar as mudanças (as chamadas em andamento não caem).'}</p>
           <button className="btn-primary" onClick={apply}>Aplicar no Asterisk</button>
           {applyRes && (
             <div className="hint-text">
