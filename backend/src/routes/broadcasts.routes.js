@@ -6,6 +6,9 @@ const broadcastController = require('../controllers/broadcastController');
 const auth = require('../middlewares/auth');
 const { requireFeature } = require('../services/featureService');
 const chatMediaService = require('../services/whatsapp/chatMediaService');
+const requireRole = require('../middlewares/requireRole');
+// Criar, pausar e apagar disparos é do dono/administrador; o vendedor só acompanha.
+const manager = requireRole(['owner', 'admin']);
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -46,12 +49,12 @@ function handleUpload(req, res, next) {
 }
 
 router.get('/', broadcastController.list);
-router.post('/', handleUpload, broadcastController.create);
+router.post('/', manager, handleUpload, broadcastController.create);
 router.post('/preview-audience', broadcastController.previewAudience);
 router.get('/:id', broadcastController.getById);
 router.get('/:id/recipients', broadcastController.getRecipients);
 router.get('/:id/progress', broadcastController.getProgress);
-router.post('/:id/pause-resume', broadcastController.pauseResume);
-router.delete('/:id', broadcastController.remove);
+router.post('/:id/pause-resume', manager, broadcastController.pauseResume);
+router.delete('/:id', manager, broadcastController.remove);
 
 module.exports = router;

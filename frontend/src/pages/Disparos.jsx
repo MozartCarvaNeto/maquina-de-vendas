@@ -1,6 +1,7 @@
 // frontend/src/pages/Disparos.jsx
 import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import api from '../services/api';
+import useCurrentUser from '../hooks/useCurrentUser';
 import { ATTACHMENT_REGEX, BLOCKED_EXT_REGEX, ATTACHMENT_ACCEPT, formatBytes } from '../utils/attachments';
 import './Disparos.css';
 
@@ -57,6 +58,8 @@ export default function Disparos() {
   const [lists, setLists] = useState([]);
   const [connectedCount, setConnectedCount] = useState(0);
   const [emailDomains, setEmailDomains] = useState([]);
+  const currentUser = useCurrentUser();
+  const canManage = currentUser.role === 'owner' || currentUser.role === 'admin' || currentUser.isPlatformAdmin;
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const [audienceCount, setAudienceCount] = useState(null);
@@ -457,7 +460,7 @@ export default function Disparos() {
       </header>
 
       <div className="disparos-toolbar">
-        <button className="btn-primary" onClick={openCreate}>➕ Novo Disparo</button>
+        {canManage && <button className="btn-primary" onClick={openCreate}>➕ Novo Disparo</button>}
         <span className="connection-indicator">WhatsApp conectado: <strong>{connectedCount}</strong></span>
       </div>
 
@@ -507,12 +510,12 @@ export default function Disparos() {
                       </button>
                     </td>
                     <td>
-                      {(canPause || canResume) && (
+                      {canManage && (canPause || canResume) && (
                         <button className="btn-outline" onClick={() => handlePauseResume(b.id)}>
                           {canResume ? '▶ Retomar' : '⏸ Pausar'}
                         </button>
                       )}
-                      <button className="btn-danger-small" onClick={() => handleDelete(b.id)}>Excluir</button>
+                      {canManage && <button className="btn-danger-small" onClick={() => handleDelete(b.id)}>Excluir</button>}
                     </td>
                   </tr>
 

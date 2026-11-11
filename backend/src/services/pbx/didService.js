@@ -252,7 +252,11 @@ async function autoAssign(accountId) {
   if (!s.auto) return [];
   const have = await prisma.pbxDid.count({ where: { accountId } });
   if (have > 0) return [];
-  const free = await prisma.pbxDid.findMany({ where: { accountId: null }, orderBy: { createdAt: 'asc' }, take: s.count });
+  // respeita o limite de números do plano
+  const room = await require('../telecomLimitService').checkDids(accountId, 0);
+  const cap = room.limit == null ? s.count : Math.max(0, Math.min(s.count, room.limit - room.used));
+  if (cap <= 0) return [];
+  const free = await prisma.pbxDid.findMany({ where: { accountId: null }, orderBy: { createdAt: 'asc' }, take: cap });
   const got = [];
   for (const f of free) {
     // "reserva" atômica: só quem conseguir trocar null -> conta fica com o número

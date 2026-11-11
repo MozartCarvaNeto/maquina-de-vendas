@@ -171,3 +171,10 @@ Tudo abaixo é feito **só pelo administrador** (conta em `SUPERADMIN_EMAILS`), 
 - Quem já usa o sistema vê a janela dos termos uma vez. Só dono/admin consegue aceitar.
 - Limites contam por mês (horário de Brasília). Os minutos contam as ligações encerradas.
 - O CPF/CNPJ é validado pelos dígitos. Se o cliente digitar errado, o sistema avisa.
+
+### Ajustes finais (fechamento da auditoria)
+- **Disparos só para dono/administrador:** criar, pausar e apagar disparos agora exige dono ou administrador; o vendedor só acompanha (os botões somem para ele).
+- **Aviso de vencimento por e-mail:** todo dia às 9h (Brasília) o dono recebe aviso 7, 3 e 1 dia antes do vencimento, no dia e 2 dias depois (vale também para o teste grátis). Cada aviso sai uma vez por vencimento. Precisa do e-mail do sistema configurado (SYSTEM_SMTP_*).
+- **Números automáticos respeitam o limite do plano:** se o plano permite 1 número, o sistema não entrega 2.
+- **Limite de minutos:** vale para as ligações que passam pelo seu Asterisk (as que você revende). Quem liga com a própria conta Twilio paga direto à Twilio e não conta nesse limite.
+- **Chaves das operadoras:** conferido que ficam criptografadas e a API só devolve versão mascarada.

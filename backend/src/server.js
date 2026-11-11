@@ -49,6 +49,7 @@ const billingController = require('./controllers/billingController');
 const { startAccessSweepJob } = require('./jobs/accessSweepJob');
 const { startDidJobs } = require('./jobs/didJob');
 const { startWalletAlertJob } = require('./jobs/walletAlertJob');
+const { startRenewalReminderJob } = require('./jobs/renewalReminderJob');
 const { ensureAdminAccounts } = require('./services/accessService');
 
 // Rede de segurança contra crashes vindos de bibliotecas de terceiros.
@@ -166,6 +167,7 @@ server.listen(env.port, async () => {
   startAccessSweepJob();
   startDidJobs();
   startWalletAlertJob();
+  startRenewalReminderJob();
   // Libera as contas dos administradores ANTES de restaurar as sessões de WhatsApp.
   await ensureAdminAccounts().catch((err) => console.error('Erro ao liberar administradores:', err.message));
   nativeWhatsappService.bootstrapExistingSessions();
