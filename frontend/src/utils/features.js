@@ -27,5 +27,6 @@ export const FEATURE_NAMES = {
   disparos: 'Disparos em massa',
   discador: 'Discador para equipes de vendas',
   robo: 'Robô de ligações',
-  agente_ia: 'Agente de IA por voz'
+  agente_ia: 'Agente de IA por voz',
+  marca_propria: 'Marca própria'
 };

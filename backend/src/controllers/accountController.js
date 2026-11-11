@@ -139,6 +139,44 @@ exports.optOutRemove = async (req, res, next) => {
   try { await optOuts.remove(req.userId, req.params.id); res.json({ success: true }); } catch (e) { next(e); }
 };
 
+// ----- indicação (afiliados) -----
+exports.referral = async (req, res, next) => {
+  try { res.json(await require('../services/referralService').overview(req.userId)); } catch (e) { next(e); }
+};
+exports.adminReferralGet = async (req, res, next) => {
+  try { res.json(await require('../services/referralService').getSettings()); } catch (e) { next(e); }
+};
+exports.adminReferralSave = async (req, res, next) => {
+  try { res.json(await require('../services/referralService').saveSettings(req.body || {})); }
+  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); next(e); }
+};
+
+// ----- marca própria (white-label) -----
+exports.brandGet = async (req, res, next) => {
+  try {
+    const a = await prisma.account.findUnique({ where: { id: req.userId } });
+    res.json({ brand: { name: a.brandName || '', subtitle: a.brandSubtitle || '', color: a.brandColor || '', logo: a.brandLogo || '' } });
+  } catch (e) { next(e); }
+};
+exports.brandSave = async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const name = String(b.name || '').trim().slice(0, 40);
+    const subtitle = String(b.subtitle || '').trim().slice(0, 40);
+    const color = String(b.color || '').trim();
+    const logo = String(b.logo || '');
+    if (color && !/^#[0-9a-fA-F]{6}$/.test(color)) return res.status(400).json({ error: 'Cor inválida. Use o formato #RRGGBB.' });
+    if (logo && (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(logo) || logo.length > 300000)) {
+      return res.status(400).json({ error: 'Logo inválido: envie PNG, JPG ou WEBP de até ~200 KB.' });
+    }
+    await prisma.account.update({
+      where: { id: req.userId },
+      data: { brandName: name || null, brandSubtitle: subtitle || null, brandColor: color || null, brandLogo: logo || null }
+    });
+    res.json({ success: true });
+  } catch (e) { next(e); }
+};
+
 // ----- e-mails descadastrados (não recebem campanhas de e-mail) -----
 exports.emailSuppressionList = async (req, res, next) => {
   try {

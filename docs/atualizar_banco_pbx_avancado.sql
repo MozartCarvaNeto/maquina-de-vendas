@@ -83,3 +83,16 @@ CREATE TABLE IF NOT EXISTS "opt_outs" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "opt_outs_accountId_phone_channel_key" ON "opt_outs"("accountId","phone","channel");
 CREATE INDEX IF NOT EXISTS "opt_outs_accountId_phone_idx" ON "opt_outs"("accountId","phone");
+
+-- Marca própria
+ALTER TABLE "accounts" ADD COLUMN IF NOT EXISTS "brandName" TEXT;
+ALTER TABLE "accounts" ADD COLUMN IF NOT EXISTS "brandSubtitle" TEXT;
+ALTER TABLE "accounts" ADD COLUMN IF NOT EXISTS "brandColor" TEXT;
+ALTER TABLE "accounts" ADD COLUMN IF NOT EXISTS "brandLogo" TEXT;
+
+-- Indicação (afiliados)
+ALTER TABLE "accounts" ADD COLUMN IF NOT EXISTS "referralCode" TEXT;
+ALTER TABLE "accounts" ADD COLUMN IF NOT EXISTS "referredById" TEXT;
+ALTER TABLE "accounts" ADD COLUMN IF NOT EXISTS "referralRewardedAt" TIMESTAMP(3);
+ALTER TABLE "accounts" ADD COLUMN IF NOT EXISTS "referralRewardBrl" DOUBLE PRECISION;
+CREATE UNIQUE INDEX IF NOT EXISTS "accounts_referralCode_key" ON "accounts"("referralCode");

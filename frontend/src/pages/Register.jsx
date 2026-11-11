@@ -24,7 +24,7 @@ export default function Register() {
     setError('');
     setLoading(true);
     try {
-      const { data } = await api.post('/auth/register', { name, companyName, email, password, acceptTerms });
+      const { data } = await api.post('/auth/register', { name, companyName, email, password, acceptTerms, ref: (() => { try { return new URLSearchParams(window.location.search).get('ref') || localStorage.getItem('mdv_ref') || undefined; } catch { return undefined; } })() });
       // Cadastro aguardando aprovação do administrador: não há login ainda.
       if (data.pending) {
         setPendingMessage(data.message);

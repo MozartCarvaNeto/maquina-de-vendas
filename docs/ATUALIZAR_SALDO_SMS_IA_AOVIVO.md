@@ -248,3 +248,33 @@ Restaurar apaga e recria as tabelas. Faça isso num banco de teste antes, e peç
 
 ### Sobre os testes
 Testei o cálculo de duplicados, a assinatura do link de descadastro e a compilação do código. **Não rodei contra banco real** nem enviei e-mail de verdade: faça um teste enviando uma campanha para você mesmo e clicando em "Cancelar inscrição".
+
+
+---
+
+## Marca própria (white-label)
+
+**Precisa rodar SQL:** abra `SQL_NOVO_rodar_no_supabase.sql` no SQL Editor do Supabase e clique em Run (só 4 colunas novas, pode rodar de novo sem problema). Depois `bash deploy/atualizar-servidor.sh --banco`.
+
+- Novo módulo **🎨 Marca própria**, liberado por plano (em *Administração → Planos*, marque "Marca própria"; planos "completos" já têm). Dá para vender como diferencial de plano.
+- O dono da conta abre **🎨 Marca própria** no menu e define: nome, subtítulo, cor principal e logo (PNG/JPG/WEBP até 200 KB). Toda a equipe passa a ver a marca dele no menu e no topo, e a cor dos botões muda.
+- As telas de login/cadastro continuam com a sua marca (Turbo Prospect), pois ainda não existe domínio próprio por cliente.
+
+**Ainda não feito (para a próxima etapa):** subcontas de revendedor (agência criando clientes dentro da própria conta), tarifa de atacado e domínio personalizado por cliente. Isso exige decisões de negócio suas (preço de atacado, quem cobra de quem).
+
+Testes: compilei backend e telas; **não testei contra o banco real** — após rodar o SQL, entre numa conta com o módulo e salve uma marca para conferir.
+
+
+---
+
+## Indique e ganhe (afiliados)
+
+**Precisa rodar SQL:** `SQL_NOVO_rodar_no_supabase.sql` no Supabase (colunas novas em "accounts"; pode rodar de novo sem problema). Depois `bash deploy/atualizar-servidor.sh --banco`.
+
+- Cada cliente tem em **🤝 Indique e ganhe** um link próprio (`/registrar?ref=CÓDIGO`) e vê quem se cadastrou e quem já pagou.
+- Quando a conta indicada **paga a primeira mensalidade**, quem indicou recebe **saldo na carteira** (padrão 10% do valor, teto R$ 200 por indicado). Uma única vez por indicado; o bônus aparece no extrato como "bônus".
+- Você controla em **Administração → 🤝 Indicação**: ativar/desativar, % e teto.
+- O bônus é saldo (não dinheiro sacável), então não gera custo financeiro direto e incentiva o uso.
+- Limitação: não impede auto-indicação com e-mail diferente; acompanhe indicações suspeitas pelo painel de clientes.
+
+Testes: compilei backend e telas; não testei com pagamento real do Asaas.

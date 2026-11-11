@@ -224,6 +224,8 @@ async function applyPayment(account, payment) {
     'Asaas'
   );
 
+  await require('../referralService').rewardOnPayment(account, Math.round(Number(payment.value || 0) * 100));
+
   if (!wasBlocked && (!wasPending || activatePending)) {
     await resumeAccountSessions(account.id).catch(() => null);
   }

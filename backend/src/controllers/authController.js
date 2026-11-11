@@ -32,6 +32,11 @@ function signToken(memberId) {
   return jwt.sign({ memberId }, env.jwtSecret, { expiresIn: env.jwtExpiresIn });
 }
 
+function brandOf(account) {
+  if (!account || !(account.brandName || account.brandLogo || account.brandColor || account.brandSubtitle)) return null;
+  return { name: account.brandName || null, subtitle: account.brandSubtitle || null, color: account.brandColor || null, logo: account.brandLogo || null };
+}
+
 function serializeMember(member, accountName) {
   return {
     id: member.id,
@@ -40,6 +45,7 @@ function serializeMember(member, accountName) {
     role: member.role,
     accountId: member.accountId,
     accountName,
+    brand: brandOf(member.account),
     isPlatformAdmin: isPlatformAdminEmail(member.email),
     // Módulos liberados pelo plano da conta (null = todos).
     features: featuresForAccount(member.account, { isPlatformAdmin: isPlatformAdminEmail(member.email) })
@@ -107,9 +113,11 @@ exports.register = async (req, res, next) => {
           }
         : { accessStatus: 'pendente' };
 
+    const referredById = await require('../services/referralService').resolveReferrer(req.body.ref).catch(() => null);
     const account = await prisma.account.create({
       data: {
         name: companyName || name,
+        referredById,
         termsAcceptedAt: new Date(),
         termsVersion: legal.version,
         termsAcceptedIp: String(req.ip || '').slice(0, 60),

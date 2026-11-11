@@ -78,6 +78,13 @@ const FEATURES = [
     icon: '🧠',
     description: 'Agentes de IA que conversam por telefone, qualificam e chamam o vendedor.',
     requires: ['contatos']
+  },
+  {
+    key: 'marca_propria',
+    label: 'Marca própria',
+    icon: '🎨',
+    description: 'O cliente coloca o próprio nome, logo e cor no painel e na equipe (white-label).',
+    requires: []
   }
 ];
 

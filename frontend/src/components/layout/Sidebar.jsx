@@ -26,6 +26,8 @@ const MENU_ITEMS = [
   { path: '/equipe', label: '🧑‍🤝‍🧑 Equipe', adminOnly: true },
   { path: '/contatos', label: '👥 Contatos', feature: ['contatos'], adminOnly: false },
   { path: '/bloqueios', label: '🚫 Lista de bloqueio', adminOnly: false },
+  { path: '/indicacoes', label: '🤝 Indique e ganhe', adminOnly: true, hideForPlatformAdmin: true },
+  { path: '/marca', label: '🎨 Marca própria', feature: ['marca_propria'], adminOnly: true },
   { path: '/configuracoes', label: '⚙️ Configurações', adminOnly: true },
   { path: '/assinatura', label: '💳 Minha assinatura', adminOnly: true, hideForPlatformAdmin: true },
   { path: '/admin', label: '🛡️ Administração', platformAdminOnly: true }

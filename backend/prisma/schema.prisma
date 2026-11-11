@@ -48,6 +48,14 @@ model Account {
   fiscalEmail           String?
   fiscalAddress         String?
   onboardingDismissed   Boolean          @default(false)
+  brandName             String?          // marca própria (white-label)
+  brandSubtitle         String?
+  brandColor            String?          // #RRGGBB
+  referralCode          String?          @unique
+  referredById          String?
+  referralRewardedAt    DateTime?
+  referralRewardBrl     Float?
+  brandLogo             String?          // data URL (png/jpg/webp/svg) até ~200KB
   optOuts               OptOut[]
   usageCounters         UsageCounter[]
 

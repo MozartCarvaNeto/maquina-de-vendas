@@ -9,6 +9,7 @@ import PlansPanel from '../components/admin/PlansPanel';
 import SystemEmailPanel from '../components/admin/SystemEmailPanel';
 import RevenuePanel from '../components/admin/RevenuePanel';
 import LegalPanel from '../components/admin/LegalPanel';
+import ReferralPanel from '../components/admin/ReferralPanel';
 import './Admin.css';
 
 const STATUS_LABEL = { pendente: 'Pendente', ativa: 'Ativa', expirada: 'Vencida', bloqueada: 'Bloqueada' };
@@ -586,6 +587,7 @@ export default function Admin() {
         <button className={tab === 'planos' ? 'is-active' : ''} onClick={() => setTab('planos')}>💼 Planos e preços</button>
         <button className={tab === 'financeiro' ? 'is-active' : ''} onClick={() => setTab('financeiro')}>📈 Financeiro</button>
         <button className={tab === 'email' ? 'is-active' : ''} onClick={() => setTab('email')}>✉️ E-mail do sistema</button>
+        <button className={tab === 'indicacao' ? 'is-active' : ''} onClick={() => setTab('indicacao')}>🤝 Indicação</button>
         <button className={tab === 'termos' ? 'is-active' : ''} onClick={() => setTab('termos')}>📜 Termos e privacidade</button>
       </div>
 
@@ -593,6 +595,7 @@ export default function Admin() {
       {tab === 'email' && <SystemEmailPanel />}
       {tab === 'financeiro' && <RevenuePanel />}
       {tab === 'termos' && <LegalPanel />}
+      {tab === 'indicacao' && <ReferralPanel />}
 
       {tab === 'clientes' && (
         <>

@@ -26,6 +26,8 @@ const account = require('../controllers/accountController');
 router.get('/revenue', account.adminRevenue);
 router.get('/fiscal', account.adminFiscalList);
 router.put('/fiscal/:kind/:id', account.adminFiscalMark);
+router.get('/referral', account.adminReferralGet);
+router.put('/referral', account.adminReferralSave);
 router.get('/legal', account.adminLegalGet);
 router.put('/legal', account.adminLegalSave);
 
