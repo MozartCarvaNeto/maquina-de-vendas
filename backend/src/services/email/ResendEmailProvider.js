@@ -11,7 +11,7 @@ class ResendEmailProvider extends IEmailProvider {
     this.fromName = credentials.fromName || 'Turbo Prospect';
   }
 
-  async sendEmail({ to, subject, html, attachments }) {
+  async sendEmail({ to, subject, html, attachments, headers }) {
     // A API do Resend espera os anexos em base64 (campo "content"), não um
     // caminho de arquivo — por isso lemos cada arquivo em disco aqui.
     const resendAttachments = (attachments || [])
@@ -33,6 +33,7 @@ class ResendEmailProvider extends IEmailProvider {
         to: [to],
         subject,
         html,
+        ...(headers ? { headers } : {}),
         ...(resendAttachments.length ? { attachments: resendAttachments } : {})
       },
       {

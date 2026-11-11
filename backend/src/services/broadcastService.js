@@ -705,10 +705,29 @@ async function executeBroadcast(broadcastId) {
           } else if (broadcast.channel === 'email') {
             if (!lead.email) throw new Error('Lead sem e-mail cadastrado');
             const emailProvider = await getEmailProvider(broadcast.userId, { emailDomainId: broadcast.emailDomainId });
+            // Quem já cancelou a inscrição de e-mail (ou deu bounce/reclamação) nunca mais recebe.
+            const emailTracking = require('./email/emailTrackingService');
+            if (await emailTracking.isSuppressed(broadcast.userId, lead.email)) {
+              await markRecipient(rec.id, { status: 'falhou', errorMessage: 'E-mail descadastrado (cancelou a inscrição).' });
+              currentRec = null;
+              failedCount += 1;
+              continue;
+            }
+            let emailHtml = buildEmailHtml(renderTemplate(broadcast.message, lead), inlineImageInfo, INLINE_CID);
+            let unsubHeaders;
+            const extras = emailTracking.buildUnsubscribeExtras(broadcast.userId, lead.email);
+            const unsubPlaceholder = /{{\s*link_descadastro\s*}}/gi;
+            if (unsubPlaceholder.test(emailHtml)) {
+              emailHtml = emailHtml.replace(/{{\s*link_descadastro\s*}}/gi, extras.url);
+            } else if (!emailProvider.handlesUnsubscribe) {
+              emailHtml += extras.footerHtml;
+            }
+            if (!emailProvider.handlesUnsubscribe) unsubHeaders = extras.headers;
             await emailProvider.sendEmail({
               to: lead.email,
               subject: renderTemplate(broadcast.subject || '', lead),
-              html: buildEmailHtml(renderTemplate(broadcast.message, lead), inlineImageInfo, INLINE_CID),
+              html: emailHtml,
+              headers: unsubHeaders,
               attachments: emailAttachments,
               // Usados só pelo provedor "native", para casar cada envio com
               // a estatística de abertura/clique e com o disparo de origem.

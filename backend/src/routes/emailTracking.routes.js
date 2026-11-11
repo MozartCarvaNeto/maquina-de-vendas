@@ -10,5 +10,8 @@ router.get('/o/:token', emailTrackingController.openPixel);
 router.get('/c/:token', emailTrackingController.clickRedirect);
 router.get('/u/:token', emailTrackingController.unsubscribePage);
 router.post('/u/:token', emailTrackingController.unsubscribeOneClick);
+// Descadastro por link assinado (qualquer provedor): GET mostra confirmação, POST descadastra.
+router.get('/s/:token', emailTrackingController.signedUnsubscribePage);
+router.post('/s/:token', express.urlencoded({ extended: false }), emailTrackingController.signedUnsubscribeDo);
 
 module.exports = router;

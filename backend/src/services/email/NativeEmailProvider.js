@@ -54,6 +54,10 @@ class NativeEmailProvider extends IEmailProvider {
     this.sendingHostname = sendingHostname || domain;
   }
 
+  get handlesUnsubscribe() {
+    return true; // rodapé, cabeçalhos e lista de supressão já são tratados aqui dentro
+  }
+
   async sendEmail({ to, subject, html, attachments, leadId = null, broadcastCampaignId = null }) {
     const toEmail = String(to || '').trim().toLowerCase();
 

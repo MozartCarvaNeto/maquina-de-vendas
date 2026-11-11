@@ -139,6 +139,40 @@ exports.optOutRemove = async (req, res, next) => {
   try { await optOuts.remove(req.userId, req.params.id); res.json({ success: true }); } catch (e) { next(e); }
 };
 
+// ----- e-mails descadastrados (não recebem campanhas de e-mail) -----
+exports.emailSuppressionList = async (req, res, next) => {
+  try {
+    const q = String(req.query.q || '').trim().toLowerCase();
+    const items = await prisma.emailSuppression.findMany({
+      where: { userId: req.userId, ...(q ? { email: { contains: q } } : {}) },
+      orderBy: { createdAt: 'desc' },
+      take: 500
+    });
+    res.json({ items, total: items.length });
+  } catch (e) { next(e); }
+};
+exports.emailSuppressionAdd = async (req, res, next) => {
+  try {
+    const list = String((req.body && (req.body.emails || req.body.email)) || '')
+      .split(/[\s,;]+/).map((x) => x.trim().toLowerCase()).filter((x) => x.includes('@'));
+    if (!list.length) return res.status(400).json({ error: 'Informe pelo menos um e-mail válido.' });
+    for (const email of [...new Set(list)]) {
+      await prisma.emailSuppression.upsert({
+        where: { userId_email: { userId: req.userId, email } },
+        update: { reason: 'descadastro' },
+        create: { userId: req.userId, email, reason: 'descadastro' }
+      });
+    }
+    res.json({ success: true, added: new Set(list).size });
+  } catch (e) { next(e); }
+};
+exports.emailSuppressionRemove = async (req, res, next) => {
+  try {
+    await prisma.emailSuppression.deleteMany({ where: { id: req.params.id, userId: req.userId } });
+    res.json({ success: true });
+  } catch (e) { next(e); }
+};
+
 // ----- administrador: financeiro e notas -----
 exports.adminRevenue = async (req, res, next) => {
   try { res.json(await require('../services/revenueMetricsService').overview({ months: Number(req.query.months) || 6 })); } catch (e) { next(e); }

@@ -224,3 +224,27 @@ Se aparecer "server version mismatch", o `pg_dump` do servidor é mais antigo qu
 gunzip -c ~/backups-maquina/banco_AAAA-MM-DD_HHMM.sql.gz | psql "URL_DO_BANCO_SEM_PARAMETROS"
 ```
 Restaurar apaga e recria as tabelas. Faça isso num banco de teste antes, e peça ajuda para o banco de produção.
+
+
+---
+
+## Contatos duplicados e descadastro de e-mail
+
+**Não precisa rodar SQL novo.** Basta atualizar o servidor: `bash deploy/atualizar-servidor.sh`.
+
+### Contatos duplicados (telefone e e-mail)
+- O sistema compara **telefone** (ignora +55, zero e o "9" extra do celular: `11 98888-7777` = `11 8888-7777`) e **e-mail** (sem diferença de maiúsculas).
+- **Importar planilha:** se houver linhas repetidas (com contatos já existentes ou repetidas no próprio arquivo), aparece a pergunta: **Manter só 1 de cada**, **Manter duplicados** ou **Cancelar**. Ao manter só 1, quem já existe **não é criado de novo**, mas **é adicionado à lista** escolhida se ainda não estiver nela.
+- **Novo contato manual:** se já existir, pergunta se quer manter duplicado ou não criar.
+- **Limpeza dos que já existem:** em *Contatos* → **🧹 Duplicados**. Mostra os grupos repetidos, você escolhe qual manter (sugerido: o mais antigo) e o sistema junta: telefone/e-mail/endereço que faltavam, etiquetas, histórico, CRM, listas e ligações passam para o contato mantido. Quem tinha pedido para não receber mensagens continua bloqueado.
+- Quem usa a API sem enviar a opção recebe o padrão "manter só 1".
+
+### Descadastro de e-mail
+- Todo e-mail de campanha (SMTP, Resend, SendGrid, Twilio e nativo) agora leva o link **Cancelar inscrição** no rodapé e o botão de "cancelar inscrição" do Gmail/Outlook (exceto Twilio, que só leva o link no rodapé).
+- Você pode escolher onde o link aparece escrevendo `{{link_descadastro}}` na mensagem.
+- Quem cancela **nunca mais recebe campanhas de e-mail**; o disparo pula esse endereço automaticamente. Isso vale **só para e-mail** (não bloqueia WhatsApp/ligação).
+- Veja e gerencie a lista em **🚫 Lista de bloqueio → E-mails descadastrados** (também dá para descadastrar à mão ou reativar).
+- Observação: o aviso de pessoas que cancelaram pelo provedor nativo antes desta versão continua marcado no contato como "não contatar".
+
+### Sobre os testes
+Testei o cálculo de duplicados, a assinatura do link de descadastro e a compilação do código. **Não rodei contra banco real** nem enviei e-mail de verdade: faça um teste enviando uma campanha para você mesmo e clicando em "Cancelar inscrição".

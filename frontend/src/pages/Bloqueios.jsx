@@ -16,6 +16,19 @@ export default function Bloqueios() {
   const [channel, setChannel] = useState('all');
   const [bulk, setBulk] = useState('');
   const [msg, setMsg] = useState(null);
+  const [emails, setEmails] = useState([]);
+  const [emailText, setEmailText] = useState('');
+
+  const loadEmails = useCallback(async () => {
+    try { setEmails((await api.get('/account/email-suppressions')).data.items); } catch { /* sem e-mails ainda */ }
+  }, []);
+  useEffect(() => { loadEmails(); }, [loadEmails]);
+  async function addEmails() {
+    try { const { data: r } = await api.post('/account/email-suppressions', { emails: emailText }); setMsg({ text: `${r.added} e-mail(s) descadastrado(s).` }); setEmailText(''); loadEmails(); } catch (err) { setMsg({ error: true, text: err.response?.data?.error || 'Erro ao salvar.' }); }
+  }
+  async function removeEmail(id) {
+    try { await api.delete(`/account/email-suppressions/${id}`); loadEmails(); } catch (err) { setMsg({ error: true, text: err.response?.data?.error || 'Erro ao remover.' }); }
+  }
 
   const load = useCallback(async () => {
     try { setData((await api.get('/account/opt-outs', { params: { q } })).data); } catch (e) { setMsg({ error: true, text: e.response?.data?.error || 'Erro ao carregar.' }); }
@@ -75,6 +88,28 @@ export default function Bloqueios() {
                 </tr>
               ))}
               {data.items.length === 0 && <tr><td colSpan={5} className="acc-muted">Nenhum número bloqueado.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="acc-card">
+        <h3>E-mails descadastrados ({emails.length})</h3>
+        <p className="acc-muted">Quem clica em "Cancelar inscrição" no rodapé do e-mail entra aqui sozinho e não recebe mais campanhas de e-mail (também entram e-mails que deram erro permanente ou reclamação). Isso não bloqueia WhatsApp nem ligação. Para o link aparecer em um lugar específico da mensagem, use <code>{'{{link_descadastro}}'}</code>.</p>
+        <textarea rows={2} value={emailText} onChange={(e) => setEmailText(e.target.value)} placeholder="Descadastrar manualmente: um e-mail por linha ou separados por vírgula" aria-label="E-mails para descadastrar" />
+        <div className="acc-row"><button className="btn-outline" type="button" onClick={addEmails} disabled={!emailText.trim()}>Descadastrar</button></div>
+        <div className="acc-table-wrap">
+          <table className="acc-table">
+            <thead><tr><th>E-mail</th><th>Motivo</th><th>Data</th><th /></tr></thead>
+            <tbody>
+              {emails.map((i) => (
+                <tr key={i.id}>
+                  <td>{i.email}</td><td>{{ descadastro: 'Cancelou a inscrição', bounce: 'E-mail inválido (erro permanente)', reclamacao: 'Marcou como spam' }[i.reason] || i.reason}</td>
+                  <td>{new Date(i.createdAt).toLocaleDateString('pt-BR')}</td>
+                  <td>{canRemove && <button className="btn-outline" onClick={() => removeEmail(i.id)}>Remover</button>}</td>
+                </tr>
+              ))}
+              {emails.length === 0 && <tr><td colSpan={4} className="acc-muted">Nenhum e-mail descadastrado.</td></tr>}
             </tbody>
           </table>
         </div>

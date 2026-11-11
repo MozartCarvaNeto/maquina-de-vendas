@@ -35,6 +35,8 @@ router.use(auth);
 router.use(requireFeature('contatos'));
 
 router.get('/', leadsController.list);
+router.get('/duplicates', leadsController.duplicates);
+router.post('/duplicates/merge', leadsController.mergeDuplicates);
 router.get('/:id', leadsController.getById);
 router.post('/', leadsController.create);
 router.post('/import-csv', (req, res, next) => {

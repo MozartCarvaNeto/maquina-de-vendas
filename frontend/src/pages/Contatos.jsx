@@ -43,6 +43,8 @@ export default function Contatos() {
   const [bulkChannel, setBulkChannel] = useState('');
   const [bulkListId, setBulkListId] = useState('');
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [dupAsk, setDupAsk] = useState(null); // pergunta na importação: { formData, info }
+  const [dupClean, setDupClean] = useState(null); // limpeza: { groups, keep: {keepId por grupo} }
 
   const loadLeads = useCallback(async () => {
     const { data } = await api.get('/leads', { params: { search, page, pageSize: PAGE_SIZE } });
@@ -84,8 +86,7 @@ export default function Contatos() {
       return;
     }
 
-    try {
-      await api.post('/leads', {
+    const payload = {
         name: form.name,
         phone: form.phone || undefined,
         email: form.email || undefined,
@@ -93,7 +94,22 @@ export default function Contatos() {
         tags: form.tags ? form.tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
         consentSource: form.consentSource,
         preferredChannel: form.preferredChannel || undefined
-      });
+    };
+    try {
+      try {
+        await api.post('/leads', payload);
+      } catch (err) {
+        if (err.response?.status === 409 && err.response?.data?.code === 'DUPLICATE') {
+          const m = err.response.data.match || {};
+          const keepBoth = window.confirm(
+            `Já existe um contato com este telefone/e-mail: ${m.name || ''} ${m.phone || ''} ${m.email || ''}\n\nOK = criar mesmo assim (manter duplicado)\nCancelar = não criar (manter só 1)`
+          );
+          if (!keepBoth) return;
+          await api.post('/leads', { ...payload, duplicates: 'keep' });
+        } else {
+          throw err;
+        }
+      }
       setShowModal(false);
       setForm({ name: '', phone: '', email: '', address: '', tags: '', consentSource: '', preferredChannel: '' });
       loadLeads();
@@ -135,21 +151,60 @@ export default function Contatos() {
     formData.append('consentSource', consentSource);
     if (listId) formData.append('listId', listId);
     if (tags) formData.append('tags', tags);
+    e.target.value = '';
+    await sendImport(formData, 'ask');
+  }
 
+  // mode: 'ask' (primeira tentativa) | 'skip' (manter só 1) | 'keep' (importar tudo)
+  async function sendImport(formData, mode) {
+    formData.set('duplicates', mode);
     try {
       const { data } = await api.post('/leads/import-csv', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
+      if (data.needsDecision) {
+        setDupAsk({ formData, info: data.duplicates, total: data.total });
+        return;
+      }
+      setDupAsk(null);
       alert(
         `${data.imported} contatos importados, ${data.skipped} ignorados` +
+          (data.duplicatesSkipped ? `, ${data.duplicatesSkipped} repetidos não duplicados` : '') +
+          (data.duplicatesLinked ? ` (${data.duplicatesLinked} já existentes foram adicionados à lista)` : '') +
           (data.skippedReasons?.length ? `.\n\nMotivos:\n${data.skippedReasons.join('\n')}` : '.')
       );
       setPage(1);
       loadLeads();
     } catch (error) {
+      setDupAsk(null);
       alert(error.response?.data?.error || 'Erro ao importar arquivo');
     }
-    e.target.value = '';
+  }
+
+  async function openDupClean() {
+    try {
+      const { data } = await api.get('/leads/duplicates');
+      const keep = {};
+      data.groups.forEach((g, i) => { keep[i] = g.keepId; });
+      setDupClean({ groups: data.groups, keep, total: data.total });
+    } catch (error) {
+      alert(error.response?.data?.error || 'Erro ao procurar duplicados');
+    }
+  }
+
+  async function mergeDup(onlyIndex) {
+    const merges = dupClean.groups
+      .map((g, i) => ({ g, i }))
+      .filter(({ i }) => onlyIndex === undefined || onlyIndex === i)
+      .map(({ g, i }) => ({ keepId: dupClean.keep[i], removeIds: g.leads.map((l) => l.id).filter((id) => id !== dupClean.keep[i]) }));
+    try {
+      const { data } = await api.post('/leads/duplicates/merge', { merges });
+      alert(`${data.merged} contato(s) duplicado(s) juntado(s).`);
+      await openDupClean();
+      loadLeads();
+    } catch (error) {
+      alert(error.response?.data?.error || 'Erro ao juntar contatos');
+    }
   }
 
   function toggleSelect(leadId) {
@@ -261,6 +316,7 @@ export default function Contatos() {
           📤 Importar CSV/Excel
           <input type="file" accept=".csv,.xlsx,.xls" hidden onChange={handleImportCsv} />
         </label>
+        <button className="btn-outline" onClick={openDupClean}>🧹 Duplicados</button>
         <button className="btn-primary" onClick={() => setShowModal(true)}>➕ Novo Contato</button>
       </div>
 
@@ -386,6 +442,59 @@ export default function Contatos() {
             <button className="btn-outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
               Próxima →
             </button>
+          </div>
+        </div>
+      )}
+
+      {dupAsk && (
+        <div className="modal-overlay" onClick={() => setDupAsk(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Contatos repetidos encontrados</h2>
+            <p>
+              {dupAsk.info.count} de {dupAsk.total} linhas repetem telefone ou e-mail
+              ({dupAsk.info.existing} já estão no sistema{dupAsk.info.inFile ? `, ${dupAsk.info.inFile} repetidas dentro do próprio arquivo` : ''}).
+            </p>
+            <ul>
+              {dupAsk.info.samples.map((x, i) => (
+                <li key={i}>{x.name} {x.phone || ''} {x.email || ''} → {x.matchName}</li>
+              ))}
+            </ul>
+            <div className="modal-actions">
+              <button className="btn-outline" onClick={() => setDupAsk(null)}>Cancelar importação</button>
+              <button className="btn-outline" onClick={() => sendImport(dupAsk.formData, 'keep')}>Manter duplicados</button>
+              <button className="btn-primary" onClick={() => sendImport(dupAsk.formData, 'skip')}>Manter só 1 de cada</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {dupClean && (
+        <div className="modal-overlay" onClick={() => setDupClean(null)}>
+          <div className="modal" style={{ maxWidth: 720, maxHeight: '85vh', overflow: 'auto' }} onClick={(e) => e.stopPropagation()}>
+            <h2>🧹 Contatos duplicados</h2>
+            {dupClean.groups.length === 0 ? (
+              <p>Nenhum contato duplicado. Tudo certo!</p>
+            ) : (
+              <>
+                <p>{dupClean.groups.length} grupo(s) com telefone ou e-mail repetido. Escolha qual manter em cada grupo — o histórico, as listas e o CRM dos outros são passados para ele.</p>
+                {dupClean.groups.map((g, i) => (
+                  <fieldset key={i} style={{ marginBottom: 12 }}>
+                    <legend>Grupo {i + 1}</legend>
+                    {g.leads.map((l) => (
+                      <label key={l.id} style={{ display: 'block' }}>
+                        <input type="radio" name={`dup-${i}`} checked={dupClean.keep[i] === l.id} onChange={() => setDupClean({ ...dupClean, keep: { ...dupClean.keep, [i]: l.id } })} />
+                        {' '}{l.name} · {l.phone || 'sem telefone'} · {l.email || 'sem e-mail'}
+                      </label>
+                    ))}
+                    <button className="btn-outline" onClick={() => mergeDup(i)}>Manter só o escolhido</button>
+                  </fieldset>
+                ))}
+              </>
+            )}
+            <div className="modal-actions">
+              <button className="btn-outline" onClick={() => setDupClean(null)}>Manter todos / fechar</button>
+              {dupClean.groups.length > 0 && <button className="btn-primary" onClick={() => mergeDup()}>Manter só 1 em todos os grupos</button>}
+            </div>
           </div>
         </div>
       )}

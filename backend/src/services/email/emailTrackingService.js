@@ -68,18 +68,77 @@ async function registerUnsubscribe(token) {
     create: { userId: message.userId, email: message.toEmail, reason: 'descadastro' }
   });
 
-  if (message.leadId) {
-    await prisma.lead.update({ where: { id: message.leadId }, data: { optOut: true } }).catch(() => {
-      // o lead pode já ter sido removido — não é motivo para falhar o descadastro
-    });
-  }
-
+  // Descadastro de E-MAIL vale só para e-mail: não marca o lead como "não
+  // contatar" em tudo (isso bloquearia WhatsApp/ligação sem a pessoa pedir).
   return message;
 }
 
+// ---------------------------------------------------------------------
+// Descadastro por link assinado — vale para QUALQUER provedor de e-mail
+// (SMTP, Resend, SendGrid, Twilio), que não têm rastreio próprio.
+// O token carrega conta + e-mail e é assinado (HMAC) com o segredo do
+// sistema: não dá para adivinhar o link de outra pessoa.
+// ---------------------------------------------------------------------
+function b64url(buf) {
+  return Buffer.from(buf).toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+function sign(payload) {
+  return b64url(crypto.createHmac('sha256', env.jwtSecret).update(`unsub:${payload}`).digest()).slice(0, 32);
+}
+
+function createSignedUnsubToken(userId, email) {
+  const payload = b64url(JSON.stringify([userId, String(email || '').trim().toLowerCase()]));
+  return `${payload}.${sign(payload)}`;
+}
+
+function parseSignedUnsubToken(token) {
+  const [payload, sig] = String(token || '').split('.');
+  if (!payload || !sig) return null;
+  const expected = sign(payload);
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const [userId, email] = JSON.parse(Buffer.from(payload.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+    if (!userId || !email) return null;
+    return { userId, email };
+  } catch (_e) {
+    return null;
+  }
+}
+
+function buildSignedUnsubscribeUrl(userId, email) {
+  return `${trackingBaseUrl()}/s/${createSignedUnsubToken(userId, email)}`;
+}
+
+async function registerSignedUnsubscribe(token) {
+  const data = parseSignedUnsubToken(token);
+  if (!data) return null;
+  await prisma.emailSuppression.upsert({
+    where: { userId_email: { userId: data.userId, email: data.email } },
+    update: { reason: 'descadastro' },
+    create: { userId: data.userId, email: data.email, reason: 'descadastro' }
+  });
+  return data;
+}
+
+/** Rodapé + cabeçalhos de descadastro para provedores que não os colocam sozinhos. */
+function buildUnsubscribeExtras(userId, email) {
+  const url = buildSignedUnsubscribeUrl(userId, email);
+  return {
+    url,
+    footerHtml: `<div style="margin-top:28px;padding-top:12px;border-top:1px solid #e5e5e5;font-size:12px;color:#999;text-align:center;">Não quer mais receber estes e-mails? <a href="${url}" style="color:#999;">Cancelar inscrição</a>.</div>`,
+    headers: {
+      'List-Unsubscribe': `<${url}>`,
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
+    }
+  };
+}
+
 async function isSuppressed(userId, email) {
+  email = String(email || '').trim().toLowerCase();
   const row = await prisma.emailSuppression.findUnique({
-    where: { userId_email: { userId, email: String(email || '').toLowerCase() } }
+    where: { userId_email: { userId, email } }
   });
   return !!row;
 }
@@ -93,5 +152,9 @@ module.exports = {
   registerOpen,
   registerClick,
   registerUnsubscribe,
+  buildSignedUnsubscribeUrl,
+  parseSignedUnsubToken,
+  registerSignedUnsubscribe,
+  buildUnsubscribeExtras,
   isSuppressed
 };

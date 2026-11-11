@@ -27,12 +27,13 @@ class SmtpEmailProvider extends IEmailProvider {
     });
   }
 
-  async sendEmail({ to, subject, html, attachments }) {
+  async sendEmail({ to, subject, html, attachments, headers }) {
     const info = await this.transporter.sendMail({
       from: `${this.fromName} <${this.fromEmail}>`,
       to,
       subject,
       html,
+      ...(headers ? { headers } : {}),
       // nodemailer aceita { filename, path } diretamente — path pode ser
       // um caminho local em disco (é o que broadcastService.js envia).
       attachments: Array.isArray(attachments) && attachments.length ? attachments : undefined

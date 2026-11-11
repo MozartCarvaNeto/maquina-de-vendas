@@ -57,3 +57,35 @@ exports.unsubscribeOneClick = async (req, res) => {
   await emailTrackingService.registerUnsubscribe(token).catch(() => {});
   res.status(200).json({ success: true });
 };
+
+function escHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function page(body) {
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cancelar inscrição</title></head><body style="font-family:sans-serif;max-width:480px;margin:60px auto;padding:0 16px;text-align:center;color:#333;">${body}</body></html>`;
+}
+
+// GET só MOSTRA a confirmação (antivírus/scanners de e-mail abrem links
+// sozinhos; descadastrar no GET cancelaria pessoas sem querer).
+exports.signedUnsubscribePage = (req, res) => {
+  const data = emailTrackingService.parseSignedUnsubToken(req.params.token);
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  if (!data) return res.status(404).send(page('Link de descadastro inválido.'));
+  res.send(page(`<h2>Cancelar inscrição</h2>
+    <p>Deseja parar de receber e-mails em <strong>${escHtml(data.email)}</strong>?</p>
+    <form method="POST"><button type="submit" style="padding:12px 28px;font-size:16px;border:0;border-radius:8px;background:#111;color:#fff;cursor:pointer;">Sim, cancelar inscrição</button></form>`));
+};
+
+// POST: botão da página OU "um clique" do Gmail/Outlook (RFC 8058).
+exports.signedUnsubscribeDo = async (req, res, next) => {
+  try {
+    const data = await emailTrackingService.registerSignedUnsubscribe(req.params.token);
+    const wantsHtml = (req.headers.accept || '').includes('text/html');
+    if (!wantsHtml) return res.status(data ? 200 : 404).json({ success: !!data });
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    if (!data) return res.status(404).send(page('Link de descadastro inválido.'));
+    res.send(page(`<h2>Você foi descadastrado</h2><p>O endereço <strong>${escHtml(data.email)}</strong> não vai mais receber e-mails deste remetente.</p>`));
+  } catch (error) {
+    next(error);
+  }
+};

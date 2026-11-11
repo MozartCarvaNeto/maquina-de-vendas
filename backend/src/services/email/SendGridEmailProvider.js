@@ -27,7 +27,7 @@ class SendGridEmailProvider extends IEmailProvider {
     this.fromName = credentials.fromName || 'Turbo Prospect';
   }
 
-  async sendEmail({ to, subject, html, attachments }) {
+  async sendEmail({ to, subject, html, attachments, headers }) {
     const sgAttachments = (attachments || [])
       .map((a) => {
         try {
@@ -52,6 +52,7 @@ class SendGridEmailProvider extends IEmailProvider {
           from: { email: this.fromEmail, name: this.fromName },
           subject,
           content: [{ type: 'text/html', value: html }],
+          ...(headers ? { headers } : {}),
           ...(sgAttachments.length ? { attachments: sgAttachments } : {})
         },
         {

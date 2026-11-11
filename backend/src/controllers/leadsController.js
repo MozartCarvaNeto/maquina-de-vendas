@@ -94,6 +94,19 @@ exports.create = async (req, res, next) => {
       return res.status(400).json({ error: 'Não é possível definir canal "E-mail" para um lead sem e-mail' });
     }
 
+    if (req.body.duplicates !== 'keep') {
+      const dedup = require('../services/leadDedupService');
+      const { index } = await dedup.buildIndex(req.userId);
+      const hit = dedup.findInIndex(index, { phone, email });
+      if (hit) {
+        return res.status(409).json({
+          code: 'DUPLICATE',
+          error: 'Já existe um contato com este telefone ou e-mail.',
+          match: { id: hit.id, name: hit.name, phone: hit.phone, email: hit.email }
+        });
+      }
+    }
+
     const lead = await prisma.lead.create({
       data: {
         userId: req.userId,
@@ -119,6 +132,8 @@ exports.create = async (req, res, next) => {
 exports.importCsv = async (req, res, next) => {
   try {
     const { campaignId, consentSource, listId, tags: globalTagsRaw } = req.body;
+    // duplicates: 'ask' (pergunta antes), 'skip' (mantém só 1 — padrão) ou 'keep' (importa tudo)
+    const dupMode = ['ask', 'skip', 'keep'].includes(req.body.duplicates) ? req.body.duplicates : 'skip';
 
     if (!req.file) {
       return res.status(400).json({ error: 'Nenhum arquivo CSV enviado' });
@@ -277,7 +292,45 @@ exports.importCsv = async (req, res, next) => {
 
     let imported = 0;
     let skipped = 0;
+    let duplicatesSkipped = 0;
+    let duplicatesLinked = 0;
     const skippedReasons = [];
+
+    const dedup = require('../services/leadDedupService');
+    let dupIndex = null;
+    if (dupMode !== 'keep') {
+      dupIndex = (await dedup.buildIndex(req.userId)).index;
+    }
+
+    // Pergunta ao usuário antes de importar: conta quantas linhas repetem
+    // algum contato existente (telefone/e-mail) ou outra linha do próprio arquivo.
+    if (dupMode === 'ask') {
+      const seen = new Set();
+      let existing = 0;
+      let inFile = 0;
+      const samples = [];
+      for (const record of records) {
+        if (!record.name || (!record.phone && !record.email)) continue;
+        const cand = { phone: record.phone ? sanitizePhoneValue(record.phone) : null, email: record.email || null };
+        const hit = dedup.findInIndex(dupIndex, cand);
+        const keys = dedup.keysOf(cand);
+        if (hit) {
+          existing += 1;
+          if (samples.length < 5) samples.push({ name: record.name, phone: cand.phone, email: cand.email, matchName: hit.name });
+        } else if (keys.some((k) => seen.has(k))) {
+          inFile += 1;
+          if (samples.length < 5) samples.push({ name: record.name, phone: cand.phone, email: cand.email, matchName: 'repetido no arquivo' });
+        }
+        keys.forEach((k) => seen.add(k));
+      }
+      if (existing + inFile > 0) {
+        return res.json({
+          needsDecision: true,
+          duplicates: { count: existing + inFile, existing, inFile, samples },
+          total: records.length
+        });
+      }
+    }
 
     for (const record of records) {
       const name = record.name || null;
@@ -299,6 +352,22 @@ exports.importCsv = async (req, res, next) => {
         continue;
       }
 
+      if (dupIndex) {
+        const hit = dedup.findInIndex(dupIndex, { phone, email });
+        if (hit) {
+          duplicatesSkipped += 1;
+          // Contato já existe: não cria outro, mas entra na lista escolhida (se ainda não estiver).
+          if (targetList) {
+            const r = await prisma.leadListMembership.createMany({
+              data: [{ listId: targetList.id, leadId: hit.id }],
+              skipDuplicates: true
+            });
+            duplicatesLinked += r.count;
+          }
+          continue;
+        }
+      }
+
       const createdLead = await prisma.lead.create({
         data: {
           userId: req.userId,
@@ -314,6 +383,8 @@ exports.importCsv = async (req, res, next) => {
         }
       });
 
+      if (dupIndex) dedup.addToIndex(dupIndex, createdLead);
+
       if (targetList) {
         await prisma.leadListMembership.create({
           data: { listId: targetList.id, leadId: createdLead.id }
@@ -323,7 +394,14 @@ exports.importCsv = async (req, res, next) => {
       imported += 1;
     }
 
-    res.json({ imported, skipped, total: records.length, skippedReasons: skippedReasons.slice(0, 20) });
+    res.json({
+      imported,
+      skipped,
+      duplicatesSkipped,
+      duplicatesLinked,
+      total: records.length,
+      skippedReasons: skippedReasons.slice(0, 20)
+    });
   } catch (error) {
     next(error);
   }
@@ -630,6 +708,34 @@ exports.bulkAddToCrm = async (req, res, next) => {
 
     res.json({ success: true, added, skipped, boardId: board.id, columnName: targetColumn.name });
   } catch (error) {
+    next(error);
+  }
+};
+
+// ---- Contatos duplicados já existentes (limpeza) ----
+exports.duplicates = async (req, res, next) => {
+  try {
+    const groups = await require('../services/leadDedupService').scanDuplicates(req.userId);
+    res.json({ groups, total: groups.reduce((n, g) => n + g.leads.length - 1, 0) });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// body: { merges: [{ keepId, removeIds: [] }] }
+exports.mergeDuplicates = async (req, res, next) => {
+  try {
+    const merges = Array.isArray(req.body.merges) ? req.body.merges : [];
+    if (!merges.length) return res.status(400).json({ error: 'Nada para juntar' });
+    const dedup = require('../services/leadDedupService');
+    let merged = 0;
+    for (const m of merges) {
+      if (!m || !m.keepId || !Array.isArray(m.removeIds)) continue;
+      merged += (await dedup.mergeLeads(req.userId, m.keepId, m.removeIds)).merged;
+    }
+    res.json({ success: true, merged });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
     next(error);
   }
 };

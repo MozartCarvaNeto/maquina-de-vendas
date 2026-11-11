@@ -18,5 +18,8 @@ router.post('/onboarding/dismiss', manager, c.onboardingDismiss);
 router.get('/opt-outs', c.optOutList);
 router.post('/opt-outs', c.optOutAdd);
 router.delete('/opt-outs/:id', manager, c.optOutRemove);
+router.get('/email-suppressions', c.emailSuppressionList);
+router.post('/email-suppressions', c.emailSuppressionAdd);
+router.delete('/email-suppressions/:id', manager, c.emailSuppressionRemove);
 
 module.exports = router;
