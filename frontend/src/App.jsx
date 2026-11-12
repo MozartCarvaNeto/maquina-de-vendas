@@ -6,6 +6,7 @@ import Legal from './pages/Legal';
 import Bloqueios from './pages/Bloqueios';
 import MarcaPropria from './pages/MarcaPropria';
 import Indicacoes from './pages/Indicacoes';
+import Revendedor from './pages/Revendedor';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import Layout from './components/layout/Layout';
@@ -78,6 +79,7 @@ export default function App() {
           <Route path="bloqueios" element={<Bloqueios />} />
           <Route path="marca" element={<MarcaPropria />} />
           <Route path="indicacoes" element={<Indicacoes />} />
+          <Route path="revendedor" element={<Revendedor />} />
           <Route path="contatos" element={<FeatureRoute feature="contatos"><Contatos /></FeatureRoute>} />
           <Route path="configuracoes" element={<Configuracoes />} />
           <Route

@@ -19,11 +19,22 @@ async function record(userId, type, amount, description, refId, extra = {}) {
 }
 
 /** Cobra. Sem saldo → erro 402 (a menos que force: ligações já feitas não podem ser recusadas). */
-async function charge(userId, amount, { type = 'uso', description = '', refId = null, force = false, costBrl = 0, quantity = 0 } = {}) {
+async function charge(userId, amount, { type = 'uso', description = '', refId = null, force = false, costBrl = 0, quantity = 0, direction = null, incrementSec = 60 } = {}) {
   amount = r4(amount);
   if (!(amount > 0)) return { charged: false };
   const w = await isActive(userId);
   if (!w) return { charged: false };
+  // Cliente de revendedor: se o revendedor ficou sem saldo de atacado, o serviço pausa (exceto o que já aconteceu).
+  const reseller = ['sms', 'voz', 'whatsapp'].includes(type) ? await resellerOf(userId) : null;
+  if (reseller && !force) {
+    const rw = await isActive(reseller);
+    if (rw && rw.balanceBrl <= 0) {
+      const err = new Error('Serviço temporariamente indisponível. Fale com o seu fornecedor.');
+      err.status = 402;
+      err.configProblem = true;
+      throw err;
+    }
+  }
   if (force) {
     await prisma.wallet.update({ where: { userId }, data: { balanceBrl: { decrement: amount } } });
   } else {
@@ -36,7 +47,32 @@ async function charge(userId, amount, { type = 'uso', description = '', refId = 
     }
   }
   await record(userId, type, -amount, description, refId, { costBrl, quantity });
+  if (reseller) await billReseller(reseller, userId, { type, quantity, direction, incrementSec, description, refId, costBrl }).catch((e) => console.warn('Cobrança de atacado:', e.message));
   return { charged: true, amount };
+}
+
+async function resellerOf(userId) {
+  const a = await prisma.account.findUnique({ where: { id: userId }, select: { resellerId: true } });
+  return a?.resellerId || null;
+}
+
+/** Atacado: a plataforma cobra do REVENDEDOR a tarifa de atacado (as tarifas da conta dele) por tudo que o cliente usa. */
+async function billReseller(resellerId, clientId, { type, quantity, direction, incrementSec, description, refId, costBrl }) {
+  const rw = await isActive(resellerId);
+  if (!rw) return;
+  let wholesale = 0;
+  if (type === 'sms') {
+    const gw = await require('./smsgw/gateway').getGatewaySettings(resellerId);
+    wholesale = r4((gw.priceBrl || 0) * (quantity || 1));
+  } else if (type === 'voz') {
+    wholesale = voiceCost(direction === 'entrada' ? rw.voiceInPerMinBrl : rw.voiceOutPerMinBrl, quantity || 0, incrementSec);
+  } else if (type === 'whatsapp') {
+    wholesale = 0; // WhatsApp oficial é do próprio revendedor/cliente; sem atacado
+  }
+  if (!(wholesale > 0)) return;
+  const client = await prisma.account.findUnique({ where: { id: clientId }, select: { name: true } });
+  await prisma.wallet.update({ where: { userId: resellerId }, data: { balanceBrl: { decrement: wholesale } } });
+  await record(resellerId, 'atacado', -wholesale, `Atacado — ${client?.name || 'cliente'}: ${description}`, refId, { costBrl, quantity });
 }
 
 async function credit(userId, amount, { type = 'recarga', description = 'Recarga', refId = null } = {}) {
@@ -84,7 +120,7 @@ async function chargeCall(userId, { direction, seconds, refId, description }) {
     const rules = await require('./platformBillingSettings').get().catch(() => null);
     const carrierRate = rules ? (direction === 'entrada' ? rules.voiceCostInPerMinBrl : rules.voiceCostOutPerMinBrl) : 0;
     const costBrl = rules ? voiceCost(carrierRate, seconds, rules.voiceCostIncrementSec) : 0;
-    await charge(userId, cost, { type: 'voz', description, refId, force: true, costBrl, quantity: seconds });
+    await charge(userId, cost, { type: 'voz', description, refId, force: true, costBrl, quantity: seconds, direction, incrementSec: w.voiceIncrementSec });
   }
   return cost;
 }

@@ -19,6 +19,7 @@ const leadListsRoutes = require('./routes/leadLists.routes');
 const crmRoutes = require('./routes/crm.routes');
 const whatsappRoutes = require('./routes/whatsapp.routes');
 const whatsappCloudRoutes = require('./routes/whatsappCloud.routes');
+const resellerRoutes = require('./routes/reseller.routes');
 const whatsappCallsRoutes = require('./routes/whatsappCalls.routes');
 const callsRoutes = require('./routes/calls.routes');
 const linesRoutes = require('./routes/lines.routes');
@@ -49,6 +50,7 @@ const billingController = require('./controllers/billingController');
 const { startAccessSweepJob } = require('./jobs/accessSweepJob');
 const { startDidJobs } = require('./jobs/didJob');
 const { startWalletAlertJob } = require('./jobs/walletAlertJob');
+const { startAutoRechargeJob } = require('./jobs/autoRechargeJob');
 const { startRenewalReminderJob } = require('./jobs/renewalReminderJob');
 const { ensureAdminAccounts } = require('./services/accessService');
 
@@ -114,6 +116,7 @@ app.use('/api/lead-lists', leadListsRoutes);
 app.use('/api/crm', crmRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/whatsapp-cloud', whatsappCloudRoutes);
+app.use('/api/reseller', resellerRoutes);
 app.use('/api/whatsapp-calls', whatsappCallsRoutes);
 app.use('/api/calls', callsRoutes);
 app.use('/api/lines', linesRoutes);
@@ -167,6 +170,7 @@ server.listen(env.port, async () => {
   startAccessSweepJob();
   startDidJobs();
   startWalletAlertJob();
+  startAutoRechargeJob();
   startRenewalReminderJob();
   // Libera as contas dos administradores ANTES de restaurar as sessões de WhatsApp.
   await ensureAdminAccounts().catch((err) => console.error('Erro ao liberar administradores:', err.message));

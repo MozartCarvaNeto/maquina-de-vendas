@@ -96,3 +96,23 @@ ALTER TABLE "accounts" ADD COLUMN IF NOT EXISTS "referredById" TEXT;
 ALTER TABLE "accounts" ADD COLUMN IF NOT EXISTS "referralRewardedAt" TIMESTAMP(3);
 ALTER TABLE "accounts" ADD COLUMN IF NOT EXISTS "referralRewardBrl" DOUBLE PRECISION;
 CREATE UNIQUE INDEX IF NOT EXISTS "accounts_referralCode_key" ON "accounts"("referralCode");
+
+-- Recarga automática
+ALTER TABLE "wallets" ADD COLUMN IF NOT EXISTS "autoRechargeEnabled" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "wallets" ADD COLUMN IF NOT EXISTS "autoRechargeThresholdBrl" DOUBLE PRECISION;
+ALTER TABLE "wallets" ADD COLUMN IF NOT EXISTS "autoRechargeAmountBrl" DOUBLE PRECISION;
+ALTER TABLE "wallets" ADD COLUMN IF NOT EXISTS "autoCardToken" TEXT;
+ALTER TABLE "wallets" ADD COLUMN IF NOT EXISTS "autoCardBrand" TEXT;
+ALTER TABLE "wallets" ADD COLUMN IF NOT EXISTS "autoCardLast4" TEXT;
+ALTER TABLE "wallets" ADD COLUMN IF NOT EXISTS "autoRemoteIp" TEXT;
+ALTER TABLE "wallets" ADD COLUMN IF NOT EXISTS "autoRechargeLastAt" TIMESTAMP(3);
+ALTER TABLE "wallets" ADD COLUMN IF NOT EXISTS "autoRechargeFailedAt" TIMESTAMP(3);
+ALTER TABLE "wallet_topups" ADD COLUMN IF NOT EXISTS "source" TEXT NOT NULL DEFAULT 'manual';
+
+-- WhatsApp oficial gerenciado e revenda
+ALTER TABLE "whatsapp_connections" ADD COLUMN IF NOT EXISTS "managed" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "whatsapp_connections" ADD COLUMN IF NOT EXISTS "priceBrl" DOUBLE PRECISION;
+ALTER TABLE "accounts" ADD COLUMN IF NOT EXISTS "isReseller" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "accounts" ADD COLUMN IF NOT EXISTS "resellerId" TEXT;
+ALTER TABLE "accounts" ADD COLUMN IF NOT EXISTS "resellerMaxClients" INTEGER;
+CREATE INDEX IF NOT EXISTS "accounts_resellerId_idx" ON "accounts"("resellerId");

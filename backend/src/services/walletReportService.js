@@ -14,6 +14,8 @@ function category(t) {
   if (t.type === 'voz') return 'voz';
   if (t.type === 'sms') return 'sms';
   if (t.type === 'did_fee') return 'numero';
+  if (t.type === 'whatsapp' || t.type === 'repasse' || t.type === 'atacado') return 'outros';
+  if (t.type === 'estorno' && /WhatsApp/i.test(t.description || '')) return 'outros';
   if (t.type === 'estorno') return /SMS/i.test(t.description || '') ? 'sms' : 'voz';
   return 'outros';
 }

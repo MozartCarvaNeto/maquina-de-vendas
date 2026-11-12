@@ -5,7 +5,7 @@ const { readStoredCredentials, persistCredentials } = require('./settingsHelpers
 const CATEGORY = 'platform_telecom';
 const PROVIDER = 'billing_rules';
 const DEFAULTS = {
-  voiceCostOutPerMinBrl: 0, voiceCostInPerMinBrl: 0, voiceCostIncrementSec: 60, didCostMonthlyBrl: 0, smsCostFallbackBrl: 0,
+  voiceCostOutPerMinBrl: 0, voiceCostInPerMinBrl: 0, voiceCostIncrementSec: 60, didCostMonthlyBrl: 0, smsCostFallbackBrl: 0, whatsappPriceBrl: 0, whatsappCostBrl: 0,
   walletLowDefaultBrl: 10, topupEnabled: true, topupMinBrl: 10, topupMaxBrl: 5000, topupAutoEnable: true
 };
 let cache = null;
@@ -27,6 +27,8 @@ async function get(force = false) {
     voiceCostIncrementSec: [1, 6, 30, 60].includes(Number(v.voiceCostIncrementSec)) ? Number(v.voiceCostIncrementSec) : DEFAULTS.voiceCostIncrementSec,
     didCostMonthlyBrl: num(v.didCostMonthlyBrl, DEFAULTS.didCostMonthlyBrl, 0, 100000),
     smsCostFallbackBrl: num(v.smsCostFallbackBrl, DEFAULTS.smsCostFallbackBrl, 0, 1000),
+    whatsappPriceBrl: num(v.whatsappPriceBrl, DEFAULTS.whatsappPriceBrl, 0, 1000),
+    whatsappCostBrl: num(v.whatsappCostBrl, DEFAULTS.whatsappCostBrl, 0, 1000),
     walletLowDefaultBrl: num(v.walletLowDefaultBrl, DEFAULTS.walletLowDefaultBrl, 0, 100000),
     topupEnabled: v.topupEnabled === undefined ? DEFAULTS.topupEnabled : v.topupEnabled === 'true',
     topupMinBrl: num(v.topupMinBrl, DEFAULTS.topupMinBrl, 1, 100000),

@@ -405,6 +405,17 @@ exports.walletLow = async (req, res, next) => {
   }
 };
 
+exports.autoRechargeGet = async (req, res, next) => {
+  try { res.json(await require('../services/autoRechargeService').status(req.userId)); } catch (e) { next(e); }
+};
+exports.autoRechargeSave = async (req, res, next) => {
+  try { res.json(await require('../services/autoRechargeService').configure(req.userId, req.body || {}, req.ip)); }
+  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); next(e); }
+};
+exports.autoRechargeRemoveCard = async (req, res, next) => {
+  try { res.json(await require('../services/autoRechargeService').removeCard(req.userId)); } catch (e) { next(e); }
+};
+
 exports.walletTopup = async (req, res, next) => {
   try {
     res.status(201).json(await require('../services/walletTopupService').createTopup({ accountId: req.userId, amountBrl: req.body?.amountBrl, cpfCnpj: req.body?.cpfCnpj }));

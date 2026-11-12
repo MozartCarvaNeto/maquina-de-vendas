@@ -46,6 +46,7 @@ function serializeMember(member, accountName) {
     accountId: member.accountId,
     accountName,
     brand: brandOf(member.account),
+    isReseller: !!member.account?.isReseller,
     isPlatformAdmin: isPlatformAdminEmail(member.email),
     // Módulos liberados pelo plano da conta (null = todos).
     features: featuresForAccount(member.account, { isPlatformAdmin: isPlatformAdminEmail(member.email) })

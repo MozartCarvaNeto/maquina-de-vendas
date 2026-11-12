@@ -278,3 +278,44 @@ Testes: compilei backend e telas; **não testei contra o banco real** — após 
 - Limitação: não impede auto-indicação com e-mail diferente; acompanhe indicações suspeitas pelo painel de clientes.
 
 Testes: compilei backend e telas; não testei com pagamento real do Asaas.
+
+
+---
+
+## Recarga automática de saldo (cartão)
+
+**Precisa rodar SQL:** `SQL_NOVO_rodar_no_supabase.sql` no Supabase, depois `bash deploy/atualizar-servidor.sh --banco`.
+
+- Em **Gateway de telecom → Saldo → 🔁 Recarga automática** o cliente define: "recarregar quando o saldo ficar abaixo de R$ X" e "valor de cada recarga R$ Y".
+- **O cartão nunca passa pelo nosso servidor.** O cliente paga uma recarga normal com cartão na página do Asaas; o Asaas devolve um *token* (sem o número) que guardamos com bandeira e 4 últimos dígitos. A opção só aparece depois dessa primeira recarga com cartão.
+- Uma rotina a cada 5 minutos cobra quem ficou abaixo do limite. Proteções: no máximo 1 cobrança por hora e 3 por dia por conta; uma cobrança nunca é feita duas vezes; se falhar, a recarga automática **desliga sozinha** e o cliente recebe e-mail.
+- O extrato mostra "Recarga automática (cartão)". Aparece somente se o Asaas estiver configurado.
+
+**Atenção — teste antes de divulgar:** a captura do token depende de o Asaas devolver o token do cartão no pagamento. Teste no **sandbox do Asaas**: pague uma recarga com cartão de teste e veja se aparece "Cartão salvo". Se não aparecer, me avise: o Asaas exige ativar a tokenização na sua conta (suporte do Asaas) e posso ajustar.
+Testes feitos: lógica de cobrança única (simulada) e compilação. Nada foi cobrado de verdade.
+
+
+---
+
+## WhatsApp oficial gerenciado e Revendedores (painel do administrador)
+
+**Precisa rodar SQL:** `SQL_NOVO_rodar_no_supabase.sql` no Supabase, depois `bash deploy/atualizar-servidor.sh --banco`.
+
+### 💬 WhatsApp oficial (Cloud API) com tarifa repassada
+O sistema já permitia que cada cliente conectasse a própria conta da Meta (nesse caso a Meta cobra o cliente direto). Agora há também a versão **gerenciada por você**:
+1. Quando sua conta Meta Business estiver verificada, crie o número na sua conta e gere o token permanente.
+2. **Administração → 💬 WhatsApp oficial**: escolha o cliente, informe Phone Number ID, token (e App Secret) e, se quiser, um preço por mensagem para aquele número.
+3. Na Meta (Webhook) use a URL e o token de verificação que o painel mostra e assine o campo `messages`.
+4. O **preço padrão por mensagem** e o seu **custo na Meta** ficam em *Gateway de telecom → Custos e recarga* ("WhatsApp oficial…"). Cada mensagem enviada é cobrada do **saldo** do cliente; se o envio falhar, o valor é devolvido. O custo alimenta o painel de lucro.
+- O cliente usa o número normalmente em Conexões/Disparos/Chat, sem ver token e sem poder editá-lo.
+- Limites a saber: a Meta cobra por conversa/categoria (marketing, utilidade etc.) e o sistema cobra um **valor único por mensagem** que você define — ajuste o preço para cobrir a média. Disparo em massa fora da janela de 24 h exige *templates* aprovados na Meta (o sistema envia texto livre).
+
+### 🏪 Revendedores (agências)
+- **Administração → 🏪 Revendedores**: marque uma conta como revendedora e defina o limite de clientes.
+- **Tarifa de atacado = as tarifas da conta do revendedor** (SMS por parte e ligação por minuto), definidas por você nas tarifas da conta dele em *Gateway de telecom*. O revendedor recarrega o saldo dele normalmente (Pix/cartão).
+- No menu do revendedor aparece **🏪 Meus clientes (revenda)**: ele cria clientes (com plano e dias de acesso), define o preço de venda de cada um — **nunca abaixo do atacado** —, adiciona saldo ao cliente (o cliente paga ao revendedor por fora) e bloqueia/libera.
+- **Como você ganha:** a cada SMS/ligação do cliente, o sistema cobra do cliente o preço de venda e **debita da carteira do revendedor o atacado**. Se o saldo do revendedor zerar, os clientes dele **pausam** o uso de SMS/voz até ele recarregar.
+- O revendedor não vê dados dos outros revendedores, e clientes de revendedor não podem virar revendedores.
+- Limite conhecido: o revendedor pode liberar um cliente que você bloqueou manualmente; bloqueios do administrador devem ser conferidos no painel de Clientes. A cobrança do plano (mensalidade) do cliente fica por conta do revendedor — o sistema não cobra a mensalidade dele pelo Asaas.
+
+Testes: simulei a cobrança do cliente, o débito de atacado do revendedor e o bloqueio por falta de saldo; o restante foi só compilação. Não testei com Meta real nem com banco real.

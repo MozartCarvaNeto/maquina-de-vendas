@@ -5,8 +5,46 @@ import api from '../../services/api';
 
 const brl = (n) => Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 4 });
 const errText = (e) => e.response?.data?.error || e.message || 'Erro';
-const CAT = { recarga: 'Recarga', voz: 'Ligação', sms: 'SMS', numero: 'Mensalidade de número', outros: 'Outros' };
+const CAT = { recarga: 'Recarga', whatsapp: 'WhatsApp oficial', atacado: 'Atacado (clientes)', voz: 'Ligação', sms: 'SMS', numero: 'Mensalidade de número', outros: 'Outros' };
 const ymd = (d) => new Date(d.getTime() - 3 * 3600 * 1000).toISOString().slice(0, 10);
+
+function AutoRecharge({ flash }) {
+  const [st, setSt] = useState(null);
+  const [th, setTh] = useState('20');
+  const [am, setAm] = useState('50');
+  const [ok, setOk] = useState(false);
+  const load = useCallback(async () => {
+    try { const d = (await api.get('/gateway/wallet/auto-recharge')).data; setSt(d); setTh(String(d.thresholdBrl)); setAm(String(d.amountBrl)); setOk(d.enabled); } catch { /* sem Asaas */ }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  if (!st || !st.available) return null;
+  const save = async (enabled) => {
+    try { setSt((await api.put('/gateway/wallet/auto-recharge', { enabled, thresholdBrl: th, amountBrl: am })).data); setOk(enabled); flash(enabled ? '✅ Recarga automática ligada.' : '✅ Recarga automática desligada.'); } catch (e) { flash(`❌ ${errText(e)}`); }
+  };
+  const removeCard = async () => {
+    try { setSt((await api.delete('/gateway/wallet/auto-recharge/card')).data); setOk(false); flash('✅ Cartão removido.'); } catch (e) { flash(`❌ ${errText(e)}`); }
+  };
+  return (
+    <div style={{ marginTop: 16 }}>
+      <h4>🔁 Recarga automática</h4>
+      {st.failedAt && !st.enabled && <div className="hint-text" style={{ color: '#b91c1c' }}>⚠️ A última cobrança automática falhou e a recarga foi desligada. Confira o cartão e ligue de novo.</div>}
+      {!st.hasCard ? (
+        <p className="hint-text">Para ligar, faça antes uma recarga paga <strong>com cartão</strong> (acima). O cartão fica guardado com segurança no Asaas — nós não vemos nem guardamos o número.</p>
+      ) : (
+        <>
+          <p className="hint-text">Cartão salvo: <strong>{st.card.brand} •••• {st.card.last4}</strong> <button type="button" className="btn-secondary-small" onClick={removeCard}>Remover cartão</button></p>
+          <div className="gw-row">
+            <div><label>Recarregar quando o saldo ficar abaixo de (R$)</label><input value={th} onChange={(e) => setTh(e.target.value)} /></div>
+            <div><label>Valor de cada recarga (R$)</label><input value={am} onChange={(e) => setAm(e.target.value)} /></div>
+            <button type="button" className="btn-primary" onClick={() => save(true)}>{ok ? 'Salvar' : 'Ligar recarga automática'}</button>
+            {ok && <button type="button" className="btn-secondary-small" onClick={() => save(false)}>Desligar</button>}
+          </div>
+          <p className="hint-text">Ao ligar, você autoriza cobranças de R$ {Number(am || 0).toFixed(2)} no cartão sempre que o saldo ficar abaixo de R$ {Number(th || 0).toFixed(2)} (no máximo 1 por hora e 3 por dia). Se uma cobrança falhar, a recarga automática desliga e você recebe um e-mail.</p>
+        </>
+      )}
+    </div>
+  );
+}
 
 export function TopupBox({ me, flash, reload }) {
   const [amount, setAmount] = useState('50');
@@ -50,6 +88,7 @@ export function TopupBox({ me, flash, reload }) {
           ))}</tbody>
         </table>
       )}
+      <AutoRecharge flash={flash} />
       <div className="gw-row">
         <div><label>Avisar por e-mail quando o saldo ficar abaixo de (R$)</label><input placeholder={`padrão: ${me.lowDefaultBrl}`} value={low} onChange={(e) => setLow(e.target.value)} /></div>
         <button type="button" className="btn-secondary-small" onClick={saveLow}>Salvar aviso</button>
@@ -109,6 +148,8 @@ const FIELDS = [
   ['voiceCostInPerMinBrl', 'Custo da ligação recebida (R$/min)'],
   ['didCostMonthlyBrl', 'Custo mensal de cada número (R$)'],
   ['smsCostFallbackBrl', 'Custo do SMS quando a operadora não tem custo cadastrado (R$/parte)'],
+  ['whatsappPriceBrl', 'WhatsApp oficial: preço cobrado do cliente por mensagem (R$)'],
+  ['whatsappCostBrl', 'WhatsApp oficial: seu custo por mensagem na Meta (R$)'],
   ['walletLowDefaultBrl', 'Aviso de saldo baixo padrão (R$)'],
   ['topupMinBrl', 'Recarga mínima (R$)'],
   ['topupMaxBrl', 'Recarga máxima (R$)']

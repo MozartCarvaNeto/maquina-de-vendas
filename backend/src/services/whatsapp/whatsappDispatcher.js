@@ -21,6 +21,26 @@ function isReady(connection) {
  *   `loadConnectionForSending` abaixo pra isso).
  */
 async function sendMessage(connection, toPhone, text, mediaFilePath, mediaOptions = {}) {
+  // WhatsApp oficial gerenciado pela plataforma: a mensagem é cobrada do saldo do cliente
+  // (tarifa repassada). Se o envio falhar, o valor é devolvido.
+  if (connection.provider === 'cloud_api' && connection.managed) {
+    const rules = await require('../platformBillingSettings').get();
+    const price = connection.priceBrl ?? rules.whatsappPriceBrl;
+    const wallet = require('../walletService');
+    const { charged } = price > 0
+      ? await wallet.charge(connection.userId, price, { type: 'whatsapp', description: 'WhatsApp oficial (mensagem)', refId: connection.id, costBrl: rules.whatsappCostBrl, quantity: 1 })
+      : { charged: false };
+    try {
+      return await sendMessageRaw(connection, toPhone, text, mediaFilePath, mediaOptions);
+    } catch (err) {
+      if (charged) await wallet.refund(connection.userId, price, 'Estorno WhatsApp oficial: envio falhou', connection.id).catch(() => null);
+      throw err;
+    }
+  }
+  return sendMessageRaw(connection, toPhone, text, mediaFilePath, mediaOptions);
+}
+
+async function sendMessageRaw(connection, toPhone, text, mediaFilePath, mediaOptions = {}) {
   if (connection.provider === 'cloud_api') {
     // Sobe o arquivo para a Meta e envia pelo id (antes usava uma URL
     // pública montada errada, o que quebrava os disparos com imagem).

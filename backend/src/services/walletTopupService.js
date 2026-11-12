@@ -60,7 +60,8 @@ async function applyPaid(payment) {
   const claimed = await prisma.walletTopup.updateMany({ where: { id, status: { not: 'paid' } }, data: { status: 'paid', paidAt: new Date(), asaasPaymentId: payment.id } });
   if (!claimed.count) return { status: 'duplicate' };
   const amount = topup.amountCents / 100;
-  await wallet.credit(topup.accountId, amount, { type: 'recarga', description: 'Recarga online (Asaas)', refId: topup.id });
+  await wallet.credit(topup.accountId, amount, { type: 'recarga', description: topup.source === 'auto' ? 'Recarga automática (cartão)' : 'Recarga online (Asaas)', refId: topup.id });
+  if (topup.source !== 'auto') await require('./autoRechargeService').captureToken(topup.accountId, payment);
   const r = await rules.get();
   if (r.topupAutoEnable) await prisma.wallet.updateMany({ where: { userId: topup.accountId, enabled: { not: true } }, data: { enabled: true } });
   await prisma.wallet.updateMany({ where: { userId: topup.accountId }, data: { lowNotifiedAt: null } });

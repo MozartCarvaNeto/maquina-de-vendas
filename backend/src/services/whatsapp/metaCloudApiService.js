@@ -221,6 +221,11 @@ async function updateConnection(userId, connectionId, { accessToken, appSecret }
     throw err;
   }
 
+  if (existing.managed) {
+    const err = new Error('Esta conexão é gerenciada pelo administrador do sistema.');
+    err.status = 403;
+    throw err;
+  }
   const newToken = accessToken || decrypt(existing.accessTokenEnc);
   const info = await validateConnection({ phoneNumberId: existing.phoneNumberId, accessToken: newToken });
 
