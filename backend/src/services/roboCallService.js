@@ -282,6 +282,7 @@ async function placeRoboCall(campaign, lead, provider) {
     }
   });
 
+  const amdOn = (provider.supportsAmd || provider.providerName === 'asterisk') && (await require('./answeringMachineActions').amdEnabledFor(campaign.userId));
   try {
     const { providerCallId } = await provider.startCall({
       to: toE164BR(lead.phone) || lead.phone,
@@ -290,6 +291,7 @@ async function placeRoboCall(campaign, lead, provider) {
       twiml: buildIntroTwiml(campaign, callId),
       ringTimeoutSeconds: RING_TIMEOUT_SECONDS,
       timeLimitSeconds: CALL_TIME_LIMIT_SECONDS,
+      ...(amdOn ? { detectMachine: true, amdCallbackUrl: `${base}/api/calls/webhook/amd?callId=${callId}` } : {}),
       recordingStatusCallbackUrl: campaign.recordCallsEnabled
         ? `${base}/api/robocalls/webhook/recording?callId=${callId}`
         : undefined
@@ -410,6 +412,14 @@ async function registerResponse(call, { digits, speech, confidence, raw }) {
   const campaign = call.roboCallCampaign;
   const Digits = digits;
   const SpeechResult = speech;
+  // A "resposta" era uma gravação (caixa postal / URA / triagem)? Não conta como resposta de ninguém.
+  if (!Digits && SpeechResult) {
+    const m = require('./answeringMachineService').classifyUtterance(SpeechResult);
+    if (m.isMachine) {
+      await require('./answeringMachineActions').handleMachineDetected({ id: call.id }, { kind: m.kind, outcome: m.outcome, source: 'texto', reason: m.reason });
+      return { decision: 'maquina', qualified: false, machine: true };
+    }
+  }
   const Confidence = confidence;
   const req = { body: raw || { Digits, SpeechResult, Confidence } };
     const { decision, optOut } = classifyResponse(

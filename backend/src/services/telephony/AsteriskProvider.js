@@ -43,10 +43,10 @@ class AsteriskProvider extends ITelephonyProvider {
     return { trunk: built.active[idx], endpoint: built.trunks[idx] };
   }
 
-  async startCall({ to, from, ringTimeoutSeconds = 30, timeLimitSeconds, statusCallbackUrl, recordingStatusCallbackUrl, twiml }) {
+  async startCall({ to, from, ringTimeoutSeconds = 30, timeLimitSeconds, statusCallbackUrl, recordingStatusCallbackUrl, twiml, detectMachine }) {
     const callId = /callId=([0-9a-f-]{36})/i.exec(statusCallbackUrl || '')?.[1];
     if (twiml && callId && /\/robocalls\//.test(statusCallbackUrl || '')) {
-      return this.startRoboCall({ to, from, callId, twiml, ringTimeoutSeconds, timeLimitSeconds, record: Boolean(recordingStatusCallbackUrl) });
+      return this.startRoboCall({ to, from, callId, twiml, ringTimeoutSeconds, timeLimitSeconds, record: Boolean(recordingStatusCallbackUrl), detectMachine });
     }
     if (twiml) {
       const err = new Error('Este tipo de ligação com roteiro em TwiML só roda pela Twilio (a URA reversa e as ligações da IA já têm suporte próprio no Asterisk).');
@@ -54,7 +54,7 @@ class AsteriskProvider extends ITelephonyProvider {
       err.fatal = true;
       throw err;
     }
-    if (!callId) return this.startDialerLeg({ to, from, ringTimeoutSeconds, timeLimitSeconds });
+    if (!callId) return this.startDialerLeg({ to, from, ringTimeoutSeconds, timeLimitSeconds, detectMachine });
     const allow = await require('../walletService').voiceAllowance(this.userId);
     if (!allow.allowed) {
       const err = new Error('Saldo insuficiente para ligar. Peça uma recarga ao administrador do serviço.');
@@ -78,6 +78,7 @@ class AsteriskProvider extends ITelephonyProvider {
       `Setvar: TP_PREFIX=${trunk.dialPrefix || ''}`,
       `Setvar: TP_TAG=${require('../pbx/pbxCore').tagFor(this.userId)}`
     ];
+    if (detectMachine) lines.push('Setvar: TP_AMD=1');
     if (recordingStatusCallbackUrl) lines.push(`Setvar: TP_REC=ai-${callId}`);
     const limit = [timeLimitSeconds, allow.maxSeconds].filter((x) => x > 0);
     if (limit.length) lines.push(`Setvar: TIMEOUT(absolute)=${Math.round(Math.min(...limit))}`);
@@ -117,7 +118,7 @@ class AsteriskProvider extends ITelephonyProvider {
     return allow;
   }
 
-  legLines({ sid, leg, dialStr, wait, from, room, timeLimit, robo }) {
+  legLines({ sid, leg, dialStr, wait, from, room, timeLimit, robo, amd }) {
     const hex = sid.slice(4);
     const num = String(from || '').replace(/\D/g, '');
     const lines = [
@@ -133,6 +134,7 @@ class AsteriskProvider extends ITelephonyProvider {
       `Setvar: TP_DIALSTR=${dialStr}`,
       `Setvar: TP_TAG=${require('../pbx/pbxCore').tagFor(this.userId)}`
     ];
+    if (amd && leg === 'lead') lines.push('Setvar: TP_AMD=1');
     if (robo) lines.push(`Setvar: TP_CALLID=${robo.callId}`, `Setvar: TP_INTRO=${robo.intro}`, `Setvar: TP_REC=${robo.rec || ''}`);
     if (timeLimit > 0) lines.push(`Setvar: TIMEOUT(absolute)=${Math.round(timeLimit)}`);
     return lines;
@@ -142,20 +144,20 @@ class AsteriskProvider extends ITelephonyProvider {
     return `dl${String(sid).replace(/^ast-/, '')}`;
   }
 
-  async startDialerLeg({ to, from, ringTimeoutSeconds = 30, timeLimitSeconds }) {
+  async startDialerLeg({ to, from, ringTimeoutSeconds = 30, timeLimitSeconds, detectMachine }) {
     const allow = await this.checkAllowance();
     const info = await this.pickTrunk();
     const digits = String(to).replace(/\D/g, '');
     const sid = `ast-${crypto.randomBytes(16).toString('hex')}`;
     const limit = [timeLimitSeconds, allow.maxSeconds].filter((x) => x > 0);
     await this.writeCallFile(`turbo-dial-${sid}.call`, this.legLines({
-      sid, leg: 'lead', dialStr: await this.dialString(digits, info), wait: Math.max(10, ringTimeoutSeconds), from, room: AsteriskProvider.roomFor(sid), timeLimit: limit.length ? Math.min(...limit) : 0
+      sid, leg: 'lead', dialStr: await this.dialString(digits, info), wait: Math.max(10, ringTimeoutSeconds), from, room: AsteriskProvider.roomFor(sid), timeLimit: limit.length ? Math.min(...limit) : 0, amd: detectMachine
     }));
     return { providerCallId: sid, status: 'queued' };
   }
 
   /** URA reversa (robô): toca o áudio de abertura, lê a tecla; se não houver tecla, a ponte escuta a fala. */
-  async startRoboCall({ to, from, callId, twiml, ringTimeoutSeconds = 25, timeLimitSeconds, record }) {
+  async startRoboCall({ to, from, callId, twiml, ringTimeoutSeconds = 25, timeLimitSeconds, record, detectMachine }) {
     const allow = await this.checkAllowance();
     const info = await this.pickTrunk();
     const m = /\/uploads\/robocall-audio\/([0-9a-f-]{36})\/([^<"?]+)/i.exec(String(twiml));
@@ -174,7 +176,7 @@ class AsteriskProvider extends ITelephonyProvider {
     const limit = [timeLimitSeconds, allow.maxSeconds].filter((x) => x > 0);
     await this.writeCallFile(`turbo-dial-${sid}.call`, this.legLines({
       sid, leg: 'lead', dialStr: await this.dialString(String(to).replace(/\D/g, ''), info), wait: Math.max(10, ringTimeoutSeconds), from, room: '', timeLimit: limit.length ? Math.min(...limit) : 0,
-      robo: { callId, intro: base, rec: record ? `${host.dirs().rec}/robo-${callId}` : '' }
+      robo: { callId, intro: base, rec: record ? `${host.dirs().rec}/robo-${callId}` : '' }, amd: detectMachine
     }));
     return { providerCallId: sid, status: 'queued' };
   }

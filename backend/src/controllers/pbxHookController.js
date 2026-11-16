@@ -117,6 +117,12 @@ exports.dialEvent = async (req, res) => {
     const q = req.query;
     const sid = clip(q.sid, 40);
     if (!/^ast-[0-9a-f]{32}$/.test(sid)) return res.type('text/plain').send('IGNORED');
+    if (q.ev === 'machine') {
+      // AMD do Asterisk na perna do cliente (discador ou robô): caixa postal -> desliga e segue para a próxima
+      const cidM = /^[0-9a-f-]{36}$/i.test(q.cid || '') ? String(q.cid) : null;
+      await require('../services/answeringMachineActions').handleMachineDetected(cidM ? { id: cidM } : { providerCallId: sid }, { kind: 'caixa_postal', source: 'amd:asterisk', reason: 'detectado pelo áudio' });
+      return res.type('text/plain').send('OK');
+    }
     let status;
     if (q.ev === 'answered') status = 'in-progress';
     else {
@@ -162,6 +168,20 @@ exports.roboDigit = (req, res) => {
 exports.aiNext = (req, res) => {
   if (!guard(req, res)) return;
   res.type('text/plain').send(bridge.nextAction(String(req.query.callId || '')));
+};
+
+/** O AMD do Asterisk reconheceu caixa postal numa ligação da IA: marca o resultado e segue para a próxima. */
+exports.aiMachine = async (req, res) => {
+  if (!guard(req, res)) return;
+  try {
+    const callId = String(req.query.callId || '');
+    if (!/^[0-9a-f-]{36}$/i.test(callId)) return res.type('text/plain').send('IGNORED');
+    await require('../services/answeringMachineActions').handleMachineDetected({ id: callId }, { kind: 'caixa_postal', source: 'amd:asterisk', reason: 'detectado pelo áudio' });
+    res.type('text/plain').send('OK');
+  } catch (e) {
+    console.error('PBX caixa postal (IA):', e.message);
+    res.type('text/plain').send('ERR');
+  }
 };
 
 exports.aiEnd = async (req, res) => {

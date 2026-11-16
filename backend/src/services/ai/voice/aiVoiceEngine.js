@@ -293,16 +293,9 @@ async function runAgentTurn({ agent, leadName, inbound = false, transcript, user
   return parseModelReply(rawText, { now });
 }
 
-// Frases que indicam caixa postal / secretária eletrônica.
-const VOICEMAIL_PHRASES = [
-  'caixa postal', 'caixa de mensagens', 'deixe sua mensagem', 'deixe seu recado', 'deixe um recado', 'deixe uma mensagem',
-  'apos o sinal', 'apos o bip', 'depois do sinal', 'depois do bip', 'nao esta disponivel', 'nao pode atender', 'nao podemos atender',
-  'gravar sua mensagem', 'secretaria eletronica', 'mensagem apos', 'fora da area de cobertura', 'telefone desligado',
-  'esta desligado', 'nao atende', 'a pessoa que voce ligou', 'o numero chamado', 'correio de voz', 'voicemail'
-];
+// Detecção de caixa postal / secretária / triagem / URA: ver services/answeringMachineService.js (lista completa).
 function looksLikeVoicemail(speech) {
-  const heard = normalize(speech);
-  return VOICEMAIL_PHRASES.some((phrase) => heard.includes(phrase));
+  return require('../../answeringMachineService').classifyUtterance(speech).isMachine;
 }
 
 /**

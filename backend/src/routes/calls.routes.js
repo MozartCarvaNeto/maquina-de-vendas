@@ -8,6 +8,7 @@ const { requireFeature } = require('../services/featureService');
 
 // Webhooks públicos (chamados pela Twilio, sem JWT)
 router.post('/webhook/twilio', callsWebhookController.handleTwilioWebhook);
+router.post('/webhook/amd', callsWebhookController.handleAmd);
 router.post('/webhook/recording', callsWebhookController.handleRecordingStatusWebhook);
 
 router.use(auth);

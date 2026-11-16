@@ -13,6 +13,7 @@
 //  - O vendedor livre há mais tempo é o escolhido (rodízio justo).
 //  - O "motor" automático (jobs/dialerAutoJob.js) chama runDialerTick() a cada poucos segundos para as contas
 //    com o modo automático ligado.
+const crypto = require('crypto');
 const prisma = require('../config/db');
 const env = require('../config/env');
 const { getActiveTelephonyProvider } = require('./telephony/providerFactory');
@@ -199,8 +200,18 @@ async function dialOne(userId) {
 
   const statusCallbackUrl = `${env.backendPublicUrl}/api/calls/webhook/twilio`;
   let providerCallId;
+  let pendingAmd = false;
+  const callId = crypto.randomUUID();
   try {
-    const result = await provider.startCall({ to, from: callerNumber.phoneNumber, statusCallbackUrl });
+    const amd = await require('./answeringMachineActions').amdEnabledFor(userId, { dialer: true });
+    const useAmd = amd && (provider.supportsAmd || provider.providerName === 'asterisk');
+    pendingAmd = useAmd && provider.supportsAmd; // Twilio: o vendedor só é chamado depois do aviso do AMD
+    const result = await provider.startCall({
+      to,
+      from: callerNumber.phoneNumber,
+      statusCallbackUrl,
+      ...(useAmd ? { detectMachine: true, amdCallbackUrl: `${env.backendPublicUrl}/api/calls/webhook/amd?callId=${callId}` } : {})
+    });
     providerCallId = result.providerCallId;
   } catch (error) {
     if (FATAL_TWILIO_CODES.includes(error.twilioCode)) {
@@ -221,6 +232,7 @@ async function dialOne(userId) {
 
   const call = await prisma.call.create({
     data: {
+      id: callId,
       userId,
       leadId: lead.id,
       provider: provider.providerName || 'twilio',
@@ -230,6 +242,7 @@ async function dialOne(userId) {
       callerNumberId: callerNumber.id,
       agentId: agent.id,
       status: 'iniciando',
+      ...(pendingAmd ? { answeredBy: 'amd_pendente' } : {}),
       startedAt: new Date()
     }
   });

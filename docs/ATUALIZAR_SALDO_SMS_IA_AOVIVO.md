@@ -319,3 +319,23 @@ O sistema já permitia que cada cliente conectasse a própria conta da Meta (nes
 - Limite conhecido: o revendedor pode liberar um cliente que você bloqueou manualmente; bloqueios do administrador devem ser conferidos no painel de Clientes. A cobrança do plano (mensalidade) do cliente fica por conta do revendedor — o sistema não cobra a mensalidade dele pelo Asaas.
 
 Testes: simulei a cobrança do cliente, o débito de atacado do revendedor e o bloqueio por falta de saldo; o restante foi só compilação. Não testei com Meta real nem com banco real.
+
+---
+
+## Detecção de caixa postal, secretária eletrônica e URA (discador, IA e robô)
+
+**O que mudou (sem alterar o banco de dados):** quando quem atende é uma gravação, a ligação é encerrada na hora e o sistema parte para a próxima.
+
+Reconhece: caixa postal das operadoras (Vivo, Claro, TIM, Oi…), secretária do iPhone e do Android, triagem de chamadas (Google/iPhone: "diga seu nome e o motivo da ligação"), avisos como "desligado ou fora da área", "número não existe", "chamadas a cobrar", e URAs de empresas ("digite 1…", "todos os atendentes estão ocupados").
+
+**Como funciona (3 camadas):**
+1. **Pelo áudio (AMD)** — Twilio e Asterisk. No discador com vendedor, o vendedor **só é chamado depois** que o sistema confirma que é uma pessoa (até ~3–5 s). Se for máquina: desliga, o lead volta para a fila (nova tentativa em 60 min, até 3x) e o vendedor já pega o próximo.
+2. **Pelo texto** — na IA e no robô, tudo que o cliente fala é comparado com ~500 frases típicas de gravação. Se bater, desliga **antes de a IA responder** (não gasta crédito de IA). Resultado fica "Caixa postal" (ou "Número errado"), sem criar "retorno agendado".
+3. **Heurísticas** — parágrafo longo logo no início e a mesma fala se repetindo (gravação em loop).
+
+**Para desligar o AMD:** no servidor, `AMD_DISABLED=true` no `.env`; no discador, configuração `amdEnabled=false`. A detecção por texto continua.
+
+**Atenção:**
+- A Twilio cobra uma taxa pequena por AMD (consulte sua tabela). No Asterisk o módulo `app_amd` precisa estar ativo (vem no padrão). Depois de atualizar, **recarregue a configuração do PBX** (Telefonia PBX > Aplicar) para o plano de discagem novo valer.
+- Telnyx e Jambonz: só a detecção por texto (IA/robô); o discador com vendedor nelas não tem AMD.
+- Não foi testado em operadoras reais. Acompanhe as primeiras 20–30 ligações: se uma pessoa de verdade for cortada, desligue o AMD do discador e me avise com a frase.

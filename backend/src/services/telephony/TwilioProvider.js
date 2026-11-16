@@ -22,6 +22,7 @@ class TwilioProvider extends ITelephonyProvider {
     this.client = twilio(this.accountSid, this.authToken);
     this.providerName = 'twilio';
     this.dialect = 'twiml';
+    this.supportsAmd = true;
   }
 
   translateError(error) {
@@ -36,7 +37,7 @@ class TwilioProvider extends ITelephonyProvider {
    *  - timeLimitSeconds: duração máxima da ligação (proteção contra custo inesperado)
    *  - recordingStatusCallbackUrl: se informado, grava a ligação inteira
    */
-  async startCall({ to, from, statusCallbackUrl, twiml, ringTimeoutSeconds, timeLimitSeconds, recordingStatusCallbackUrl }) {
+  async startCall({ to, from, statusCallbackUrl, twiml, ringTimeoutSeconds, timeLimitSeconds, recordingStatusCallbackUrl, detectMachine, amdCallbackUrl }) {
     try {
       const params = {
         to,
@@ -49,6 +50,18 @@ class TwilioProvider extends ITelephonyProvider {
         statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
         statusCallbackMethod: 'POST'
       };
+      if (detectMachine && amdCallbackUrl) {
+        // Detecção de caixa postal pelo áudio (assíncrona: a ligação segue e a Twilio avisa o resultado em seguida).
+        // Fala longa logo no início (>3,2 s) = gravação; "alô?" curto = pessoa.
+        params.machineDetection = 'Enable';
+        params.asyncAmd = 'true';
+        params.asyncAmdStatusCallback = amdCallbackUrl;
+        params.asyncAmdStatusCallbackMethod = 'POST';
+        params.machineDetectionSpeechThreshold = 3200;
+        params.machineDetectionSpeechEndThreshold = 1200;
+        params.machineDetectionSilenceTimeout = 5000;
+        params.machineDetectionTimeout = 8;
+      }
       if (ringTimeoutSeconds) params.timeout = ringTimeoutSeconds;
       if (timeLimitSeconds) params.timeLimit = timeLimitSeconds;
       if (recordingStatusCallbackUrl) {

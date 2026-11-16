@@ -6,6 +6,7 @@
 // quando o lead está pronto, passa para o vendedor (transferindo a ligação
 // ou mandando o contato por WhatsApp). Tudo que acontece vai para o CRM.
 const crypto = require('crypto');
+const machines = require('../../answeringMachineService');
 const prisma = require('../../../config/db');
 const env = require('../../../config/env');
 const { getAiTelephonyProvider } = require('../../telephony/providerFactory');
@@ -536,12 +537,18 @@ async function processTurn({ callId, speech, confidence }) {
     return buildGatherTwiml({ agent, text: again, callId });
   }
 
-  // ---- caixa postal ----
-  if (session.turnCount <= 2 && looksLikeVoicemail(heard)) {
+  // ---- caixa postal / secretária / triagem / URA: encerra na hora, sem gastar crédito de IA ----
+  const leadSoFar = [...transcript.filter((t) => t && t.role === 'lead'), { text: heard }];
+  const machine = machines.classifyConversation(leadSoFar);
+  if (machine.isMachine) {
     await prisma.aiCallSession.update({
       where: { id: session.id },
-      data: { outcome: 'caixa_postal', transcript: [...transcript, { role: 'lead', text: heard.slice(0, 500), at: nowIso }] }
+      data: {
+        outcome: machine.outcome,
+        transcript: [...transcript, { role: 'lead', text: heard.slice(0, 500), machine: machine.kind, at: nowIso }]
+      }
     });
+    console.log(`📵 Ligação ${callId}: ${machines.describe(machine.kind)} (${machine.reason}) — encerrada.`);
     return '<Response><Hangup/></Response>';
   }
 
@@ -783,8 +790,13 @@ async function resolveFinalOutcome(session, agent, lead) {
   const leadTurns = turns.filter((t) => t && t.role === 'lead' && t.text);
   const data = {};
 
-  if (leadTurns.some((t) => looksLikeVoicemail(t.text)) && leadTurns.length <= 3) {
-    data.outcome = 'caixa_postal';
+  const machineVerdict = machines.classifyConversation(leadTurns, { max: 6 });
+  if (session.outcome === 'caixa_postal' || session.outcome === 'numero_errado') {
+    // já reconhecido durante a ligação (AMD ou texto): não deixa a análise da IA mudar
+  } else if (machineVerdict.isMachine && leadTurns.length <= 6) {
+    data.outcome = machineVerdict.outcome;
+    data.callbackAt = null;
+    data.callbackNote = null;
   } else if (leadTurns.length > 0 && (!session.outcome || session.outcome === 'sem_conclusao')) {
     try {
       const verdict = await classifyCall({ agent, leadName: lead.name, transcript: turns });
@@ -1103,6 +1115,7 @@ async function placeAiCall({ campaign, agent, lead, provider, isTest = false }) 
     }
   });
 
+  const amdOn = (provider.supportsAmd || provider.providerName === 'asterisk') && (await require('../../answeringMachineActions').amdEnabledFor(agent.userId));
   try {
     // Twilio recebe a abertura junto com o pedido da ligação (como sempre). As outras operadoras
     // consultam o endereço "answer" quando o cliente atende (ver handleAnswerCall).
@@ -1117,6 +1130,7 @@ async function placeAiCall({ campaign, agent, lead, provider, isTest = false }) 
         : { answerUrl: `${baseUrl()}/api/ai-calls/webhook/answer?callId=${callId}${dialectParam}` }),
       ringTimeoutSeconds: RING_TIMEOUT_SECONDS,
       timeLimitSeconds: agent.maxCallSeconds || 420,
+      ...(amdOn ? { detectMachine: true, amdCallbackUrl: `${baseUrl()}/api/calls/webhook/amd?callId=${callId}` } : {}),
       recordingStatusCallbackUrl: agent.recordCalls ? `${baseUrl()}/api/ai-calls/webhook/recording?callId=${callId}${dialectParam}` : undefined
     });
     await prisma.call.update({ where: { id: callId }, data: { providerCallId } });

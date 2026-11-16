@@ -57,58 +57,18 @@ exports.handleTwilioWebhook = async (req, res, next) => {
       updateData.answeredAt = new Date();
       updateData.answeredBy = 'humano';
 
-      const lead = await prisma.lead.findUnique({ where: { id: call.leadId } });
+      if (call.answeredBy !== 'amd_pendente') await emitAnswered(call);
 
-      const io = global.socketIoInstance;
-      if (io && lead) {
-        io.to(`user:${call.userId}`).emit('call:answered', {
-          callId: call.id,
-          leadId: lead.id,
-          leadName: lead.name,
-          leadPhone: lead.phone
-        });
-      }
-
-      if (call.agentId && call.callerNumberId) {
-        const [agent, callerNumber] = await Promise.all([
-          prisma.agent.findUnique({ where: { id: call.agentId } }),
-          prisma.callerNumber.findUnique({ where: { id: call.callerNumberId } })
-        ]);
-
-        if (agent && callerNumber) {
-          const provider = await getActiveTelephonyProvider(call.userId);
-          const conferenceRoom = `call_${call.id}`;
-          const statusCallbackUrl = `${env.backendPublicUrl}/api/calls/webhook/twilio`;
-          const recordingStatusCallbackUrl = `${env.backendPublicUrl}/api/calls/webhook/recording`;
-
-          const dialerSettings = await getCredentials(call.userId, 'dialer');
-          const recordingEnabled = dialerSettings?.recordCallsEnabled === 'true';
-
-          try {
-            const { agentCallSid, recordingUrl: localRecording } = await provider.bridgeToAgent({
-              providerCallId: call.providerCallId,
-              from: callerNumber.phoneNumber,
-              agentPhoneNumber: toE164BR(agent.phoneNumber) || agent.phoneNumber,
-              agentId: agent.id,
-              conferenceRoomName: conferenceRoom,
-              statusCallbackUrl,
-              recordingEnabled,
-              recordingStatusCallbackUrl
-            });
-
-            updateData.agentProviderCallId = agentCallSid;
-            if (localRecording) updateData.recordingUrl = localRecording;
-            updateData.conferenceRoom = conferenceRoom;
-          } catch (bridgeError) {
-            console.error(`❌ Não foi possível ligar para o vendedor ${agent.name}: ${bridgeError.message}`);
-            await prisma.callEvent.create({
-              data: { callId: call.id, eventType: 'vendedor_falha_repasse', rawPayload: { error: bridgeError.message } }
-            }).catch(() => {});
-            await prisma.call.update({ where: { id: call.id }, data: updateData });
-            await handleAgentMissed({ ...call, ...updateData }, bridgeError.message);
-            res.set('Content-Type', 'text/xml');
-            return res.status(200).send('<Response></Response>');
-          }
+      if (call.answeredBy === 'amd_pendente') {
+        // Detecção de caixa postal em andamento: só chama o vendedor quando o AMD disser que é pessoa
+        // (ou, na falta do aviso, depois de alguns segundos).
+        updateData.answeredBy = 'verificando';
+        scheduleAmdFallback(call.id);
+      } else if (call.agentId && call.callerNumberId) {
+        const ok = await bridgeAgentForCall(call, updateData);
+        if (!ok) {
+          res.set('Content-Type', 'text/xml');
+          return res.status(200).send('<Response></Response>');
         }
       }
     }
@@ -182,6 +142,101 @@ exports.handleRecordingStatusWebhook = async (req, res, next) => {
     res.status(200).send('<Response></Response>');
   } catch (error) {
     next(error);
+  }
+};
+
+/** Chama o vendedor e une com o lead (sala de conferência). Devolve false se não foi possível (já tratado). */
+async function emitAnswered(call) {
+  const lead = await prisma.lead.findUnique({ where: { id: call.leadId } });
+  const io = global.socketIoInstance;
+  if (io && lead) {
+    io.to(`user:${call.userId}`).emit('call:answered', { callId: call.id, leadId: lead.id, leadName: lead.name, leadPhone: lead.phone });
+  }
+}
+
+async function bridgeAgentForCall(call, updateData) {
+  const [agent, callerNumber] = await Promise.all([
+    prisma.agent.findUnique({ where: { id: call.agentId } }),
+    prisma.callerNumber.findUnique({ where: { id: call.callerNumberId } })
+  ]);
+  if (!agent || !callerNumber) return true;
+  const provider = await getActiveTelephonyProvider(call.userId);
+  const conferenceRoom = `call_${call.id}`;
+  const statusCallbackUrl = `${env.backendPublicUrl}/api/calls/webhook/twilio`;
+  const recordingStatusCallbackUrl = `${env.backendPublicUrl}/api/calls/webhook/recording`;
+  const dialerSettings = await getCredentials(call.userId, 'dialer');
+  const recordingEnabled = dialerSettings?.recordCallsEnabled === 'true';
+  try {
+    const { agentCallSid, recordingUrl: localRecording } = await provider.bridgeToAgent({
+      providerCallId: call.providerCallId,
+      from: callerNumber.phoneNumber,
+      agentPhoneNumber: toE164BR(agent.phoneNumber) || agent.phoneNumber,
+      agentId: agent.id,
+      conferenceRoomName: conferenceRoom,
+      statusCallbackUrl,
+      recordingEnabled,
+      recordingStatusCallbackUrl
+    });
+    updateData.agentProviderCallId = agentCallSid;
+    if (localRecording) updateData.recordingUrl = localRecording;
+    updateData.conferenceRoom = conferenceRoom;
+    return true;
+  } catch (bridgeError) {
+    console.error(`❌ Não foi possível ligar para o vendedor ${agent.name}: ${bridgeError.message}`);
+    await prisma.callEvent.create({
+      data: { callId: call.id, eventType: 'vendedor_falha_repasse', rawPayload: { error: bridgeError.message } }
+    }).catch(() => {});
+    await prisma.call.update({ where: { id: call.id }, data: updateData });
+    await handleAgentMissed({ ...call, ...updateData }, bridgeError.message);
+    return false;
+  }
+}
+
+/** Liga o vendedor depois do AMD dizer "pessoa" (ou se o aviso do AMD não chegar). */
+async function bridgeAfterAmd(callId) {
+  const call = await prisma.call.findUnique({ where: { id: callId } });
+  if (!call || call.answeredBy !== 'verificando' || call.agentProviderCallId || call.status === 'encerrada') return;
+  const data = { answeredBy: 'humano' };
+  const claim = await prisma.call.updateMany({ where: { id: callId, answeredBy: 'verificando' }, data });
+  if (claim.count === 0) return;
+  await emitAnswered(call);
+  if (call.agentId && call.callerNumberId) {
+    const ok = await bridgeAgentForCall(call, data);
+    if (ok) await prisma.call.update({ where: { id: callId }, data });
+  }
+}
+
+function scheduleAmdFallback(callId) {
+  const t = setTimeout(() => bridgeAfterAmd(callId).catch((e) => console.error('Repasse após AMD:', e.message)), 9000);
+  if (t.unref) t.unref();
+}
+
+/**
+ * Aviso de detecção de caixa postal (Twilio AsyncAMD): máquina = desliga e segue para o próximo; pessoa = segue o fluxo.
+ * POST /api/calls/webhook/amd?callId=...
+ */
+exports.handleAmd = async (req, res) => {
+  try {
+    const machines = require('../services/answeringMachineService');
+    const { handleMachineDetected } = require('../services/answeringMachineActions');
+    const callId = String(req.query.callId || '');
+    const { AnsweredBy } = req.body || {};
+    const call = callId ? await prisma.call.findUnique({ where: { id: callId } }) : null;
+    if (call) {
+      await prisma.callEvent.create({ data: { callId: call.id, eventType: `amd_${AnsweredBy || 'desconhecido'}`, rawPayload: req.body } }).catch(() => {});
+      if (machines.isMachineAnsweredBy(AnsweredBy)) {
+        await handleMachineDetected({ id: call.id }, { kind: 'caixa_postal', source: `amd:${AnsweredBy}`, reason: 'detectado pelo áudio' });
+      } else if (call.answeredBy === 'verificando' || call.answeredBy === 'amd_pendente') {
+        // pessoa (ou "unknown"): chama o vendedor agora
+        if (call.answeredBy === 'amd_pendente') await prisma.call.update({ where: { id: call.id }, data: { answeredBy: 'verificando' } });
+        await bridgeAfterAmd(call.id);
+      }
+    }
+    res.set('Content-Type', 'text/xml');
+    res.status(200).send('<Response></Response>');
+  } catch (error) {
+    console.error('Erro no aviso de caixa postal (AMD):', error.message);
+    res.status(200).send('<Response></Response>');
   }
 };
 

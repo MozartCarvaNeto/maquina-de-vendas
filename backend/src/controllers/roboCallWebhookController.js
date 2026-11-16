@@ -109,7 +109,8 @@ exports.handleGather = async (req, res) => {
       return sendTwiml(res, call.qualified ? buildInterestedTwiml(campaign) : buildNotInterestedTwiml(campaign));
     }
 
-    const { qualified } = await registerResponse(call, { digits: Digits, speech: SpeechResult, confidence: Confidence, raw: req.body });
+    const { qualified, machine } = await registerResponse(call, { digits: Digits, speech: SpeechResult, confidence: Confidence, raw: req.body });
+    if (machine) return sendTwiml(res, '<Response><Hangup/></Response>');
     if (qualified) return sendTwiml(res, buildInterestedTwiml(campaign));
     return sendTwiml(res, buildNotInterestedTwiml(campaign));
   } catch (error) {

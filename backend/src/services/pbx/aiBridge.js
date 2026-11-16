@@ -165,7 +165,9 @@ async function runRobo(session, call, convo, deps) {
   }
   let qualified = false;
   if (full.qualified === null || full.qualified === undefined) {
-    ({ qualified } = await robo.registerResponse(full, { digits: digit, speech: heard, confidence: heard ? 0.9 : 0 }));
+    const reg = await robo.registerResponse(full, { digits: digit, speech: heard, confidence: heard ? 0.9 : 0 });
+    if (reg.machine) return session.hangup(); // caixa postal/URA: já tratada, só desliga
+    qualified = reg.qualified;
   } else {
     qualified = Boolean(full.qualified);
   }
