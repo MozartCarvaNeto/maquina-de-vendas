@@ -208,6 +208,28 @@ class TestXmlEAssinatura(unittest.TestCase):
         self.assertNotRegex(serializar(nfe), r">\s+<")
         self.assertNotIn("<?xml", serializar(nfe))
 
+    def test_c14n_sem_xmlns_vazio_e_igual_ao_documento_inteiro(self):
+        """Regressão da rejeição 297: o lxml 6.x injeta xmlns="" ao canonicalizar um sub-elemento.
+
+        A referência é independente: C14N do documento inteiro (sem a Signature), onde o bug não
+        existe. O verificar() sozinho não pega isso, pois usa a mesma função da assinatura.
+        """
+        import base64
+        import hashlib
+        nfe, _, _ = montar(cliente={**CLIENTE, "nome": "M DAS GRAÇAS & CIA <teste>"})
+        inf = nfe.find(f"{{{NS}}}infNFe")
+        assinar(nfe, inf, self.cert)
+        doc = etree.fromstring(serializar(nfe).encode())
+        ds = "{http://www.w3.org/2000/09/xmldsig#}"
+        digest_assinado = doc.find(f"{ds}Signature/{ds}SignedInfo/{ds}Reference/{ds}DigestValue").text
+        doc.remove(doc.find(f"{ds}Signature"))
+        inteiro = etree.tostring(etree.ElementTree(doc), method="c14n")
+        ini = inteiro.index(b"<infNFe") + len(b"<infNFe")
+        fim = inteiro.rindex(b"</infNFe>") + len(b"</infNFe>")
+        esperado = b'<infNFe xmlns="' + NS.encode() + b'"' + inteiro[ini:fim]
+        self.assertNotIn(b'xmlns=""', esperado)
+        self.assertEqual(base64.b64encode(hashlib.sha1(esperado).digest()).decode(), digest_assinado)
+
     def test_danfe_pdf(self):
         nfe, _, _ = montar()
         pdf = gerar_danfe(serializar(nfe))

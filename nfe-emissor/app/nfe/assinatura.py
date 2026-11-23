@@ -4,6 +4,7 @@ Implementado direto com lxml + cryptography (sem dependências extras).
 O padrão da NF-e 4.00 ainda usa SHA-1 na assinatura.
 """
 import base64
+import copy
 import hashlib
 
 from cryptography.hazmat.primitives import hashes
@@ -24,7 +25,16 @@ def _ds(nome: str) -> str:
 
 
 def _c14n(elemento) -> bytes:
-    return etree.tostring(elemento, method="c14n", exclusive=False, with_comments=False)
+    """C14N 1.0 (inclusiva) de um elemento.
+
+    ATENÇÃO: no lxml 6.x (libxml2 2.14) canonicalizar um *sub-elemento* direto com
+    etree.tostring(el, method="c14n") injeta um xmlns="" falso em todos os filhos, o que muda o
+    digest e faz a SEFAZ rejeitar com 297 ("Assinatura difere do calculado"). Canonicalizar um
+    DOCUMENTO inteiro não tem o problema; por isso copiamos o elemento para uma árvore própria.
+    """
+    copia = copy.deepcopy(elemento)
+    return etree.tostring(etree.ElementTree(copia), method="c14n", exclusive=False,
+                          with_comments=False)
 
 
 def assinar(pai, alvo, cert: Certificado):
