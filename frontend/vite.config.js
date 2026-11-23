@@ -46,7 +46,7 @@ export default defineConfig({
         // /api continuam exigindo internet — isso aqui não deixa o sistema
         // funcionar 100% offline, só evita a tela branca.
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/nfe-app/],
         globPatterns: ['**/*.{js,css,html,png,svg,ico}']
       },
 
