@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import csrf with context %}
+{% block titulo %}Integrações - Emissor de NF-e{% endblock %}
+{% block conteudo %}
+<h1>Integrações com lojas virtuais</h1>
+<p><small>Clique em <strong>Importar pedidos</strong> para buscar as vendas pagas dos últimos dias. Cada pedido vira um
+<strong>rascunho de nota</strong> (e um cliente, se ainda não existir) para você revisar, editar e emitir.
+Pedidos já importados não são duplicados. Produtos são ligados pelo <strong>SKU = código</strong> do produto cadastrado aqui;
+SKU desconhecido cria um produto <em>sem NCM</em> que você precisa completar. O CPF/CNPJ do cliente é obrigatório na NF-e:
+pedidos sem documento válido não são importados.</small></p>
+
+{% for c in cartoes %}
+<section class="cartao" id="{{ c.chave }}">
+  <h2>{{ c.nome }} {% if c.autorizada %}<span class="badge st-autorizada">credenciais salvas</span>{% endif %}</h2>
+  <form method="post" action="{{ url_for('main.integracao_salvar', plataforma=c.chave) }}">
+    {{ csrf() }}
+    <div class="linha">
+      {% for nome, rotulo, secreto in c.campos %}
+      <label class="campo m"><span>{{ rotulo }}</span>
+        {% if secreto %}<input type="password" name="{{ nome }}" autocomplete="new-password" placeholder="{{ '•••••• (já salvo; deixe em branco para manter)' if c.cfg.get(nome) else '' }}">
+        {% else %}<input type="text" name="{{ nome }}" value="{{ c.cfg.get(nome, '') }}" autocomplete="off">{% endif %}
+      </label>
+      {% endfor %}
+      {% if c.chave == 'shopify' %}
+      {# a versão já está em CAMPOS; nada extra #}
+      {% endif %}
+    </div>
+    {% if c.chave == 'mercadolivre' %}
+    <p><small>URL de redirecionamento a cadastrar no app do Mercado Livre: <code>{{ redirect_ml }}</code></small></p>
+    {% endif %}
+    <button class="botao secundario" type="submit">Salvar credenciais</button>
+  </form>
+  {% if c.configurada %}
+  <div class="barra espaco">
+    <form method="post" action="{{ url_for('main.integracao_testar', plataforma=c.chave) }}" class="inline">
+      {{ csrf() }}<button class="botao secundario" type="submit">Testar conexão</button></form>
+    {% if c.chave == 'mercadolivre' %}
+    <form method="post" action="{{ url_for('main.integracao_ml_autorizar') }}" class="inline">
+      {{ csrf() }}<button class="botao secundario" type="submit">{{ 'Reautorizar' if c.cfg.get('refresh_token') else 'Autorizar' }} no Mercado Livre</button></form>
+    {% endif %}
+    <form method="post" action="{{ url_for('main.integracao_importar', plataforma=c.chave) }}" class="inline">
+      {{ csrf() }}
+      <label>Últimos <input type="number" name="dias" value="30" min="1" max="120" style="width:5em;display:inline"> dias</label>
+      <button class="botao" type="submit">Importar pedidos</button></form>
+  </div>
+  {% if c.ultima %}<small>Última importação: {{ c.ultima|data_br }}</small>{% endif %}
+  {% endif %}
+</section>
+{% endfor %}
+
+<section class="cartao">
+  <h2>Pedidos importados recentemente</h2>
+  <div class="rolagem"><table>
+    <thead><tr><th>Loja</th><th>Pedido</th><th>Nota</th><th>Avisos</th></tr></thead>
+    <tbody>
+    {% for p in recentes %}
+      <tr><td>{{ p.plataforma }}</td><td>{{ p.numero }}</td>
+        <td>{% if p.nota_id %}<a href="{{ url_for('main.nota', nota_id=p.nota_id) }}">abrir ({{ p.nota_status }})</a>{% endif %}</td>
+        <td><small>{{ p.avisos or '' }}</small></td></tr>
+    {% else %}<tr><td colspan="4" class="vazio">Nada importado ainda.</td></tr>{% endfor %}
+    </tbody></table></div>
+</section>
+{% endblock %}

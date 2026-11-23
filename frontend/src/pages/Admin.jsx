@@ -12,6 +12,8 @@ import LegalPanel from '../components/admin/LegalPanel';
 import ReferralPanel from '../components/admin/ReferralPanel';
 import OfficialWhatsappPanel from '../components/admin/OfficialWhatsappPanel';
 import ResellersPanel from '../components/admin/ResellersPanel';
+import NfePanel from '../components/admin/NfePanel';
+import VideosPanel from '../components/admin/VideosPanel';
 import './Admin.css';
 
 const STATUS_LABEL = { pendente: 'Pendente', ativa: 'Ativa', expirada: 'Vencida', bloqueada: 'Bloqueada' };
@@ -589,9 +591,11 @@ export default function Admin() {
         <button className={tab === 'planos' ? 'is-active' : ''} onClick={() => setTab('planos')}>💼 Planos e preços</button>
         <button className={tab === 'financeiro' ? 'is-active' : ''} onClick={() => setTab('financeiro')}>📈 Financeiro</button>
         <button className={tab === 'email' ? 'is-active' : ''} onClick={() => setTab('email')}>✉️ E-mail do sistema</button>
+        <button className={tab === 'nfe' ? 'is-active' : ''} onClick={() => setTab('nfe')}>🧾 Notas fiscais (NF-e)</button>
         <button className={tab === 'revenda' ? 'is-active' : ''} onClick={() => setTab('revenda')}>🏪 Revendedores</button>
         <button className={tab === 'wabaoficial' ? 'is-active' : ''} onClick={() => setTab('wabaoficial')}>💬 WhatsApp oficial</button>
         <button className={tab === 'indicacao' ? 'is-active' : ''} onClick={() => setTab('indicacao')}>🤝 Indicação</button>
+        <button className={tab === 'videos' ? 'is-active' : ''} onClick={() => setTab('videos')}>🎬 Vídeos tutoriais</button>
         <button className={tab === 'termos' ? 'is-active' : ''} onClick={() => setTab('termos')}>📜 Termos e privacidade</button>
       </div>
 
@@ -601,6 +605,8 @@ export default function Admin() {
       {tab === 'termos' && <LegalPanel />}
       {tab === 'indicacao' && <ReferralPanel />}
       {tab === 'revenda' && <ResellersPanel />}
+      {tab === 'nfe' && <NfePanel />}
+      {tab === 'videos' && <VideosPanel />}
       {tab === 'wabaoficial' && <OfficialWhatsappPanel />}
 
       {tab === 'clientes' && (

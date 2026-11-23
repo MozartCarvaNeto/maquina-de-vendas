@@ -61,6 +61,8 @@ model Account {
   brandLogo             String?          // data URL (png/jpg/webp/svg) até ~200KB
   optOuts               OptOut[]
   usageCounters         UsageCounter[]
+  nfeSubscription       NfeSubscription?
+  nfePayments           NfePayment[]
 
   members            Member[]
   settings           Setting[]
@@ -1292,4 +1294,74 @@ model OptOut {
   @@unique([accountId, phone, channel])
   @@index([accountId, phone])
   @@map("opt_outs")
+}
+
+
+// ---------------------------------------------------------------------------
+// Emissor de NF-e: plano EXCLUSIVO (cobrança própria, separada do plano do Turbo Prospect).
+// O administrador cria os planos no painel (Administração > Notas fiscais).
+// ---------------------------------------------------------------------------
+model NfePlan {
+  id               String            @id @default(uuid())
+  name             String
+  description      String?
+  priceCents       Int               // preço por ciclo, em centavos
+  cycleMonths      Int               @default(1) // 1, 3, 6 ou 12
+  maxMonthlyNotes  Int?              // notas de PRODUÇÃO por mês. null = ilimitado
+  isActive         Boolean           @default(true)
+  isPublic         Boolean           @default(true)
+  sortOrder        Int               @default(0)
+  createdAt        DateTime          @default(now())
+  subscriptions    NfeSubscription[]
+
+  @@map("nfe_plans")
+}
+
+// Uma assinatura de NF-e por conta.
+model NfeSubscription {
+  id                    String    @id @default(uuid())
+  accountId             String    @unique
+  account               Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  planId                String?
+  plan                  NfePlan?  @relation(fields: [planId], references: [id], onDelete: SetNull)
+  startsAt              DateTime?
+  endsAt                DateTime? // vencimento. null = sem vencimento (cortesia do administrador)
+  billingCustomerId     String?
+  billingSubscriptionId String?   // assinatura recorrente no Asaas
+  cancelledAt           DateTime?
+  note                  String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([billingSubscriptionId])
+  @@map("nfe_subscriptions")
+}
+
+model NfePayment {
+  id          String    @id // id do pagamento no Asaas (evita renovar duas vezes)
+  accountId   String
+  account     Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  status      String
+  amountCents Int
+  paidAt      DateTime?
+  appliedAt   DateTime?
+  invoiceUrl  String?
+  createdAt   DateTime  @default(now())
+
+  @@index([accountId, createdAt])
+  @@map("nfe_payments")
+}
+
+// ---------------------------------------------------------------------------
+// Vídeos tutoriais: um link do YouTube por página do sistema (global, igual para todos).
+// Só o administrador da plataforma altera (Administração > Vídeos tutoriais).
+// ---------------------------------------------------------------------------
+model TutorialVideo {
+  pageKey   String   @id // ex.: "crm", "disparos", "notas-fiscais", "dashboard"
+  title     String
+  url       String
+  videoId   String
+  updatedAt DateTime @updatedAt
+
+  @@map("tutorial_videos")
 }

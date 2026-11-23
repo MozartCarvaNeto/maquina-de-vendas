@@ -36,10 +36,22 @@ router.get('/resellers', reseller.adminList);
 router.put('/resellers/:id', reseller.adminSet);
 router.get('/referral', account.adminReferralGet);
 router.put('/referral', account.adminReferralSave);
+const tutorials = require('../controllers/tutorialController');
+router.put('/tutorials/:pageKey', tutorials.save);
+router.delete('/tutorials/:pageKey', tutorials.remove);
 router.get('/legal', account.adminLegalGet);
 router.put('/legal', account.adminLegalSave);
 
 router.post('/system-email/test', adminController.testSystemEmail);
+
+const nfeAdmin = require('../controllers/nfeAdminController');
+router.get('/nfe/plans', nfeAdmin.listPlans);
+router.post('/nfe/plans', nfeAdmin.createPlan);
+router.patch('/nfe/plans/:id', nfeAdmin.updatePlan);
+router.delete('/nfe/plans/:id', nfeAdmin.deletePlan);
+router.get('/nfe/subscriptions', nfeAdmin.listSubscriptions);
+router.post('/nfe/subscriptions', nfeAdmin.grant);
+router.delete('/nfe/subscriptions/:accountId', nfeAdmin.revoke);
 
 router.get('/plans', adminController.listPlans);
 router.post('/plans', adminController.createPlan);

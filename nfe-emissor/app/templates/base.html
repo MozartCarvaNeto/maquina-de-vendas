@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{% block titulo %}Emissor de NF-e{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body data-base="{{ request.script_root }}">
+{% from '_macros.html' import csrf with context %}
+{% if g.conta %}
+<header class="topo">
+  <a class="marca" href="{{ url_for('main.index') }}">NF-e</a>
+  <nav>
+    <a href="{{ url_for('main.index') }}">Painel</a>
+    <a href="{{ url_for('main.notas') }}">Notas</a>
+    <a href="{{ url_for('main.produtos') }}">Produtos</a>
+    <a href="{{ url_for('main.clientes') }}">Clientes</a>
+    <a href="{{ url_for('main.integracoes') }}">Integrações</a>
+    <a href="{{ url_for('main.empresa_form') }}">Configurações</a>
+  </nav>
+  {% if cota %}<span class="cota" title="Notas de produção autorizadas neste mês">NF-e do mês: {{ cota.usadas }}{% if cota.limite is not none %} / {{ cota.limite }}{% endif %}</span>{% endif %}
+</header>
+{% if somente_leitura %}
+<div class="faixa homolog">Seu plano de NF-e está vencido: você pode consultar e baixar notas, mas não emitir nem alterar. Renove em "Minha assinatura" no Turbo Prospect.</div>
+{% endif %}
+{% if ambiente_atual == '2' %}
+<div class="faixa homolog">AMBIENTE DE HOMOLOGAÇÃO: as notas emitidas aqui são apenas testes e não têm valor fiscal.</div>
+{% elif ambiente_atual == '1' %}
+<div class="faixa producao">PRODUÇÃO: as notas emitidas têm valor fiscal.</div>
+{% endif %}
+{% endif %}
+<main>
+  {% with mensagens = get_flashed_messages(with_categories=true) %}
+    {% for categoria, texto in mensagens %}
+      <div class="alerta {{ categoria }}">{{ texto }}</div>
+    {% endfor %}
+  {% endwith %}
+  {% block conteudo %}{% endblock %}
+</main>
+<script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</body>
+</html>

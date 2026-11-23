@@ -25,6 +25,13 @@ cd ../frontend
 npm install
 npm run build
 
+cd ..
+if [ -d nfe-emissor/.venv ]; then
+  echo "🧾 Atualizando o emissor de NF-e..."
+  nfe-emissor/.venv/bin/pip install -q -r nfe-emissor/requirements.txt
+  systemctl restart nfe-emissor
+fi
+
 echo "🔄 4/5 Reiniciando o sistema..."
 pm2 restart maquina
 

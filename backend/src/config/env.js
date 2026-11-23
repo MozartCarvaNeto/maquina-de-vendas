@@ -54,6 +54,14 @@ module.exports = {
   supportContact: process.env.SUPPORT_CONTACT || '',
   appName: process.env.APP_NAME || 'Turbo Prospect',
 
+  // ---- Emissor de NF-e (serviço Python em nfe-emissor/, só acessível por dentro do servidor) ----
+  // NFE_INTERNAL_SECRET: segredo compartilhado entre este sistema e o emissor (sem ele, a aba de NF-e fica desligada).
+  nfe: {
+    secret: process.env.NFE_INTERNAL_SECRET || '',
+    url: (process.env.NFE_PY_URL || 'http://127.0.0.1:5001').replace(/\/$/, ''),
+    prefix: '/nfe-app'
+  },
+
   // ---- Cobrança automática (Asaas) ----
   asaas: {
     apiKey: process.env.ASAAS_API_KEY || '',

@@ -66,3 +66,8 @@
 .sub-features li { font-size: 14px; }
 .sub-features li.is-off { opacity: 0.55; }
 .sub-note-inline { margin: 10px 0 0; font-size: 13px; color: var(--gray-400, #888); }
+
+/* Emissor de NF-e (aba Notas Fiscais) */
+.nfe-frame-wrap { margin-top: 12px; }
+.nfe-frame { width: 100%; height: calc(100vh - 260px); min-height: 560px; border: 1px solid #d9dee8; border-radius: 10px; background: #fff; }
+.sub-checkout { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; max-width: 420px; }

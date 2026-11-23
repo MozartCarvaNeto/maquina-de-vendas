@@ -1,0 +1,136 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import opcoes, ufs, campo, csrf with context %}
+{% block titulo %}Configurações - Emissor de NF-e{% endblock %}
+{% block conteudo %}
+<h1>Configurações</h1>
+<p class="atalhos"><a href="#certificado">Certificado digital</a> · <a href="#sefaz">Endereços da SEFAZ</a></p>
+
+<form method="post" action="{{ url_for('main.empresa_salvar') }}" class="cartao">
+  {{ csrf() }}
+  <h2>Dados da empresa e regime tributário</h2>
+  <div class="linha">
+    {{ campo('cnpj', 'CNPJ', e.cnpj, obrigatorio=true, classe='m', dica='Somente o seu CNPJ (letras e números).') }}
+    {{ campo('razao_social', 'Razão social', e.razao_social, obrigatorio=true, classe='g', maxlen=60) }}
+    {{ campo('nome_fantasia', 'Nome fantasia', e.nome_fantasia, classe='g', maxlen=60) }}
+  </div>
+  <div class="linha">
+    {{ campo('ie', 'Inscrição estadual', e.ie, obrigatorio=true, classe='m', dica='Somente números.') }}
+    {{ campo('im', 'Inscrição municipal', e.im, classe='m') }}
+    {{ campo('cnae', 'CNAE', e.cnae, classe='m', dica='Só é enviado junto com a inscrição municipal.') }}
+    <label class="campo g"><span>Regime tributário *</span>
+      <select name="crt">{{ opcoes(T.CRT, e.crt) }}</select>
+      <small>Pode ser alterado a qualquer momento. O Simples Nacional é o regime mais completo neste sistema; ao trocar, revise os produtos (CSOSN/CST).</small>
+    </label>
+  </div>
+
+  <h2>Endereço</h2>
+  <div class="linha">
+    {{ campo('cep', 'CEP', e.cep, obrigatorio=true, classe='p', modo='numeric') }}
+    <div class="campo p"><span>&nbsp;</span><button type="button" class="botao secundario" data-buscar-cep>Buscar CEP</button></div>
+    {{ campo('logradouro', 'Logradouro', e.logradouro, obrigatorio=true, classe='g', maxlen=60) }}
+    {{ campo('numero', 'Número', e.numero, obrigatorio=true, classe='p', maxlen=60) }}
+    {{ campo('complemento', 'Complemento', e.complemento, classe='m', maxlen=60) }}
+  </div>
+  <div class="linha">
+    {{ campo('bairro', 'Bairro', e.bairro, obrigatorio=true, classe='m', maxlen=60) }}
+    {{ campo('municipio', 'Município', e.municipio, obrigatorio=true, classe='m', maxlen=60) }}
+    {{ campo('cod_municipio', 'Cód. município (IBGE)', e.cod_municipio, obrigatorio=true, classe='m', modo='numeric', dica='7 dígitos. O botão Buscar CEP preenche.') }}
+    <label class="campo p"><span>UF *</span><select name="uf" id="uf">{{ ufs(e.uf) }}</select></label>
+    {{ campo('fone', 'Telefone', e.fone, classe='m', modo='tel') }}
+    {{ campo('email', 'E-mail', e.email, classe='g') }}
+  </div>
+
+  <h2>Emissão</h2>
+  <div class="linha">
+    <label class="campo m"><span>Ambiente</span>
+      <select name="ambiente">
+        <option value="2" {{ 'selected' if e.ambiente == '2' }}>2 - Homologação (testes)</option>
+        <option value="1" {{ 'selected' if e.ambiente == '1' }}>1 - Produção (valor fiscal)</option>
+      </select>
+    </label>
+    {{ campo('serie', 'Série', e.serie, classe='p', modo='numeric') }}
+    {{ campo('ultimo_numero', 'Último nº emitido', ultimo, classe='p', modo='numeric', dica='Neste ambiente e série. A próxima nota usa este número + 1.') }}
+    {{ campo('nat_op_padrao', 'Natureza da operação padrão', e.nat_op_padrao, classe='g', maxlen=60) }}
+  </div>
+  {% if e.ambiente != '1' %}
+  <label class="check"><input type="checkbox" name="confirmar_producao" value="1"> Confirmo que, ao ativar a PRODUÇÃO, as notas emitidas têm valor fiscal.</label>
+  {% endif %}
+  <div class="alerta aviso">
+    <strong>Migrando do Tiny?</strong> Não emita com a mesma série do Tiny ao mesmo tempo: números repetidos são rejeitados.
+    Use outra série (ex.: 2) para o novo emissor, ou pare de emitir no Tiny e informe aqui o último número emitido.
+  </div>
+
+  <h2>Web service da SEFAZ</h2>
+  <div class="linha">
+    <label class="campo m"><span>Autorizador</span>
+      <select name="autorizador">
+        {% for a in autorizadores %}<option value="{{ a }}" {{ 'selected' if (e.autorizador or '') == a }}>{{ a or 'Automático pela UF' }}</option>{% endfor %}
+      </select>
+      <small>Em uso: <strong>{{ autorizador_efetivo }}</strong>.
+      {% if not url_cadastrada %}<span class="erro-txt">Faltam endereços: preencha em "Endereços da SEFAZ" mais abaixo.</span>
+      {% elif not url_verificada %}Endereços não conferidos em fonte oficial: confirme no Portal Nacional da NF-e e use "Testar conexão".{% endif %}</small>
+    </label>
+  </div>
+
+  <h2>Responsável técnico <small>(opcional, exigido por algumas UFs)</small></h2>
+  <div class="linha">
+    {{ campo('resp_tec_cnpj', 'CNPJ', e.resp_tec_cnpj, classe='m') }}
+    {{ campo('resp_tec_contato', 'Contato', e.resp_tec_contato, classe='m', maxlen=60) }}
+    {{ campo('resp_tec_email', 'E-mail', e.resp_tec_email, classe='m', maxlen=60) }}
+    {{ campo('resp_tec_fone', 'Telefone', e.resp_tec_fone, classe='m', modo='tel') }}
+  </div>
+  <button class="botao" type="submit">Salvar configurações</button>
+</form>
+
+<section class="cartao" id="certificado">
+  <h2>Certificado digital A1</h2>
+  {% if e.cert_arquivo %}
+    <p><strong>{{ e.cert_titular }}</strong><br>Válido até {{ e.cert_validade|data_br(false) }}</p>
+  {% else %}
+    <p class="vazio">Nenhum certificado enviado.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('main.empresa_certificado') }}" enctype="multipart/form-data">
+    {{ csrf() }}
+    <div class="linha">
+      <label class="campo g"><span>Arquivo (.pfx ou .p12)</span><input type="file" name="certificado" accept=".pfx,.p12" required></label>
+      <label class="campo m"><span>Senha do certificado</span><input type="password" name="senha_certificado" required autocomplete="off"></label>
+    </div>
+    <button class="botao" type="submit">Enviar certificado</button>
+  </form>
+  <small>O arquivo fica protegido pela própria senha; a senha é guardada criptografada. Só certificado A1 (arquivo) funciona online; token/cartão A3 não.</small>
+  <h3>Certificados de segurança da SEFAZ (cadeia ICP-Brasil)</h3>
+  <p>{% if cadeia_ok %}✅ Cadeia ICP-Brasil instalada.{% else %}⚠️ Ainda não instalada. Sem ela, o "Testar conexão" dá erro de <em>CERTIFICATE_VERIFY_FAILED</em>.{% endif %}</p>
+  <form method="post" action="{{ url_for('main.empresa_cadeia') }}" enctype="multipart/form-data" class="espaco">
+    {{ csrf() }}
+    <button class="botao secundario" type="submit">Baixar cadeia ICP-Brasil automaticamente</button>
+    <div class="linha">
+      <label class="campo g"><span>Ou envie o arquivo ACcompactado.zip (do site do ITI) / .crt / .pem</span><input type="file" name="cadeia" accept=".zip,.crt,.cer,.pem"></label>
+    </div>
+    <button class="botao secundario" type="submit">Enviar arquivo da cadeia</button>
+  </form>
+  <form method="post" action="{{ url_for('main.empresa_testar') }}" class="espaco">
+    {{ csrf() }}
+    <button class="botao secundario" type="submit" {{ 'disabled' if not e.cert_arquivo }}>Testar conexão com a SEFAZ</button>
+  </form>
+</section>
+
+<section class="cartao" id="sefaz">
+  <h2>Endereços da SEFAZ <small>(autorizador: {{ autorizador_efetivo }})</small></h2>
+  <p><small>Só altere se a SEFAZ da sua UF mudou ou se algum endereço estiver faltando/errado
+  (confira no Portal Nacional da NF-e, em Serviços &gt; Web Services). Apague o campo para voltar ao padrão.
+  Só são aceitos endereços https de sites .gov.br.</small></p>
+  <form method="post" action="{{ url_for('main.configuracoes_sefaz') }}">
+    {{ csrf() }}
+    {% for amb, titulo in (('2', 'Homologação (testes)'), ('1', 'Produção')) %}
+      <h3>{{ titulo }}</h3>
+      {% for srv in servicos %}
+        <label class="campo">
+          <span>{{ srv }}{% if srv in alteradas[amb] %} <em>(alterado)</em>{% endif %}</span>
+          <input type="url" name="url_{{ amb }}_{{ srv }}" value="{{ urls[amb][srv] }}" placeholder="https://..." autocomplete="off">
+        </label>
+      {% endfor %}
+    {% endfor %}
+    <button class="botao" type="submit">Salvar endereços</button>
+  </form>
+</section>
+{% endblock %}

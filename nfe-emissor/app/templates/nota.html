@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import badge, csrf with context %}
+{% block titulo %}Nota {{ n.numero or '' }} - Emissor de NF-e{% endblock %}
+{% block conteudo %}
+<h1>Nota fiscal {{ n.numero or '(sem número)' }} {{ badge(n.status) }}</h1>
+
+<section class="cartao">
+  <div class="grade-info">
+    <div><span>Cliente</span>{{ cliente.nome if cliente else '-' }}</div>
+    <div><span>Natureza</span>{{ n.nat_op }}</div>
+    <div><span>Total</span>R$ {{ (n.total_nf or '0')|brl }}</div>
+    <div><span>Ambiente / série</span>{{ 'Produção' if n.ambiente == '1' else ('Homologação' if n.ambiente == '2' else '-') }} / {{ n.serie or '-' }}</div>
+    <div><span>Emissão</span>{{ n.dh_emissao|data_br if n.dh_emissao else '-' }}</div>
+    <div><span>Autorização</span>{{ n.dh_autorizacao|data_br if n.dh_autorizacao else '-' }}</div>
+  </div>
+  {% if n.chave %}<p class="chave"><span>Chave de acesso</span>{{ n.chave }}</p>{% endif %}
+  {% if n.protocolo %}<p><span class="rot">Protocolo</span> {{ n.protocolo }}</p>{% endif %}
+  {% if n.c_stat or n.x_motivo %}
+    <p class="retorno {{ 'ok' if n.status == 'autorizada' else 'erro-txt' }}">SEFAZ: {{ n.c_stat or '' }} {{ n.x_motivo or '' }}</p>
+  {% endif %}
+  {% if n.status == 'pendente' %}
+    <div class="alerta aviso">O envio ficou sem resposta confirmada. Clique em <strong>Consultar situação</strong> antes de qualquer nova tentativa.</div>
+  {% endif %}
+  {% if n.status == 'cancelada' %}
+    <p><span class="rot">Cancelamento</span> protocolo {{ n.cancel_protocolo or '-' }}: {{ n.cancel_motivo or '' }}</p>
+  {% endif %}
+</section>
+
+<section class="cartao">
+  <h2>Itens</h2>
+  <div class="rolagem">
+  <table>
+    <thead><tr><th>Código</th><th>Descrição</th><th>NCM</th><th>CFOP</th><th>Qtd</th><th>Unitário</th><th>Total</th></tr></thead>
+    <tbody>
+    {% for it in itens %}
+      <tr><td>{{ it.codigo }}</td><td>{{ it.descricao }}</td><td>{{ it.ncm }}</td><td>{{ it.cfop }}</td>
+          <td class="num">{{ it.quantidade|brl(4) }}</td><td class="num">{{ it.valor_unitario|brl }}</td>
+          <td class="num">{{ (it.quantidade|float * it.valor_unitario|float)|round(2)|brl }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="cartao acoes-nota">
+  {% if n.status in ('rascunho', 'rejeitada') %}
+    <form method="post" action="{{ url_for('main.nota_emitir', nota_id=n.id) }}" class="inline">{{ csrf() }}
+      <button class="botao" type="submit" data-confirm="Enviar esta nota à SEFAZ{{ ' em PRODUÇÃO (valor fiscal)' if n.ambiente == '1' or (not n.ambiente and ambiente_atual == '1') else ' (homologação)' }}?">Emitir NF-e</button>
+    </form>
+    <a class="botao secundario" href="{{ url_for('main.nota_form', nota_id=n.id) }}">Editar</a>
+  {% endif %}
+  {% if n.chave and n.status in ('pendente', 'autorizada', 'rejeitada', 'cancelada', 'denegada') %}
+    <form method="post" action="{{ url_for('main.nota_consultar', nota_id=n.id) }}" class="inline">{{ csrf() }}
+      <button class="botao secundario" type="submit">Consultar situação</button></form>
+  {% endif %}
+  {% if n.xml_proc or n.xml_assinado %}
+    <a class="botao secundario" href="{{ url_for('main.nota_danfe', nota_id=n.id) }}" target="_blank" rel="noopener">DANFE (PDF)</a>
+    <a class="botao secundario" href="{{ url_for('main.nota_xml', nota_id=n.id) }}">Baixar XML</a>
+  {% endif %}
+  {% if n.cancel_xml %}
+    <a class="botao secundario" href="{{ url_for('main.nota_xml_cancelamento', nota_id=n.id) }}">XML do cancelamento</a>
+  {% endif %}
+  <a class="botao secundario" href="{{ url_for('main.nota_form', duplicar=n.id) }}">Duplicar</a>
+  {% if n.status == 'rascunho' %}
+    <form method="post" action="{{ url_for('main.nota_excluir', nota_id=n.id) }}" class="inline">{{ csrf() }}
+      <button class="botao perigo" type="submit" data-confirm="Excluir este rascunho?">Excluir rascunho</button></form>
+  {% endif %}
+</section>
+
+{% if n.status == 'autorizada' %}
+<section class="cartao">
+  <h2>Cancelar NF-e</h2>
+  <p><small>O cancelamento só é aceito dentro do prazo legal (em geral 24 h após a autorização; confira a regra da sua UF).</small></p>
+  <form method="post" action="{{ url_for('main.nota_cancelar', nota_id=n.id) }}">{{ csrf() }}
+    <label class="campo"><span>Justificativa (15 a 255 caracteres)</span>
+      <textarea name="justificativa" rows="2" minlength="15" maxlength="255" required></textarea></label>
+    <button class="botao perigo" type="submit" data-confirm="Cancelar definitivamente esta NF-e?">Cancelar NF-e</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

@@ -280,6 +280,12 @@ async function handleWebhook(headers, body) {
     return { http: 200, body: { handled: event, topup: true } };
   }
 
+  // assinatura do emissor de NF-e (plano exclusivo): NUNCA pode renovar o plano do Turbo Prospect
+  const nfeSvc = require('../nfe/nfeService');
+  if (await nfeSvc.ownsPayment(payment)) {
+    return { http: 200, body: await nfeSvc.handleWebhookEvent(event, payment) };
+  }
+
   const account = await findAccountForPayment(payment);
   if (!account) {
     console.warn(`Webhook Asaas (${event}) sem conta correspondente — pagamento ${payment.id}`);

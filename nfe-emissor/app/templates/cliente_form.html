@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import opcoes, ufs, campo, csrf with context %}
+{% block titulo %}Cliente - Emissor de NF-e{% endblock %}
+{% block conteudo %}
+<h1>{{ 'Editar cliente' if cid else 'Novo cliente' }}</h1>
+<form method="post" class="cartao">
+  {{ csrf() }}
+  <div class="linha">
+    {{ campo('documento', 'CPF ou CNPJ', c.documento, obrigatorio=true, classe='m') }}
+    {{ campo('nome', 'Nome / Razão social', c.nome, obrigatorio=true, classe='g', maxlen=60) }}
+  </div>
+  <div class="linha">
+    <label class="campo g"><span>Indicador de IE</span><select name="ind_ie_dest">{{ opcoes(T.IND_IE_DEST, c.ind_ie_dest) }}</select></label>
+    {{ campo('ie', 'Inscrição estadual', c.ie, classe='m', dica='Só se for contribuinte do ICMS.') }}
+    {{ campo('email', 'E-mail', c.email, classe='m', maxlen=60) }}
+    {{ campo('fone', 'Telefone', c.fone, classe='m', modo='tel') }}
+  </div>
+  <h2>Endereço</h2>
+  <div class="linha">
+    {{ campo('cep', 'CEP', c.cep, obrigatorio=true, classe='p', modo='numeric') }}
+    <div class="campo p"><span>&nbsp;</span><button type="button" class="botao secundario" data-buscar-cep>Buscar CEP</button></div>
+    {{ campo('logradouro', 'Logradouro', c.logradouro, obrigatorio=true, classe='g', maxlen=60) }}
+    {{ campo('numero', 'Número', c.numero, obrigatorio=true, classe='p', maxlen=60) }}
+    {{ campo('complemento', 'Complemento', c.complemento, classe='m', maxlen=60) }}
+  </div>
+  <div class="linha">
+    {{ campo('bairro', 'Bairro', c.bairro, obrigatorio=true, classe='m', maxlen=60) }}
+    {{ campo('municipio', 'Município', c.municipio, obrigatorio=true, classe='m', maxlen=60) }}
+    {{ campo('cod_municipio', 'Cód. município (IBGE)', c.cod_municipio, obrigatorio=true, classe='m', modo='numeric') }}
+    <label class="campo p"><span>UF *</span><select name="uf" id="uf">{{ ufs(c.uf) }}</select></label>
+  </div>
+  <button class="botao" type="submit">Salvar cliente</button>
+  <a class="botao secundario" href="{{ url_for('main.clientes') }}">Cancelar</a>
+</form>
+{% endblock %}

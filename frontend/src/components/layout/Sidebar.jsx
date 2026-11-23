@@ -25,6 +25,7 @@ const MENU_ITEMS = [
   { path: '/linhas', label: '🔀 Linhas', feature: ['discador', 'robo', 'agente_ia'], adminOnly: true },
   { path: '/equipe', label: '🧑‍🤝‍🧑 Equipe', adminOnly: true },
   { path: '/contatos', label: '👥 Contatos', feature: ['contatos'], adminOnly: false },
+  { path: '/notas-fiscais', label: '🧾 Notas Fiscais', adminOnly: true },
   { path: '/bloqueios', label: '🚫 Lista de bloqueio', adminOnly: false },
   { path: '/indicacoes', label: '🤝 Indique e ganhe', adminOnly: true, hideForPlatformAdmin: true },
   { path: '/revendedor', label: '🏪 Meus clientes (revenda)', adminOnly: true, resellerOnly: true },

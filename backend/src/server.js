@@ -75,6 +75,8 @@ app.set('trust proxy', env.trustProxy);
 const server = http.createServer(app);
 
 app.use(cors({ origin: env.frontendUrl, credentials: true }));
+// Emissor de NF-e (serviço Python): ANTES dos leitores de corpo, para o upload do certificado passar direto.
+app.use('/nfe-app', require('./middlewares/nfeProxy'));
 app.use(
   express.json({
     limit: '2mb',
@@ -100,7 +102,9 @@ app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/account', require('./routes/account.routes'));
 app.use('/api/legal', require('./routes/legal.routes'));
+app.use('/api/tutorials', require('./routes/tutorial.routes'));
 app.use('/api/billing', billingRoutes);
+app.use('/api/nfe', require('./routes/nfe.routes'));
 // Públicas (sem login): configurações da tela de entrada e aviso de pagamento do Asaas.
 app.get('/api/public/config', billingController.publicConfig);
 app.post('/api/webhooks/asaas', billingController.asaasWebhook);

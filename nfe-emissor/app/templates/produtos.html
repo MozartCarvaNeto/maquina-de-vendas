@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import csrf with context %}
+{% block titulo %}Produtos - Emissor de NF-e{% endblock %}
+{% block conteudo %}
+<h1>Produtos</h1>
+<div class="barra">
+  <form method="get" class="busca"><input type="search" name="q" value="{{ q }}" placeholder="Buscar por código, nome ou NCM"><button class="botao secundario" type="submit">Buscar</button></form>
+  <a class="botao" href="{{ url_for('main.produto_form') }}">+ Novo produto</a>
+</div>
+<section class="cartao">
+<div class="rolagem">
+<table>
+  <thead><tr><th>Código</th><th>Descrição</th><th>NCM</th><th>CFOP</th><th>ICMS</th><th>Preço</th><th></th></tr></thead>
+  <tbody>
+  {% for p in produtos %}
+    <tr class="{{ 'inativo' if not p.ativo }}">
+      <td>{{ p.codigo }}</td><td>{{ p.descricao }}</td><td>{{ p.ncm }}</td><td>{{ p.cfop }}</td><td>{{ p.cst_icms }}</td>
+      <td class="num">R$ {{ p.preco|brl }}</td>
+      <td class="acoes">
+        <a href="{{ url_for('main.produto_form', pid=p.id) }}">editar</a>
+        <form method="post" action="{{ url_for('main.produto_ativo', pid=p.id) }}" class="inline">{{ csrf() }}<button class="link" type="submit">{{ 'inativar' if p.ativo else 'reativar' }}</button></form>
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="vazio">Nenhum produto cadastrado.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+</section>
+{% endblock %}

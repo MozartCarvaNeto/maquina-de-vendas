@@ -1,0 +1,24 @@
+{% macro opcoes(lista, atual) -%}
+{%- for valor, rotulo in lista %}<option value="{{ valor }}" {{ 'selected' if valor == (atual|string) }}>{{ rotulo }}</option>{% endfor -%}
+{%- endmacro %}
+
+{% macro ufs(atual) -%}
+<option value="">UF</option>
+{%- for uf in T.UFS %}<option value="{{ uf }}" {{ 'selected' if uf == atual }}>{{ uf }}</option>{% endfor -%}
+{%- endmacro %}
+
+{% macro campo(nome, rotulo, valor='', tipo='text', classe='', obrigatorio=false, dica='', maxlen=0, modo='') -%}
+<label class="campo {{ classe }}">
+  <span>{{ rotulo }}{% if obrigatorio %} *{% endif %}</span>
+  <input type="{{ tipo }}" name="{{ nome }}" id="{{ nome }}" value="{{ valor if valor is not none else '' }}"
+         {% if obrigatorio %}required{% endif %} {% if maxlen %}maxlength="{{ maxlen }}"{% endif %}
+         {% if modo %}inputmode="{{ modo }}"{% endif %} autocomplete="off">
+  {% if dica %}<small>{{ dica }}</small>{% endif %}
+</label>
+{%- endmacro %}
+
+{% macro csrf() -%}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{%- endmacro %}
+
+{% macro badge(status) -%}
+<span class="badge st-{{ status }}">{{ NOTA_STATUS.get(status, status) }}</span>
+{%- endmacro %}

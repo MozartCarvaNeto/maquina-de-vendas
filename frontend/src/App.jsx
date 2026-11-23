@@ -7,6 +7,7 @@ import Bloqueios from './pages/Bloqueios';
 import MarcaPropria from './pages/MarcaPropria';
 import Indicacoes from './pages/Indicacoes';
 import Revendedor from './pages/Revendedor';
+import NotasFiscais from './pages/NotasFiscais';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import Layout from './components/layout/Layout';
@@ -77,6 +78,7 @@ export default function App() {
           <Route path="linhas" element={<FeatureRoute feature={['discador', 'robo', 'agente_ia']}><Linhas /></FeatureRoute>} />
           <Route path="equipe" element={<Equipe />} />
           <Route path="bloqueios" element={<Bloqueios />} />
+          <Route path="notas-fiscais" element={<NotasFiscais />} />
           <Route path="marca" element={<MarcaPropria />} />
           <Route path="indicacoes" element={<Indicacoes />} />
           <Route path="revendedor" element={<Revendedor />} />

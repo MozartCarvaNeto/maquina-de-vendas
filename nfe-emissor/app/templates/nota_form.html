@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import opcoes, campo, csrf with context %}
+{% block titulo %}Nota fiscal - Emissor de NF-e{% endblock %}
+
+{% macro linha(it) -%}
+<tr class="item">
+  <td>
+    <select name="produto_id" class="sel-produto" required>
+      <option value="">Selecione o produto...</option>
+      {% for p in produtos %}
+      <option value="{{ p.id }}" data-preco="{{ p.preco }}" {{ 'selected' if it and it.produto_id == p.id }}>{{ p.codigo }} - {{ p.descricao }}{{ '' if p.ativo else ' (inativo)' }}</option>
+      {% endfor %}
+    </select>
+  </td>
+  <td><input name="quantidade" class="qtd" value="{{ it.quantidade if it else '1' }}" inputmode="decimal" required></td>
+  <td><input name="valor_unitario" class="vun" value="{{ it.valor_unitario if it else '' }}" inputmode="decimal" required></td>
+  <td class="num sub">0,00</td>
+  <td><button type="button" class="link rem">remover</button></td>
+</tr>
+{%- endmacro %}
+
+{% block conteudo %}
+<h1>{{ 'Editar nota' if nota.id else 'Nova nota fiscal' }}</h1>
+
+{% if not clientes %}
+  <div class="alerta aviso">Cadastre ao menos um <a href="{{ url_for('main.cliente_form') }}">cliente</a> antes de emitir.</div>
+{% endif %}
+{% if not produtos %}
+  <div class="alerta aviso">Cadastre ao menos um <a href="{{ url_for('main.produto_form') }}">produto</a> antes de emitir.</div>
+{% endif %}
+
+<form method="post" class="cartao" id="form-nota">
+  {{ csrf() }}
+  <h2>Destinatário</h2>
+  <div class="linha">
+    <label class="campo g"><span>Cliente *</span>
+      <select name="cliente_id" required>
+        <option value="">Selecione...</option>
+        {% for c in clientes %}<option value="{{ c.id }}" {{ 'selected' if nota.cliente_id == c.id }}>{{ c.nome }} ({{ c.documento }})</option>{% endfor %}
+      </select>
+    </label>
+    {{ campo('nat_op', 'Natureza da operação', nota.nat_op, classe='g', maxlen=60) }}
+  </div>
+
+  <h2>Itens</h2>
+  <div class="rolagem">
+  <table id="tabela-itens">
+    <thead><tr><th>Produto</th><th>Quantidade</th><th>Valor unitário (R$)</th><th>Subtotal</th><th></th></tr></thead>
+    <tbody id="itens">
+      {% for it in itens %}{{ linha(it) }}{% else %}{{ linha(none) }}{% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <template id="tpl-item">{{ linha(none) }}</template>
+  <p><button type="button" class="botao secundario" id="add-item">+ Adicionar item</button></p>
+
+  <h2>Valores e pagamento</h2>
+  <div class="linha">
+    {{ campo('valor_frete', 'Frete (R$)', nota.valor_frete, classe='p', modo='decimal') }}
+    {{ campo('valor_desconto', 'Desconto (R$)', nota.valor_desconto, classe='p', modo='decimal') }}
+    {{ campo('valor_outras', 'Outras despesas (R$)', nota.valor_outras, classe='p', modo='decimal') }}
+    <label class="campo m"><span>Forma de pagamento</span><select name="forma_pagto">{{ opcoes(T.FORMA_PAGTO, nota.forma_pagto) }}</select></label>
+    <label class="campo m"><span>Frete por conta de</span><select name="mod_frete">{{ opcoes(T.MOD_FRETE, nota.mod_frete) }}</select></label>
+  </div>
+  <p class="total">Total da nota: <strong id="total-nota">R$ 0,00</strong></p>
+
+  <h2>Operação</h2>
+  <div class="linha">
+    <label class="campo m"><span>Consumidor final</span>
+      <select name="ind_final">
+        <option value="1" {{ 'selected' if nota.ind_final != '0' }}>1 - Sim (consumidor final)</option>
+        <option value="0" {{ 'selected' if nota.ind_final == '0' }}>0 - Não (revenda/indústria)</option>
+      </select>
+    </label>
+    <label class="campo g"><span>Presença do comprador</span><select name="ind_pres">{{ opcoes(T.IND_PRES, nota.ind_pres) }}</select></label>
+    <label class="campo g"><span>Venda por intermediador (marketplace)?</span>
+      <select name="ind_intermed">
+        <option value="0" {{ 'selected' if nota.ind_intermed != '1' }}>Não: loja própria</option>
+        <option value="1" {{ 'selected' if nota.ind_intermed == '1' }}>Sim: marketplace/plataforma de terceiros</option>
+      </select>
+    </label>
+  </div>
+  <div class="linha">
+    {{ campo('intermed_cnpj', 'CNPJ do intermediador', nota.intermed_cnpj, classe='m') }}
+    {{ campo('intermed_id', 'Identificador no intermediador', nota.intermed_id, classe='m', maxlen=60) }}
+  </div>
+  <label class="campo"><span>Informações adicionais (aparecem no DANFE)</span>
+    <textarea name="info_adicional" rows="3" maxlength="2000">{{ nota.info_adicional or '' }}</textarea>
+    <small>Ex.: número do pedido da loja virtual.</small>
+  </label>
+
+  <button class="botao" type="submit">Salvar rascunho</button>
+  <a class="botao secundario" href="{{ url_for('main.notas') }}">Cancelar</a>
+</form>
+{% endblock %}

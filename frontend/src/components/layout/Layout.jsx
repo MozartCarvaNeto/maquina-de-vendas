@@ -7,6 +7,7 @@ import NavButtons from './NavButtons';
 import SubscriptionBanner from './SubscriptionBanner';
 import LowBalanceBanner from './LowBalanceBanner';
 import TermsGate from './TermsGate';
+import VideoHelp from './VideoHelp';
 import './Layout.css';
 
 export default function Layout() {
@@ -40,6 +41,7 @@ export default function Layout() {
         <div className="desktop-nav">
           <NavButtons />
         </div>
+        <VideoHelp />
         <Outlet />
       </main>
     </div>

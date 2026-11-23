@@ -35,3 +35,9 @@ Thumbs.db
 npm-debug.log*
 .vscode/
 .idea/
+
+# 7) Emissor de NF-e: ambiente Python e dados locais de teste
+nfe-emissor/.venv/
+nfe-emissor/data/
+__pycache__/
+*.pyc

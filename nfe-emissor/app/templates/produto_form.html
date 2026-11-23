@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import opcoes, campo, csrf with context %}
+{% block titulo %}Produto - Emissor de NF-e{% endblock %}
+{% block conteudo %}
+<h1>{{ 'Editar produto' if pid else 'Novo produto' }}</h1>
+<form method="post" class="cartao">
+  {{ csrf() }}
+  <div class="linha">
+    {{ campo('codigo', 'Código (SKU)', p.codigo, obrigatorio=true, classe='m', maxlen=60) }}
+    {{ campo('descricao', 'Descrição', p.descricao, obrigatorio=true, classe='g', maxlen=120) }}
+    {{ campo('preco', 'Preço de venda (R$)', p.preco, classe='m', modo='decimal') }}
+  </div>
+  <div class="linha">
+    {{ campo('ncm', 'NCM', p.ncm, obrigatorio=true, classe='m', modo='numeric', dica='8 dígitos. Veja no cadastro do Tiny.') }}
+    {{ campo('cest', 'CEST', p.cest, classe='m', modo='numeric', dica='7 dígitos, se o produto exigir.') }}
+    {{ campo('ean', 'GTIN / EAN', p.ean, classe='m', modo='numeric', dica='Vazio = "SEM GTIN".') }}
+    {{ campo('unidade', 'Unidade', p.unidade, classe='p', maxlen=6) }}
+  </div>
+  <h2>Tributação</h2>
+  <div class="linha">
+    <label class="campo m"><span>Origem</span><select name="origem">{{ opcoes(T.ORIGEM, p.origem) }}</select></label>
+    {{ campo('cfop', 'CFOP', p.cfop, obrigatorio=true, classe='p', modo='numeric', dica='Ex.: 5102. Para outro estado o sistema troca 5xxx por 6xxx.') }}
+    <label class="campo g"><span>{{ 'CSOSN (Simples Nacional)' if crt in ('1','2') else 'CST do ICMS' }}</span>
+      <select name="cst_icms">{{ opcoes(T.ICMS_SIMPLES if crt in ('1','2') else T.ICMS_NORMAL, p.cst_icms) }}</select>
+    </label>
+    {{ campo('aliq_icms', 'Alíquota ICMS (%)', p.aliq_icms, classe='p', modo='decimal', dica='Só CST 00 ou CSOSN 101 (crédito).') }}
+  </div>
+  <div class="linha">
+    <label class="campo g"><span>CST do PIS</span><select name="cst_pis">{{ opcoes(T.PIS_COFINS_CST, p.cst_pis) }}</select></label>
+    {{ campo('aliq_pis', 'Alíquota PIS (%)', p.aliq_pis, classe='p', modo='decimal') }}
+    <label class="campo g"><span>CST da COFINS</span><select name="cst_cofins">{{ opcoes(T.PIS_COFINS_CST, p.cst_cofins) }}</select></label>
+    {{ campo('aliq_cofins', 'Alíquota COFINS (%)', p.aliq_cofins, classe='p', modo='decimal') }}
+  </div>
+  <button class="botao" type="submit">Salvar produto</button>
+  <a class="botao secundario" href="{{ url_for('main.produtos') }}">Cancelar</a>
+</form>
+{% endblock %}

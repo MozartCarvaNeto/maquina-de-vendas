@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import badge with context %}
+{% block conteudo %}
+<h1>Painel</h1>
+
+{% for texto, destino in avisos %}
+  <div class="alerta aviso">{{ texto }} <a href="{{ url_for(destino) }}">Resolver</a></div>
+{% endfor %}
+
+<div class="grade">
+  <div class="cartao numero"><strong>{{ contagem.get('autorizada', 0) }}</strong><span>Autorizadas</span></div>
+  <div class="cartao numero"><strong>{{ contagem.get('rascunho', 0) }}</strong><span>Rascunhos</span></div>
+  <div class="cartao numero"><strong>{{ contagem.get('rejeitada', 0) }}</strong><span>Rejeitadas</span></div>
+  <div class="cartao numero"><strong>{{ contagem.get('pendente', 0) }}</strong><span>Pendentes</span></div>
+</div>
+
+<p><a class="botao" href="{{ url_for('main.nota_form') }}">+ Nova nota fiscal</a></p>
+
+<section class="cartao">
+  <h2>Últimas notas</h2>
+  <div class="rolagem">
+  <table>
+    <thead><tr><th>Nº</th><th>Cliente</th><th>Total</th><th>Situação</th><th></th></tr></thead>
+    <tbody>
+    {% for n in ultimas %}
+      <tr>
+        <td>{{ n.numero or '-' }}</td>
+        <td>{{ n.cliente_nome or '-' }}</td>
+        <td class="num">R$ {{ (n.total_nf or '0')|brl }}</td>
+        <td>{{ badge(n.status) }}</td>
+        <td><a href="{{ url_for('main.nota', nota_id=n.id) }}">abrir</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="vazio">Nenhuma nota ainda.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}
