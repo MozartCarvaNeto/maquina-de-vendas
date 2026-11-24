@@ -3,6 +3,8 @@ import sqlite3
 
 from flask import current_app, g
 
+from .nfe.util import sem_acento
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS usuarios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,12 +137,19 @@ CREATE TABLE IF NOT EXISTS log_sefaz (
 """
 
 
+def migrar(con: sqlite3.Connection):
+    """Índices que aceleram a busca de clientes/produtos (seguro rodar sempre)."""
+    con.execute("CREATE INDEX IF NOT EXISTS idx_clientes_documento ON clientes (documento)")
+    con.commit()
+
+
 def get_db() -> sqlite3.Connection:
     if "db" not in g:
         from . import tenant
         con = sqlite3.connect(tenant.cfg()["DB_PATH"])
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA foreign_keys = ON")
+        con.create_function("sem_acento", 1, sem_acento, deterministic=True)   # busca sem acento
         g.db = con
     return g.db
 

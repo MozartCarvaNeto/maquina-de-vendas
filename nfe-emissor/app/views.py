@@ -2,6 +2,7 @@
 import io
 import re
 import zipfile
+from pathlib import Path
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -20,7 +21,7 @@ from .nfe import tls
 from .nfe.danfe import gerar_danfe
 from .nfe.sefaz_urls import SERVICOS, VERIFICADOS, autorizador_da_uf, listar_urls
 from .nfe.sefaz_urls import padrao as sefaz_padrao
-from .nfe.util import (limpar_texto, normalizar_cnpj, parse_decimal, so_digitos, validar_cnpj,
+from .nfe.util import (limpar_texto, normalizar_cnpj, parse_decimal, sem_acento, so_digitos, validar_cnpj,
                        validar_documento)
 from .nfe.xml_builder import DadosInvalidos
 from .security import login_required
@@ -54,6 +55,18 @@ def _flash_erros(erros):
         flash(e, "erro")
 
 
+def _versao_estaticos() -> str:
+    """Muda sozinha quando app.js/style.css mudam: o navegador baixa a versão nova e guarda a antiga em cache."""
+    pasta = Path(__file__).parent / "static"
+    try:
+        return str(int(max(f.stat().st_mtime for f in pasta.iterdir() if f.is_file())))
+    except (OSError, ValueError):
+        return "1"
+
+
+_VERSAO_ESTATICOS = _versao_estaticos()
+
+
 @bp.app_context_processor
 def contexto_global():
     ambiente = None
@@ -64,7 +77,7 @@ def contexto_global():
         ambiente = row["ambiente"] if row else None
         cota = tenant.uso(db)
     return {"T": T, "NOTA_STATUS": T.NOTA_STATUS, "ambiente_atual": ambiente, "cota": cota,
-            "somente_leitura": getattr(g, "somente_leitura", False)}
+            "somente_leitura": getattr(g, "somente_leitura", False), "asset_v": _VERSAO_ESTATICOS}
 
 
 @bp.app_template_filter("brl")
@@ -410,6 +423,63 @@ def api_cep(cep):
 
 
 # ----------------------------------------------------------------------------------------
+# Busca por digitação (campos Cliente e Produto da nota): devolve só os primeiros resultados,
+# então a tela continua leve mesmo com dezenas de milhares de cadastros.
+# ----------------------------------------------------------------------------------------
+LIMITE_BUSCA = 50
+
+
+def _termos(q: str) -> list[str]:
+    """Palavras da busca. Aceita colar o rótulo da lista: 'Nome (12345678909)' -> 'nome', '12345678909'."""
+    return [t for t in re.sub(r"[()\[\],;]", " ", sem_acento(q)).split() if t][:8]
+
+
+@bp.get("/api/busca/clientes")
+@login_required
+def api_busca_clientes():
+    q = request.args.get("q", "").strip()[:100]
+    where, args = [], []
+    for t in _termos(q):
+        dig = so_digitos(t)
+        cond = "sem_acento(nome) LIKE ?"
+        args.append(f"%{t}%")
+        if len(dig) >= 3 and len(dig) == len(re.sub(r"[.\-/]", "", t)):   # CPF/CNPJ com ou sem pontuação
+            cond = f"({cond} OR documento LIKE ?)"
+            args.append(f"%{dig}%")
+        where.append(cond)
+    sql = "SELECT id, nome, documento FROM clientes"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    primeiro = sem_acento(q)
+    sql += " ORDER BY (sem_acento(nome) LIKE ?) DESC, nome LIMIT ?"
+    linhas = get_db().execute(sql, [*args, primeiro + "%", LIMITE_BUSCA + 1]).fetchall()
+    return jsonify(
+        itens=[{"id": r["id"], "rotulo": f"{r['nome']} ({r['documento']})"} for r in linhas[:LIMITE_BUSCA]],
+        mais=len(linhas) > LIMITE_BUSCA)
+
+
+@bp.get("/api/busca/produtos")
+@login_required
+def api_busca_produtos():
+    q = request.args.get("q", "").strip()[:100]
+    where, args = [], []
+    for t in _termos(q):
+        where.append("(sem_acento(codigo) LIKE ? OR sem_acento(descricao) LIKE ? OR ncm LIKE ? OR ean LIKE ?)")
+        args += [f"%{t}%", f"%{t}%", f"%{so_digitos(t) or t}%", f"%{so_digitos(t) or t}%"]
+    sql = "SELECT id, codigo, descricao, preco, ativo FROM produtos"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    primeiro = sem_acento(q)
+    sql += " ORDER BY ativo DESC, (sem_acento(descricao) LIKE ? OR sem_acento(codigo) LIKE ?) DESC, descricao LIMIT ?"
+    linhas = get_db().execute(sql, [*args, primeiro + "%", primeiro + "%", LIMITE_BUSCA + 1]).fetchall()
+    return jsonify(
+        itens=[{"id": r["id"], "preco": r["preco"],
+                "rotulo": f"{r['codigo']} - {r['descricao']}{'' if r['ativo'] else ' (inativo)'}"}
+               for r in linhas[:LIMITE_BUSCA]],
+        mais=len(linhas) > LIMITE_BUSCA)
+
+
+# ----------------------------------------------------------------------------------------
 # Produtos
 # ----------------------------------------------------------------------------------------
 @bp.get("/produtos")
@@ -734,14 +804,33 @@ def _salvar_nota(db, nota_id, d, itens):
     return nota_id
 
 
+def _tela_nota(db, nota, itens, empresa):
+    """Monta o formulário SEM carregar todos os clientes/produtos: só quantos existem e o que já está escolhido."""
+    cliente_sel = None
+    if nota.get("cliente_id"):
+        r = db.execute("SELECT nome, documento FROM clientes WHERE id = ?", (nota["cliente_id"],)).fetchone()
+        if r:
+            cliente_sel = f"{r['nome']} ({r['documento']})"
+    ids = [int(i["produto_id"]) for i in itens if i.get("produto_id")]
+    inativos = set()
+    if ids:
+        marcas = ",".join("?" * len(ids))
+        inativos = {r["id"] for r in db.execute(
+            f"SELECT id FROM produtos WHERE ativo = 0 AND id IN ({marcas})", ids)}
+    itens = [{**i, "rotulo": f"{i['codigo']} - {i['descricao']}"
+                              f"{' (inativo)' if i.get('produto_id') in inativos else ''}"} for i in itens]
+    return render_template(
+        "nota_form.html", nota=nota, itens=itens, empresa=empresa, cliente_sel=cliente_sel,
+        total_clientes=db.execute("SELECT COUNT(*) FROM clientes").fetchone()[0],
+        total_produtos=db.execute("SELECT COUNT(*) FROM produtos").fetchone()[0])
+
+
 @bp.route("/notas/nova", methods=["GET", "POST"])
 @bp.route("/notas/<int:nota_id>/editar", methods=["GET", "POST"])
 @login_required
 def nota_form(nota_id=None):
     db = get_db()
     empresa = servico.carregar_empresa(db)
-    clientes_ = db.execute("SELECT id, nome, documento FROM clientes ORDER BY nome").fetchall()
-    produtos_ = db.execute("SELECT * FROM produtos ORDER BY ativo DESC, descricao").fetchall()
 
     if nota_id:
         nota, _cli, itens = servico.carregar_nota(db, nota_id)
@@ -763,8 +852,7 @@ def nota_form(nota_id=None):
         if erros:
             _flash_erros(erros)
             nota = {**(nota or {}), **d, "id": nota_id}
-            return render_template("nota_form.html", nota=nota, itens=novos_itens, clientes=clientes_,
-                                   produtos=produtos_, empresa=empresa)
+            return _tela_nota(db, nota, novos_itens, empresa)
         nota_id = _salvar_nota(db, nota_id, d, novos_itens)
         flash("Nota salva como rascunho. Revise e clique em Emitir.", "ok")
         return redirect(url_for("main.nota", nota_id=nota_id))
@@ -773,8 +861,7 @@ def nota_form(nota_id=None):
         nota = {"nat_op": empresa["nat_op_padrao"] or "VENDA DE MERCADORIA", "ind_final": "1",
                 "ind_pres": "2", "ind_intermed": "0", "mod_frete": "9", "forma_pagto": "17",
                 "valor_frete": "0.00", "valor_desconto": "0.00", "valor_outras": "0.00"}
-    return render_template("nota_form.html", nota=nota, itens=itens, clientes=clientes_,
-                           produtos=produtos_, empresa=empresa)
+    return _tela_nota(db, nota, itens, empresa)
 
 
 @bp.get("/notas/<int:nota_id>")

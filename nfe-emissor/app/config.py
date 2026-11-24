@@ -39,6 +39,7 @@ class Config:
     SESSION_COOKIE_NAME = "nfe_session"
     SESSION_COOKIE_PATH = os.environ.get("NFE_PREFIXO", "/nfe-app")
 
+    SEND_FILE_MAX_AGE_DEFAULT = 7 * 24 * 3600   # CSS/JS têm ?v=... : podem ficar 7 dias no navegador
     MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # upload máximo de 10 MB (certificado, cadeia ICP-Brasil)
 
     # Cookies de sessão. COOKIE_SECURE=0 só para testar localmente sem HTTPS.

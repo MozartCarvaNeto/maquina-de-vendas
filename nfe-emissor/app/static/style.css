@@ -67,7 +67,6 @@ td.acoes { white-space: nowrap; }
 tr.inativo td { color: #98a3af; }
 td.vazio, p.vazio { color: var(--suave); text-align: center; padding: 18px; }
 #tabela-itens input, #tabela-itens select { min-width: 90px; }
-#tabela-itens .sel-produto { min-width: 260px; }
 
 .badge { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: .75rem; font-weight: 600; background: #e5eaf0; color: #3b4a5a; }
 .st-autorizada { background: #d9f0e2; color: #14522f; }

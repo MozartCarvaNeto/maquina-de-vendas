@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>{% block titulo %}Emissor de NF-e{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=busca1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_v }}">
 </head>
 <body data-base="{{ request.script_root }}">
 {% from '_macros.html' import csrf with context %}
@@ -39,6 +39,6 @@
   {% endwith %}
   {% block conteudo %}{% endblock %}
 </main>
-<script src="{{ url_for('static', filename='app.js') }}?v=busca1" defer></script>
+<script src="{{ url_for('static', filename='app.js') }}?v={{ asset_v }}" defer></script>
 </body>
 </html>

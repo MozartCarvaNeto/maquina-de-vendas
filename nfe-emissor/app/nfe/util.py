@@ -51,6 +51,11 @@ def fmt_aliq(valor) -> str:
     return fmt4(valor)
 
 
+def sem_acento(texto) -> str:
+    """Minúsculas e sem acentos (para buscar 'joao' e achar 'JOÃO')."""
+    return unicodedata.normalize("NFKD", str(texto or "")).encode("ascii", "ignore").decode().lower()
+
+
 def so_digitos(texto) -> str:
     return re.sub(r"\D", "", str(texto or ""))
 

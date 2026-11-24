@@ -38,240 +38,251 @@
   });
 
   // ---- Campos com busca (cliente e produto): digite ou cole para filtrar ----
-  // O <select> original continua sendo o campo enviado ao servidor (fica oculto);
-  // o campo de texto + lista de sugestões apenas escolhe a opção dele.
-  var MAX_SUGESTOES = 50;
+  // A busca é feita NO SERVIDOR (só os primeiros 50 resultados), então a página continua leve com
+  // milhares de cadastros. Um único tratador de eventos no documento atende todos os campos
+  // (inclusive as linhas de itens adicionadas depois) e existe uma única lista flutuante.
+  var ESPERA_MS = 180;
+  var cacheBusca = new Map();
+  var lista = null;       // <ul> flutuante compartilhada
+  var aberto = null;      // campo de texto com a lista aberta
 
-  function normalizar(t) {
-    return String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  function base() { return document.body.dataset.base || ""; }
+
+  function estado(input) {
+    if (!input._cb) {
+      var box = input.closest(".cb");
+      input._cb = {
+        box: box, valor: box.querySelector(".cb-valor"), url: box.dataset.url,
+        itens: [], mais: false, ativo: -1, seq: 0, timer: null, ctrl: null, colou: false, digitou: false,
+        termoPronto: null, escolherAoChegar: false,
+      };
+      input._cb.rotulo = input.value; // rótulo da escolha salva (volta a ele se a pessoa desistir)
+    }
+    return input._cb;
   }
-  function soDigitos(t) { return String(t || "").replace(/\D/g, ""); }
 
-  function iniciarBusca(select) {
-    if (select.dataset.buscaOk) return;
-    select.dataset.buscaOk = "1";
-
-    var obrigatorio = select.required;
-    var itens = [];
-    Array.prototype.forEach.call(select.options, function (o) {
-      if (!o.value) return; // ignora "Selecione..."
-      var rotulo = o.textContent.replace(/\s+/g, " ").trim();
-      itens.push({ valor: o.value, rotulo: rotulo, norm: normalizar(rotulo), dig: soDigitos(rotulo) });
-    });
-
-    var wrap = document.createElement("div");
-    wrap.className = "cb";
-    var input = document.createElement("input");
-    input.type = "text";
-    input.className = "cb-input";
-    input.autocomplete = "off";
-    input.spellcheck = false;
-    input.placeholder = select.dataset.busca || "Digite para buscar...";
-    input.setAttribute("role", "combobox");
-    input.setAttribute("aria-autocomplete", "list");
-    input.setAttribute("aria-expanded", "false");
-    input.required = obrigatorio;
-    wrap.appendChild(input);
-    // o campo de texto vem ANTES do select para ser o alvo do <label>
-    select.parentNode.insertBefore(wrap, select);
-    select.hidden = true;
-    select.required = false; // a validação passa a ser do campo de texto
-    select.tabIndex = -1;
-
-    var lista = document.createElement("ul");
+  function criarLista() {
+    if (lista) return lista;
+    lista = document.createElement("ul");
     lista.className = "cb-lista";
     lista.setAttribute("role", "listbox");
     lista.hidden = true;
     document.body.appendChild(lista);
-
-    var resultados = [];
-    var ativo = -1;
-    var aberta = false;
-    var digitou = false;
-
-    function rotuloAtual() {
-      var o = select.selectedOptions && select.selectedOptions[0];
-      return o && o.value ? o.textContent.replace(/\s+/g, " ").trim() : "";
-    }
-
-    function validar() {
-      var txt = input.value.trim();
-      if (txt && !select.value) input.setCustomValidity("Escolha um item da lista de sugestões.");
-      else input.setCustomValidity("");
-    }
-
-    function filtrar(consulta) {
-      var q = normalizar(consulta).trim();
-      if (!q) return itens.slice();
-      var termos = q.split(/\s+/);
-      var achados = itens.filter(function (it) {
-        return termos.every(function (t) {
-          if (it.norm.indexOf(t) >= 0) return true;
-          var td = soDigitos(t); // CPF/CNPJ digitado com ou sem pontuação
-          return td.length >= 3 && td.length === t.replace(/[.\-\/]/g, "").length && it.dig.indexOf(td) >= 0;
-        });
-      });
-      // quem começa com o texto digitado aparece primeiro
-      var comeca = [], resto = [];
-      achados.forEach(function (it) { (it.norm.indexOf(q) === 0 ? comeca : resto).push(it); });
-      return comeca.concat(resto);
-    }
-
-    function posicionar() {
-      var r = input.getBoundingClientRect();
-      var abaixo = window.innerHeight - r.bottom;
-      lista.style.left = Math.max(0, r.left) + "px";
-      lista.style.minWidth = r.width + "px";
-      lista.style.maxWidth = Math.max(r.width, Math.min(640, window.innerWidth - 16)) + "px";
-      if (abaixo < 220 && r.top > abaixo) { // sem espaço embaixo: abre para cima
-        lista.style.top = "auto";
-        lista.style.bottom = (window.innerHeight - r.top + 2) + "px";
-        lista.style.maxHeight = Math.max(120, Math.min(280, r.top - 12)) + "px";
-      } else {
-        lista.style.bottom = "auto";
-        lista.style.top = (r.bottom + 2) + "px";
-        lista.style.maxHeight = Math.max(120, Math.min(280, abaixo - 12)) + "px";
-      }
-    }
-
-    function marcarAtivo(i, rolar) {
-      ativo = i;
-      var lis = lista.querySelectorAll("li[data-i]");
-      lis.forEach(function (li) {
-        var on = Number(li.dataset.i) === i;
-        li.classList.toggle("ativo", on);
-        li.setAttribute("aria-selected", on ? "true" : "false");
-        if (on && rolar) li.scrollIntoView({ block: "nearest" });
-      });
-    }
-
-    function desenhar() {
-      var consulta = digitou ? input.value : "";
-      var todos = filtrar(consulta);
-      resultados = todos.slice(0, MAX_SUGESTOES);
-      lista.textContent = "";
-      resultados.forEach(function (it, i) {
-        var li = document.createElement("li");
-        li.setAttribute("role", "option");
-        li.dataset.i = String(i);
-        li.textContent = it.rotulo;
-        if (String(it.valor) === String(select.value)) li.classList.add("atual");
-        lista.appendChild(li);
-      });
-      if (!resultados.length) {
-        var vazio = document.createElement("li");
-        vazio.className = "cb-aviso";
-        vazio.textContent = itens.length ? "Nada encontrado para o que foi digitado." : "Nenhum item cadastrado.";
-        lista.appendChild(vazio);
-      } else if (todos.length > resultados.length) {
-        var mais = document.createElement("li");
-        mais.className = "cb-aviso";
-        mais.textContent = "Mostrando " + resultados.length + " de " + todos.length + ". Continue digitando para refinar.";
-        lista.appendChild(mais);
-      }
-      marcarAtivo(resultados.length && digitou ? 0 : -1, false);
-      if (!digitou && select.value) {
-        var idx = resultados.findIndex(function (it) { return String(it.valor) === String(select.value); });
-        if (idx >= 0) marcarAtivo(idx, true);
-      }
-      posicionar();
-    }
-
-    function abrir() {
-      aberta = true;
-      lista.hidden = false;
-      input.setAttribute("aria-expanded", "true");
-      desenhar();
-    }
-    function fechar() {
-      aberta = false;
-      lista.hidden = true;
-      input.setAttribute("aria-expanded", "false");
-    }
-
-    function escolher(item) {
-      select.value = item.valor;
-      input.value = item.rotulo;
-      digitou = false;
-      fechar();
-      validar();
-      select.dispatchEvent(new Event("change", { bubbles: true })); // preenche o preço, recalcula etc.
-    }
-
-    input.addEventListener("input", function () {
-      digitou = true;
-      var mudou = select.value !== "";
-      select.value = ""; // texto editado: a escolha anterior deixa de valer
-      validar();
-      if (mudou) select.dispatchEvent(new Event("change", { bubbles: true }));
-      abrir();
-    });
-    input.addEventListener("paste", function () {
-      // texto colado: se só houver um cadastro correspondente, já seleciona
-      setTimeout(function () {
-        if (!select.value && input.value.trim() && resultados.length === 1) escolher(resultados[0]);
-      }, 0);
-    });
-    input.addEventListener("focus", function () {
-      input.select();
-      digitou = false;
-      abrir();
-    });
-    input.addEventListener("click", function () { if (!aberta) abrir(); });
-    input.addEventListener("keydown", function (ev) {
-      if (ev.key === "ArrowDown") {
-        ev.preventDefault();
-        if (!aberta) { abrir(); return; }
-        if (resultados.length) marcarAtivo(Math.min(ativo + 1, resultados.length - 1), true);
-      } else if (ev.key === "ArrowUp") {
-        ev.preventDefault();
-        if (aberta && resultados.length) marcarAtivo(Math.max(ativo - 1, 0), true);
-      } else if (ev.key === "Enter") {
-        if (aberta) {
-          ev.preventDefault(); // não envia o formulário enquanto a lista está aberta
-          var alvo = resultados[ativo >= 0 ? ativo : 0];
-          if (alvo && (digitou || ativo >= 0)) escolher(alvo);
-          else fechar();
-        }
-      } else if (ev.key === "Escape") {
-        if (aberta) { ev.preventDefault(); fechar(); }
-        if (select.value) input.value = rotuloAtual();
-      }
-    });
-    input.addEventListener("blur", function () {
-      fechar();
-      if (select.value) {
-        input.value = rotuloAtual();
-      } else if (input.value.trim()) {
-        var achados = filtrar(input.value);
-        if (achados.length === 1) escolher(achados[0]);
-      }
-      validar();
-    });
-
-    // clicar numa sugestão (mousedown evita que o campo perca o foco antes)
+    // mousedown (e não click) evita que o campo perca o foco antes da escolha
     lista.addEventListener("mousedown", function (ev) {
       ev.preventDefault();
       var li = ev.target.closest("li[data-i]");
-      if (li) escolher(resultados[Number(li.dataset.i)]);
+      if (li && aberto) escolher(aberto, estado(aberto).itens[Number(li.dataset.i)]);
     });
     lista.addEventListener("mousemove", function (ev) {
       var li = ev.target.closest("li[data-i]");
-      if (li && Number(li.dataset.i) !== ativo) marcarAtivo(Number(li.dataset.i), false);
+      if (li && aberto && Number(li.dataset.i) !== estado(aberto).ativo) marcar(aberto, Number(li.dataset.i), false);
     });
-
-    window.addEventListener("resize", function () { if (aberta) posicionar(); });
-    window.addEventListener("scroll", function () { if (aberta) posicionar(); }, true);
-    window.addEventListener("pageshow", function () { input.value = rotuloAtual(); validar(); });
-
-    input.value = rotuloAtual();
-    validar();
+    window.addEventListener("resize", function () { if (aberto) posicionar(aberto); });
+    window.addEventListener("scroll", function (ev) {
+      if (aberto && !(lista && lista.contains(ev.target))) posicionar(aberto);
+    }, true);
+    return lista;
   }
 
-  function iniciarBuscas(raiz) {
-    (raiz || document).querySelectorAll("select[data-busca]").forEach(iniciarBusca);
+  function posicionar(input) {
+    var r = input.getBoundingClientRect();
+    var abaixo = window.innerHeight - r.bottom;
+    lista.style.left = Math.max(0, r.left) + "px";
+    lista.style.minWidth = r.width + "px";
+    lista.style.maxWidth = Math.max(r.width, Math.min(640, window.innerWidth - 16)) + "px";
+    if (abaixo < 220 && r.top > abaixo) { // sem espaço embaixo: abre para cima
+      lista.style.top = "auto";
+      lista.style.bottom = (window.innerHeight - r.top + 2) + "px";
+      lista.style.maxHeight = Math.max(120, Math.min(280, r.top - 12)) + "px";
+    } else {
+      lista.style.bottom = "auto";
+      lista.style.top = (r.bottom + 2) + "px";
+      lista.style.maxHeight = Math.max(120, Math.min(280, abaixo - 12)) + "px";
+    }
   }
-  iniciarBuscas(document);
+
+  function validar(input) {
+    var st = estado(input);
+    input.setCustomValidity(input.value.trim() && !st.valor.value ? "Escolha um item da lista de sugestões." : "");
+  }
+
+  function marcar(input, i, rolar) {
+    var st = estado(input);
+    st.ativo = i;
+    lista.querySelectorAll("li[data-i]").forEach(function (li) {
+      var on = Number(li.dataset.i) === i;
+      li.classList.toggle("ativo", on);
+      li.setAttribute("aria-selected", on ? "true" : "false");
+      if (on && rolar) li.scrollIntoView({ block: "nearest" });
+    });
+  }
+
+  function aviso(texto) {
+    var li = document.createElement("li");
+    li.className = "cb-aviso";
+    li.textContent = texto;
+    lista.appendChild(li);
+  }
+
+  function desenhar(input, carregando, erro) {
+    var st = estado(input);
+    criarLista();
+    lista.textContent = "";
+    st.itens.forEach(function (it, i) {
+      var li = document.createElement("li");
+      li.setAttribute("role", "option");
+      li.dataset.i = String(i);
+      li.textContent = it.rotulo;
+      if (String(it.id) === String(st.valor.value)) li.classList.add("atual");
+      lista.appendChild(li);
+    });
+    if (erro) aviso("Não foi possível buscar agora. Tente de novo.");
+    else if (carregando && !st.itens.length) aviso("Buscando...");
+    else if (!st.itens.length) aviso(input.value.trim() ? "Nada encontrado para o que foi digitado." : "Nenhum item cadastrado.");
+    else if (st.mais) aviso("Mostrando os " + st.itens.length + " primeiros. Continue digitando para refinar.");
+    marcar(input, st.itens.length && st.digitou ? 0 : -1, false);
+    lista.hidden = false;
+    posicionar(input);
+  }
+
+  function buscar(input, termo, aoTerminar) {
+    var st = estado(input);
+    var chave = st.url + "|" + termo;
+    var minha = ++st.seq;
+    if (st.ctrl) st.ctrl.abort();
+    if (cacheBusca.has(chave)) { aoTerminar(cacheBusca.get(chave), minha === st.seq); return; }
+    st.ctrl = window.AbortController ? new AbortController() : null;
+    fetch(st.url + "?q=" + encodeURIComponent(termo), { credentials: "same-origin", signal: st.ctrl ? st.ctrl.signal : undefined })
+      .then(function (r) { if (!r.ok) throw new Error("http " + r.status); return r.json(); })
+      .then(function (d) {
+        if (cacheBusca.size > 150) cacheBusca.clear();
+        cacheBusca.set(chave, d);
+        aoTerminar(d, minha === st.seq);
+      })
+      .catch(function (e) { if (e && e.name === "AbortError") return; aoTerminar(null, minha === st.seq); });
+  }
+
+  function atualizar(input, imediato) {
+    var st = estado(input);
+    clearTimeout(st.timer);
+    var termo = st.digitou ? input.value.trim() : "";
+    if (st.termoPronto !== termo) {                // a lista antiga não vale para o texto novo
+      st.itens = [];
+      if (!imediato && aberto === input) desenhar(input, true, false);   // mostra "Buscando..." na hora
+    }
+    function rodar() {
+      desenhar(input, true, false);
+      buscar(input, termo, function (dados, vigente) {
+        if (!vigente) return;
+        if (!dados) { st.itens = []; if (aberto === input) desenhar(input, false, true); return; }
+        st.itens = dados.itens || [];
+        st.mais = !!dados.mais;
+        st.termoPronto = termo;
+        if (aberto === input) desenhar(input, false, false);
+        // Enter apertado antes da busca voltar: escolhe o primeiro resultado da busca ATUAL
+        if (st.escolherAoChegar && st.digitou && st.itens.length) { st.escolherAoChegar = false; escolher(input, st.itens[0]); return; }
+        st.escolherAoChegar = false;
+        // texto colado que corresponde a um único cadastro: já seleciona
+        if (st.colou && st.itens.length === 1 && !st.mais && !st.valor.value) escolher(input, st.itens[0]);
+        st.colou = false;
+      });
+    }
+    if (imediato) rodar(); else st.timer = setTimeout(rodar, ESPERA_MS);
+  }
+
+  function abrir(input) {
+    aberto = input;
+    input.setAttribute("aria-expanded", "true");
+    atualizar(input, true);
+  }
+
+  function fechar(input) {
+    if (aberto === input) aberto = null;
+    input.setAttribute("aria-expanded", "false");
+    if (lista) lista.hidden = true;
+  }
+
+  function escolher(input, item) {
+    if (!item) return;
+    var st = estado(input);
+    clearTimeout(st.timer);
+    st.valor.value = item.id;
+    st.rotulo = item.rotulo;
+    input.value = item.rotulo;
+    st.digitou = false;
+    st.colou = false;
+    fechar(input);
+    validar(input);
+    st.valor.dispatchEvent(new CustomEvent("cb:escolhido", { bubbles: true, detail: item })); // preço, totais...
+  }
+
+  document.addEventListener("input", function (ev) {
+    var input = ev.target;
+    if (!input.classList || !input.classList.contains("cb-input")) return;
+    var st = estado(input);
+    st.digitou = true;
+    st.escolherAoChegar = false;
+    st.valor.value = ""; // texto editado: a escolha anterior deixa de valer
+    validar(input);
+    aberto = input;
+    input.setAttribute("aria-expanded", "true");
+    atualizar(input, false);
+  });
+  document.addEventListener("paste", function (ev) {
+    if (ev.target.classList && ev.target.classList.contains("cb-input")) estado(ev.target).colou = true;
+  });
+  document.addEventListener("focusin", function (ev) {
+    var input = ev.target;
+    if (!input.classList || !input.classList.contains("cb-input")) return;
+    estado(input).digitou = false;
+    input.select();
+    abrir(input);
+  });
+  document.addEventListener("focusout", function (ev) {
+    var input = ev.target;
+    if (!input.classList || !input.classList.contains("cb-input")) return;
+    var st = estado(input);
+    clearTimeout(st.timer);
+    fechar(input);
+    if (st.valor.value) {
+      input.value = st.rotulo;
+    } else if (input.value.trim()) {
+      st.colou = true; // se a busca achar um só cadastro, seleciona
+      atualizar(input, true);
+      fechar(input);
+    }
+    validar(input);
+  });
+  document.addEventListener("keydown", function (ev) {
+    var input = ev.target;
+    if (!input.classList || !input.classList.contains("cb-input")) return;
+    var st = estado(input);
+    var abertaAgora = aberto === input && lista && !lista.hidden;
+    if (ev.key === "ArrowDown") {
+      ev.preventDefault();
+      if (!abertaAgora) { abrir(input); return; }
+      if (st.itens.length) marcar(input, Math.min(st.ativo + 1, st.itens.length - 1), true);
+    } else if (ev.key === "ArrowUp") {
+      ev.preventDefault();
+      if (abertaAgora && st.itens.length) marcar(input, Math.max(st.ativo - 1, 0), true);
+    } else if (ev.key === "Enter") {
+      if (abertaAgora) {
+        ev.preventDefault(); // não envia o formulário enquanto a lista está aberta
+        var atual = st.termoPronto === (st.digitou ? input.value.trim() : "");
+        if (st.digitou && !atual) { st.escolherAoChegar = true; return; } // espera a busca terminar
+        var alvo = st.itens[st.ativo >= 0 ? st.ativo : 0];
+        if (alvo && (st.digitou || st.ativo >= 0)) escolher(input, alvo); else fechar(input);
+      }
+    } else if (ev.key === "Escape") {
+      if (abertaAgora) { ev.preventDefault(); fechar(input); }
+      if (st.valor.value) input.value = st.rotulo;
+    }
+  });
+  document.addEventListener("click", function (ev) {
+    var input = ev.target.closest && ev.target.closest(".cb-input");
+    if (input && aberto !== input) abrir(input);
+  });
 
   // ---- Formulário de nota: linhas de itens e total ----
   var tabela = document.getElementById("itens");
@@ -299,15 +310,12 @@
   }
 
   tabela.addEventListener("input", recalcular);
-  tabela.addEventListener("change", function (ev) {
-    if (ev.target.classList.contains("sel-produto")) {
-      var opt = ev.target.selectedOptions[0];
-      var vun = ev.target.closest("tr").querySelector(".vun");
-      if (opt && opt.dataset.preco && !vun.value) {
-        vun.value = String(opt.dataset.preco).replace(".", ",");
-      }
-      recalcular();
-    }
+  tabela.addEventListener("cb:escolhido", function (ev) {
+    if (ev.target.name !== "produto_id") return;
+    var vun = ev.target.closest("tr").querySelector(".vun");
+    var preco = ev.detail && ev.detail.preco;
+    if (preco && !vun.value) vun.value = String(preco).replace(".", ",");
+    recalcular();
   });
   tabela.addEventListener("click", function (ev) {
     if (ev.target.classList.contains("rem")) {
@@ -319,7 +327,6 @@
   document.getElementById("add-item").addEventListener("click", function () {
     var tpl = document.getElementById("tpl-item");
     tabela.appendChild(tpl.content.cloneNode(true));
-    iniciarBuscas(tabela);
     var campos = tabela.querySelectorAll("tr.item:last-child .cb-input");
     if (campos.length) campos[0].focus();
     recalcular();

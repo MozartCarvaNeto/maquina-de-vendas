@@ -2,16 +2,18 @@
 {% from '_macros.html' import opcoes, campo, csrf with context %}
 {% block titulo %}Nota fiscal - Emissor de NF-e{% endblock %}
 
+{# Campo com busca: o texto digitado consulta o servidor; o que vai no formulário é o id escolhido (campo oculto). #}
+{% macro busca(nome, url, rotulo, valor, dica) -%}
+<div class="cb" data-url="{{ url }}">
+  <input type="text" class="cb-input" autocomplete="off" spellcheck="false" required role="combobox"
+         aria-autocomplete="list" aria-expanded="false" placeholder="{{ dica }}" value="{{ rotulo or '' }}">
+  <input type="hidden" class="cb-valor" name="{{ nome }}" value="{{ valor or '' }}">
+</div>
+{%- endmacro %}
+
 {% macro linha(it) -%}
 <tr class="item">
-  <td>
-    <select name="produto_id" class="sel-produto" data-busca="Digite ou cole o nome/código do produto..." required>
-      <option value="">Selecione o produto...</option>
-      {% for p in produtos %}
-      <option value="{{ p.id }}" data-preco="{{ p.preco }}" {{ 'selected' if it and it.produto_id == p.id }}>{{ p.codigo }} - {{ p.descricao }}{{ '' if p.ativo else ' (inativo)' }}</option>
-      {% endfor %}
-    </select>
-  </td>
+  <td>{{ busca('produto_id', url_for('main.api_busca_produtos'), it.rotulo if it else '', it.produto_id if it else '', 'Digite ou cole o nome/código do produto...') }}</td>
   <td><input name="quantidade" class="qtd" value="{{ it.quantidade if it else '1' }}" inputmode="decimal" required></td>
   <td><input name="valor_unitario" class="vun" value="{{ it.valor_unitario if it else '' }}" inputmode="decimal" required></td>
   <td class="num sub">0,00</td>
@@ -22,10 +24,10 @@
 {% block conteudo %}
 <h1>{{ 'Editar nota' if nota.id else 'Nova nota fiscal' }}</h1>
 
-{% if not clientes %}
+{% if not total_clientes %}
   <div class="alerta aviso">Cadastre ao menos um <a href="{{ url_for('main.cliente_form') }}">cliente</a> antes de emitir.</div>
 {% endif %}
-{% if not produtos %}
+{% if not total_produtos %}
   <div class="alerta aviso">Cadastre ao menos um <a href="{{ url_for('main.produto_form') }}">produto</a> antes de emitir.</div>
 {% endif %}
 
@@ -34,10 +36,7 @@
   <h2>Destinatário</h2>
   <div class="linha">
     <label class="campo g"><span>Cliente *</span>
-      <select name="cliente_id" data-busca="Digite ou cole o nome ou CPF/CNPJ do cliente..." required>
-        <option value="">Selecione...</option>
-        {% for c in clientes %}<option value="{{ c.id }}" {{ 'selected' if nota.cliente_id == c.id }}>{{ c.nome }} ({{ c.documento }})</option>{% endfor %}
-      </select>
+      {{ busca('cliente_id', url_for('main.api_busca_clientes'), cliente_sel, nota.cliente_id, 'Digite ou cole o nome ou CPF/CNPJ do cliente...') }}
     </label>
     {{ campo('nat_op', 'Natureza da operação', nota.nat_op, classe='g', maxlen=60) }}
   </div>

@@ -90,7 +90,7 @@ def preparar(conta: str):
     """Cria pastas e tabelas da conta na primeira vez que ela é usada neste processo."""
     if conta in _PRONTAS:
         return
-    from .db import SCHEMA
+    from .db import SCHEMA, migrar
     with _trava:
         base = pasta_conta(conta)
         for sub in ("", "certs", "xmls"):
@@ -99,6 +99,7 @@ def preparar(conta: str):
         con = sqlite3.connect(base / "nfe.db")
         con.execute("PRAGMA journal_mode = WAL")
         con.executescript(SCHEMA)
+        migrar(con)
         con.commit()
         con.close()
         _PRONTAS.add(conta)

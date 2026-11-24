@@ -661,6 +661,65 @@ class TestAplicacaoWeb(unittest.TestCase):
         self.assertEqual(c.post("/produtos/importar", content_type="multipart/form-data",
                                 data={"arquivo": (io.BytesIO(csv_), "p.csv")}).status_code, 400)
 
+    def test_busca_cliente_produto_na_nota(self):
+        """Campos Cliente/Produto da nota: busca no servidor (não embute milhares de <option> na página)."""
+        import sqlite3
+        c = self.cliente(conta="conta-busca-aaaaaaaa")
+        c.get("/")                                        # cria a conta/banco
+        con = sqlite3.connect(Path(TMP) / "contas" / "conta-busca-aaaaaaaa" / "nfe.db")
+        con.executemany("INSERT INTO clientes (documento,nome,cep,logradouro,numero,bairro,municipio,uf,cod_municipio) "
+                        "VALUES (?,?,?,?,?,?,?,?,?)",
+                        [(f"{10000000000 + i}", f"Cliente {i} Ltda", "13201000", "Rua", "1", "Centro", "Jundiai", "SP", "3525904")
+                         for i in range(3000)] +
+                        [("52998224725", "JOÃO da Conceição", "13201000", "Rua", "1", "Centro", "Jundiai", "SP", "3525904")])
+        con.executemany("INSERT INTO produtos (codigo,descricao,ncm,preco,ativo) VALUES (?,?,?,?,?)",
+                        [(f"P{i}", f"Produto {i}", "61091000", "9.90", 1) for i in range(3000)] +
+                        [("CAFE-1", "Café torrado 500g", "09012100", "25.50", 1), ("OLD-1", "Café antigo", "09012100", "1.00", 0)])
+        con.commit()
+        con.close()
+        # a página não carrega os cadastros (antes: 1 <option> por cliente/produto, repetido em cada item)
+        html = c.get("/notas/nova").get_data(as_text=True)
+        self.assertLess(len(html), 60_000)
+        self.assertNotIn("Cliente 1500 Ltda", html)
+        self.assertIn('data-url="/api/busca/clientes"', html)
+        self.assertIn('data-url="/api/busca/produtos"', html)
+        self.assertNotIn("Cadastre ao menos um", html)
+        # cliente: sem acento, sem maiúsculas, CPF com/sem pontuação, rótulo colado, limite de resultados
+        busca = lambda url: c.get(url).get_json()
+        for q in ("joao conceicao", "JOÃO", "529.982.247-25", "52998224725", "João da Conceição (52998224725)"):
+            itens = busca("/api/busca/clientes?q=" + q)["itens"]
+            self.assertEqual([i["rotulo"] for i in itens], ["JOÃO da Conceição (52998224725)"], q)
+        r = busca("/api/busca/clientes?q=cliente")
+        self.assertEqual((len(r["itens"]), r["mais"]), (50, True))
+        self.assertEqual(busca("/api/busca/clientes?q=ninguem")["itens"], [])
+        # produto: código, descrição sem acento, NCM; ativos primeiro; devolve o preço
+        r = busca("/api/busca/produtos?q=cafe")["itens"]
+        self.assertEqual([i["rotulo"] for i in r], ["CAFE-1 - Café torrado 500g", "OLD-1 - Café antigo (inativo)"])
+        self.assertEqual(r[0]["preco"], "25.50")
+        self.assertEqual(len(busca("/api/busca/produtos?q=09012100")["itens"]), 2)
+        self.assertEqual(busca("/api/busca/produtos?q=p2999")["itens"][0]["rotulo"], "P2999 - Produto 2999")
+        # exige login do Turbo Prospect (sem cabeçalhos assinados é recusado)
+        self.assertEqual(self.app.test_client().get("/api/busca/clientes?q=a").status_code, 403)
+        # salvar a nota com os ids escolhidos continua igual; ao reabrir, os textos escolhidos voltam
+        cid = busca("/api/busca/clientes?q=joao")["itens"][0]["id"]
+        pid = busca("/api/busca/produtos?q=cafe-1")["itens"][0]["id"]
+        tok = re.search(r'name="csrf_token" value="([^"]+)"', html).group(1)
+        r = c.post("/notas/nova", data={"csrf_token": tok, "cliente_id": cid, "nat_op": "VENDA", "produto_id": [pid],
+                                        "quantidade": ["2"], "valor_unitario": ["25,50"], "ind_final": "1", "ind_pres": "2",
+                                        "ind_intermed": "0", "mod_frete": "9", "forma_pagto": "17",
+                                        "valor_frete": "0", "valor_desconto": "0", "valor_outras": "0"})
+        self.assertEqual(r.status_code, 302, r.get_data(as_text=True)[:400])
+        nota_id = r.headers["Location"].rstrip("/").split("/")[-1]
+        ed = c.get(f"/notas/{nota_id}/editar").get_data(as_text=True)
+        self.assertIn("JOÃO da Conceição (52998224725)", ed)
+        self.assertIn("CAFE-1 - Café torrado 500g", ed)
+        # erro de validação reabre o formulário com as escolhas preservadas
+        r = c.post(f"/notas/{nota_id}/editar", data={"csrf_token": tok, "cliente_id": cid, "produto_id": [pid],
+                                                     "quantidade": ["0"], "valor_unitario": ["1"]})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("quantidade deve ser maior que zero", r.get_data(as_text=True))
+        self.assertIn("CAFE-1 - Café torrado 500g", r.get_data(as_text=True))
+
     def test_somente_leitura_e_cota(self):
         c = self.cliente(conta="conta-ro-aaaaaaaa", leitura="1")
         self.assertEqual(c.get("/notas").status_code, 200)                       # consulta liberada
