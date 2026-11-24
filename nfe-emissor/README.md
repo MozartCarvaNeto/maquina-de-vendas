@@ -31,7 +31,7 @@ Dentro do Turbo Prospect ele roda como serviço próprio (`bash deploy/instalar-
 - Chave de acesso, XML 4.00, assinatura XMLDSig (RSA-SHA1, exigido pela SEFAZ), envio SOAP 1.2 com
   TLS mútuo, recibo/protocolo, `nfeProc` autorizado salvo no banco **e** em disco (`data/xmls/AAAA-MM/`).
 - Consulta de situação por chave; nota que ficou sem resposta vira **Pendente** e exige consulta antes de reenviar (evita duplicidade).
-- Cancelamento (evento 110111), DANFE em PDF (marca d'água em homologação/sem protocolo/cancelada),
+- Cancelamento (evento 110111), DANFE em PDF (marca d'água em homologação/sem protocolo/cancelada; **logotipo da empresa** enviado em Configurações e impresso no topo),
   ZIP mensal dos XMLs.
 - Aba **Integrações**: botão **Importar pedidos** para **Nuvemshop, Shopify, WooCommerce e Mercado Livre**. Cada pedido pago
   vira um **rascunho de nota** (e um cliente, se novo) para você revisar, editar e emitir. Veja a seção "Integrações com lojas".

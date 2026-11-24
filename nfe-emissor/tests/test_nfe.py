@@ -90,6 +90,15 @@ def montar(empresa=None, cliente=None, itens=None, nota=None, numero=7, tp_amb="
                          nota or NOTA, numero=numero, dh_emissao=DH, cnf="48271905", tp_amb=tp_amb)
 
 
+def png_teste(cor=(200, 30, 30), tamanho=(500, 200), alfa=False) -> bytes:
+    from PIL import Image
+    modo_img = "RGBA" if alfa else "RGB"
+    img = Image.new(modo_img, tamanho, cor + ((0,) if alfa else ()))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
 class TestDocumentos(unittest.TestCase):
     def test_cpf_cnpj(self):
         self.assertTrue(validar_cpf("529.982.247-25"))
@@ -239,6 +248,36 @@ class TestXmlEAssinatura(unittest.TestCase):
         nfe, _, _ = montar(itens=muitos, nota={**NOTA, "info_adicional": "x " * 400})
         pdf = gerar_danfe(serializar(nfe), cancelada=True)
         self.assertGreater(pdf.count(b"/Type /Page\n") + pdf.count(b"/Type /Page "), 1)
+
+    def test_danfe_com_logotipo(self):
+        from app import logo
+        nfe, _, _ = montar()
+        xml = serializar(nfe)
+        sem = gerar_danfe(xml)
+        self.assertNotIn(b"/Subtype /Image", sem)                      # padrão: nada muda sem logotipo
+        png = logo.normalizar(png_teste(alfa=True))                    # transparente vira fundo branco
+        com = gerar_danfe(xml, logo=png)
+        self.assertTrue(com.startswith(b"%PDF"))
+        self.assertIn(b"/Subtype /Image", com)
+        # logotipo com defeito nunca derruba o DANFE
+        self.assertTrue(gerar_danfe(xml, logo=b"isto nao e uma imagem").startswith(b"%PDF"))
+        # nome longo + muitos itens com logotipo: várias linhas, sem erro
+        longa = {**EMPRESA, "razao_social": "COMERCIO DE CONFECCOES E ACESSORIOS DA MODA LTDA ME",
+                 "logradouro": "Avenida Presidente Juscelino Kubitschek de Oliveira"}
+        nfe, _, _ = montar(empresa=longa, itens=[item(f"P{i}", "1", "9,99") for i in range(40)])
+        self.assertTrue(gerar_danfe(serializar(nfe), logo=png).startswith(b"%PDF"))
+
+    def test_logotipo_validacao(self):
+        from app import logo
+        for ruim in (b"", b"texto qualquer", b"<svg xmlns='http://www.w3.org/2000/svg'/>",
+                     b"GIF89a" + b"\x00" * 40, png_teste(tamanho=(10, 10)), b"\x89PNG" + b"0" * 100):
+            with self.assertRaises(logo.LogoInvalido):
+                logo.normalizar(ruim)
+        with self.assertRaises(logo.LogoInvalido):
+            logo.normalizar(b"0" * (logo.TAMANHO_MAX + 1))
+        grande = logo.normalizar(png_teste(tamanho=(3000, 1500)))     # é reduzido
+        from PIL import Image
+        self.assertLessEqual(max(Image.open(io.BytesIO(grande)).size), logo.LADO_SAIDA)
 
 
 def _ret_autorizacao(chave, cstat_prot="100", cstat_lote="104"):
@@ -540,6 +579,41 @@ class TestAplicacaoWeb(unittest.TestCase):
         self.assertNotIn("SO-DA-A", b.get("/produtos").get_data(as_text=True))   # B não vê o produto de A
         self.assertTrue((Path(TMP) / "contas" / "conta-iso-aaaaaaaa" / "nfe.db").exists())
         self.assertTrue((Path(TMP) / "contas" / "conta-iso-bbbbbbbb" / "nfe.db").exists())
+
+    def test_logotipo_por_conta(self):
+        a, b = self.cliente(conta="conta-logo-aaaaaaaa"), self.cliente(conta="conta-logo-bbbbbbbb")
+
+        def token(c):
+            return re.search(r'name="csrf_token" value="([^"]+)"',
+                             c.get("/configuracoes").get_data(as_text=True)).group(1)
+
+        def enviar(c, dados, nome="logo.png"):
+            return c.post("/configuracoes/logo", follow_redirects=True, content_type="multipart/form-data",
+                          data={"csrf_token": token(c), "logo": (io.BytesIO(dados), nome)})
+
+        self.assertEqual(a.get("/configuracoes/logo.png").status_code, 404)    # ainda sem logotipo
+        self.assertIn("Nenhum logotipo", a.get("/configuracoes").get_data(as_text=True))
+        # arquivo inválido é recusado com mensagem clara
+        r = enviar(a, b"<svg/>", "logo.svg")
+        self.assertIn("não reconhecido", r.get_data(as_text=True))
+        self.assertEqual(a.get("/configuracoes/logo.png").status_code, 404)
+        # envio válido
+        r = enviar(a, png_teste())
+        self.assertIn("Logotipo salvo", r.get_data(as_text=True))
+        img = a.get("/configuracoes/logo.png")
+        self.assertEqual((img.status_code, img.mimetype), (200, "image/png"))
+        self.assertTrue(img.data.startswith(b"\x89PNG"))
+        self.assertTrue((Path(TMP) / "contas" / "conta-logo-aaaaaaaa" / "logo.png").exists())
+        # isolamento: a conta B não enxerga o logotipo de A
+        self.assertEqual(b.get("/configuracoes/logo.png").status_code, 404)
+        self.assertFalse((Path(TMP) / "contas" / "conta-logo-bbbbbbbb" / "logo.png").exists())
+        # sem CSRF não grava
+        self.assertEqual(b.post("/configuracoes/logo", data={"logo": (io.BytesIO(png_teste()), "x.png")},
+                                content_type="multipart/form-data").status_code, 400)
+        # remover
+        r = a.post("/configuracoes/logo/remover", data={"csrf_token": token(a)}, follow_redirects=True)
+        self.assertIn("Logotipo removido", r.get_data(as_text=True))
+        self.assertEqual(a.get("/configuracoes/logo.png").status_code, 404)
 
     def test_somente_leitura_e_cota(self):
         c = self.cliente(conta="conta-ro-aaaaaaaa", leitura="1")

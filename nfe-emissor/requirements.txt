@@ -6,3 +6,4 @@ certifi
 reportlab>=4.0
 gunicorn>=22.0
 tzdata>=2024.1
+pillow>=10.0

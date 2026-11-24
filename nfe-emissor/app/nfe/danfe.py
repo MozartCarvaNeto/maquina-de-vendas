@@ -10,7 +10,7 @@ from lxml import etree
 from reportlab.graphics.barcode import code128
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
-from reportlab.lib.utils import simpleSplit
+from reportlab.lib.utils import ImageReader, simpleSplit
 from reportlab.pdfgen import canvas
 
 NS = "http://www.portalfiscal.inf.br/nfe"
@@ -63,7 +63,13 @@ def fmt_data(iso: str, com_hora=True) -> str:
 
 
 class _Desenho:
-    def __init__(self, xml: str | bytes, cancelada: bool = False):
+    def __init__(self, xml: str | bytes, cancelada: bool = False, logo: bytes | None = None):
+        self.logo = None
+        if logo:
+            try:                      # logotipo com defeito nunca pode impedir o DANFE
+                self.logo = ImageReader(io.BytesIO(logo))
+            except Exception:
+                self.logo = None
         if isinstance(xml, str):
             xml = xml.encode("utf-8")
         raiz = etree.fromstring(xml)
@@ -102,6 +108,11 @@ class _Desenho:
             else:
                 c.drawString((x + 1) * mm, ty, str(valor))
 
+    def desenhar_logo(self, x, topo, w, h):
+        """Logotipo dentro do retângulo (mm), sem deformar, centralizado."""
+        self.c.drawImage(self.logo, x * mm, self.y(topo + h), w * mm, h * mm,
+                         preserveAspectRatio=True, anchor="c", mask="auto")
+
     def titulo(self, topo, texto):
         self.c.setFont("Helvetica-Bold", 7)
         self.c.drawString(MARGEM, self.y(topo + 2.2), texto.upper())
@@ -132,19 +143,32 @@ class _Desenho:
         topo = 8
         i = self.inf
         c = self.c
-        # emitente
+        # emitente (com o logotipo da empresa à esquerda, se houver)
         self.caixa(x0, topo, 82, 32)
-        c.setFont("Helvetica-Bold", 10)
-        nome = _g(i, "emit/xNome")
-        for n, linha in enumerate(simpleSplit(nome, "Helvetica-Bold", 10, 78 * mm)[:3]):
-            c.drawString((x0 + 2) * mm, self.y(topo + 7 + n * 4.2), linha)
-        c.setFont("Helvetica", 7)
         e = _f(i, "emit/enderEmit")
         l1 = f"{_g(e, 'xLgr')}, {_g(e, 'nro')} {_g(e, 'xCpl')}".strip()
         l2 = f"{_g(e, 'xBairro')} - CEP {_g(e, 'CEP')}"
         l3 = f"{_g(e, 'xMun')} - {_g(e, 'UF')}   Fone: {_g(e, 'fone')}"
-        for n, linha in enumerate((l1, l2, l3)):
-            c.drawString((x0 + 2) * mm, self.y(topo + 20 + n * 3.8), linha[:62])
+        nome = _g(i, "emit/xNome")
+        if self.logo is None:
+            c.setFont("Helvetica-Bold", 10)
+            for n, linha in enumerate(simpleSplit(nome, "Helvetica-Bold", 10, 78 * mm)[:3]):
+                c.drawString((x0 + 2) * mm, self.y(topo + 7 + n * 4.2), linha)
+            c.setFont("Helvetica", 7)
+            for n, linha in enumerate((l1, l2, l3)):
+                c.drawString((x0 + 2) * mm, self.y(topo + 20 + n * 3.8), linha[:62])
+        else:
+            self.desenhar_logo(x0 + 1.5, topo + 1.5, 26, 29)
+            tx, largura_texto = x0 + 29, 51
+            c.setFont("Helvetica-Bold", 9)
+            for n, linha in enumerate(simpleSplit(nome, "Helvetica-Bold", 9, largura_texto * mm)[:3]):
+                c.drawString(tx * mm, self.y(topo + 6.5 + n * 4), linha)
+            c.setFont("Helvetica", 7)
+            linhas = []
+            for texto in (l1, l2, l3):
+                linhas += simpleSplit(texto, "Helvetica", 7, largura_texto * mm)
+            for n, linha in enumerate(linhas[:4]):
+                c.drawString(tx * mm, self.y(topo + 19.8 + n * 3.2), linha)
         # DANFE
         xd = x0 + 82
         self.caixa(xd, topo, 34, 32)
@@ -352,5 +376,6 @@ class _Desenho:
         return self.buf.getvalue()
 
 
-def gerar_danfe(xml: str | bytes, cancelada: bool = False) -> bytes:
-    return _Desenho(xml, cancelada).gerar()
+def gerar_danfe(xml: str | bytes, cancelada: bool = False, logo: bytes | None = None) -> bytes:
+    """`logo`: bytes de uma imagem (PNG) a imprimir no quadro do emitente; opcional."""
+    return _Desenho(xml, cancelada, logo).gerar()

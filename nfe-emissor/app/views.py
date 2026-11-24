@@ -13,6 +13,7 @@ from flask import (Blueprint, Response, abort, current_app, flash, g, jsonify, r
 from . import security, servico, tenant
 from .integracoes import PLATAFORMAS, ErroIntegracao, importador
 from .integracoes import mercadolivre as ml
+from . import logo
 from .db import get_db
 from .nfe import tabelas as T
 from .nfe import tls
@@ -182,7 +183,8 @@ def empresa_form():
         url_cadastrada=all(urls["2"].values()) and all(urls["1"].values()),
         urls=urls, alteradas=alteradas, servicos=SERVICOS,
         cadeia_ok=tls.tem_cadeia(current_app.config["DATA_DIR"]),
-        ultimo=servico.ultimo_numero(db, empresa["ambiente"], empresa["serie"]))
+        ultimo=servico.ultimo_numero(db, empresa["ambiente"], empresa["serie"]),
+        tem_logo=logo.existe(), logo_versao=logo.versao())
 
 
 @bp.post("/configuracoes/sefaz")
@@ -320,6 +322,42 @@ def empresa_certificado():
     db.commit()
     flash(f"Certificado salvo: {cert.titular} (válido até {cert.validade_fim:%d/%m/%Y}).", "ok")
     return redirect(url_for("main.empresa_form"))
+
+
+# ----------------------------------------------------------------------------------------
+# Logotipo impresso no DANFE (um por conta)
+# ----------------------------------------------------------------------------------------
+@bp.get("/configuracoes/logo.png")
+@login_required
+def logo_imagem():
+    dados = logo.ler()
+    if not dados:
+        abort(404)
+    return Response(dados, mimetype="image/png", headers={"Cache-Control": "private, no-cache"})
+
+
+@bp.post("/configuracoes/logo")
+@login_required
+def logo_enviar():
+    arquivo = request.files.get("logo")
+    if not arquivo or not arquivo.filename:
+        flash("Escolha uma imagem (PNG, JPG ou WEBP).", "erro")
+        return redirect(url_for("main.empresa_form") + "#logotipo")
+    try:
+        logo.salvar(arquivo.read(logo.TAMANHO_MAX + 1))
+    except logo.LogoInvalido as exc:
+        flash(str(exc), "erro")
+    else:
+        flash("Logotipo salvo. Ele passa a sair no topo do DANFE.", "ok")
+    return redirect(url_for("main.empresa_form") + "#logotipo")
+
+
+@bp.post("/configuracoes/logo/remover")
+@login_required
+def logo_remover():
+    logo.remover()
+    flash("Logotipo removido. O DANFE volta ao formato sem logotipo.", "ok")
+    return redirect(url_for("main.empresa_form") + "#logotipo")
 
 
 @bp.post("/configuracoes/cadeia")
@@ -786,7 +824,7 @@ def nota_danfe(nota_id):
     xml = n["xml_proc"] or n["xml_assinado"]
     if not xml:
         abort(404, "Emita a nota para gerar o DANFE.")
-    pdf = gerar_danfe(xml, cancelada=n["status"] == "cancelada")
+    pdf = gerar_danfe(xml, cancelada=n["status"] == "cancelada", logo=logo.ler())
     return Response(pdf, mimetype="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="danfe-{n["numero"]}.pdf"'})
 

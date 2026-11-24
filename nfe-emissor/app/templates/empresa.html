@@ -3,7 +3,7 @@
 {% block titulo %}Configurações - Emissor de NF-e{% endblock %}
 {% block conteudo %}
 <h1>Configurações</h1>
-<p class="atalhos"><a href="#certificado">Certificado digital</a> · <a href="#sefaz">Endereços da SEFAZ</a></p>
+<p class="atalhos"><a href="#logotipo">Logotipo</a> · <a href="#certificado">Certificado digital</a> · <a href="#sefaz">Endereços da SEFAZ</a></p>
 
 <form method="post" action="{{ url_for('main.empresa_salvar') }}" class="cartao">
   {{ csrf() }}
@@ -81,6 +81,30 @@
   </div>
   <button class="botao" type="submit">Salvar configurações</button>
 </form>
+
+<section class="cartao" id="logotipo">
+  <h2>Logotipo da nota (DANFE)</h2>
+  {% if tem_logo %}
+    <p><img class="logo-previa" src="{{ url_for('main.logo_imagem') }}?v={{ logo_versao }}" alt="Logotipo atual"></p>
+  {% else %}
+    <p class="vazio">Nenhum logotipo enviado: o DANFE sai só com os dados da empresa.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('main.logo_enviar') }}" enctype="multipart/form-data">
+    {{ csrf() }}
+    <div class="linha">
+      <label class="campo g"><span>Imagem (PNG, JPG ou WEBP, até 2 MB)</span><input type="file" name="logo" accept="image/png,image/jpeg,image/webp" required></label>
+    </div>
+    <button class="botao" type="submit">{{ 'Trocar logotipo' if tem_logo else 'Enviar logotipo' }}</button>
+  </form>
+  {% if tem_logo %}
+  <form method="post" action="{{ url_for('main.logo_remover') }}" class="espaco">
+    {{ csrf() }}
+    <button class="botao secundario" type="submit">Remover logotipo</button>
+  </form>
+  {% endif %}
+  <small>Aparece no quadro do emitente, no topo do DANFE (PDF). Prefira uma imagem horizontal ou quadrada com fundo branco ou transparente.
+  Vale para as visualizações do DANFE feitas depois do envio, inclusive de notas antigas; o XML da nota não muda.</small>
+</section>
 
 <section class="cartao" id="certificado">
   <h2>Certificado digital A1</h2>

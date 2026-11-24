@@ -92,3 +92,5 @@ td.vazio, p.vazio { color: var(--suave); text-align: center; padding: 18px; }
 }
 
 .cota { margin-left: auto; font-size: .85rem; opacity: .85; white-space: nowrap; }
+
+.logo-previa { max-width: 260px; max-height: 110px; padding: 6px; background: #fff; border: 1px solid var(--borda, #d8dde6); border-radius: 6px; }
