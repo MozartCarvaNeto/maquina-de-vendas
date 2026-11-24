@@ -5,7 +5,8 @@
 <h1>Produtos</h1>
 <div class="barra">
   <form method="get" class="busca"><input type="search" name="q" value="{{ q }}" placeholder="Buscar por código, nome ou NCM"><button class="botao secundario" type="submit">Buscar</button></form>
-  <a class="botao" href="{{ url_for('main.produto_form') }}">+ Novo produto</a>
+  <span class="grupo"><a class="botao secundario" href="{{ url_for('main.produtos_importar') }}">⬆ Importar planilha</a>
+  <a class="botao" href="{{ url_for('main.produto_form') }}">+ Novo produto</a></span>
 </div>
 <section class="cartao">
 <div class="rolagem">

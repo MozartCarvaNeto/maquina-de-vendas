@@ -1,0 +1,78 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import csrf with context %}
+{% block titulo %}{{ cfg.titulo }} - Emissor de NF-e{% endblock %}
+{% block conteudo %}
+<h1>{{ cfg.titulo }}</h1>
+<p><a href="{{ url_for(cfg.lista) }}">&larr; Voltar para {{ cfg.grupo }}</a></p>
+
+{% if res %}
+<section class="cartao" id="resultado">
+  <h2>{{ 'Simulação concluída (nada foi gravado)' if res.simulado else 'Importação concluída' }}</h2>
+  <div class="resumo">
+    <div><strong>{{ res.total }}</strong><span>linhas lidas</span></div>
+    <div class="ok"><strong>{{ res.criados }}</strong><span>{{ 'seriam criados' if res.simulado else 'criados' }}</span></div>
+    <div class="ok"><strong>{{ res.atualizados }}</strong><span>{{ 'seriam atualizados' if res.simulado else 'atualizados' }}</span></div>
+    <div><strong>{{ res.ignorados }}</strong><span>já existiam (pulados)</span></div>
+    <div class="{{ 'ruim' if res.com_erro }}"><strong>{{ res.com_erro }}</strong><span>com erro</span></div>
+  </div>
+  {% for a in res.avisos %}<div class="alerta aviso">{{ a }}</div>{% endfor %}
+  {% if res.colunas_ignoradas %}
+  <p><small>Colunas não reconhecidas (ignoradas): {{ res.colunas_ignoradas|join(', ') }}</small></p>
+  {% endif %}
+  {% if res.erros %}
+  <h3>Linhas com erro <small>(as demais foram {{ 'validadas' if res.simulado else 'importadas' }}; corrija estas na planilha e envie de novo)</small></h3>
+  <div class="rolagem"><table>
+    <thead><tr><th>Linha</th><th>Problema</th></tr></thead>
+    <tbody>
+    {% for linha, msgs in res.erros[:200] %}
+      <tr><td>{{ linha }}</td><td>{{ msgs|join(' ') }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% if res.erros|length > 200 %}<p><small>Mostrando as 200 primeiras de {{ res.erros|length }} linhas com erro.</small></p>{% endif %}
+  {% elif res.simulado %}
+  <div class="alerta ok">Nenhum erro encontrado. Envie o mesmo arquivo novamente, sem marcar "Só validar", para gravar.</div>
+  {% else %}
+  <div class="alerta ok">Tudo certo, nenhuma linha com erro.</div>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="cartao">
+  <h2>1. Baixe o modelo</h2>
+  <p>Use os mesmos nomes de coluna na primeira linha. Aceitamos <strong>CSV</strong> (separado por ; ou ,) e <strong>Excel (.xlsx)</strong>.</p>
+  <p><a class="botao secundario" href="{{ url_for('main.modelo_planilha', grupo=cfg.grupo, formato='xlsx') }}">Modelo Excel (.xlsx)</a>
+     <a class="botao secundario" href="{{ url_for('main.modelo_planilha', grupo=cfg.grupo, formato='csv') }}">Modelo CSV</a></p>
+</section>
+
+<section class="cartao">
+  <h2>2. Envie a planilha</h2>
+  <form method="post" enctype="multipart/form-data" action="{{ url_for(cfg.rota) }}">
+    {{ csrf() }}
+    <div class="linha">
+      <label class="campo g"><span>Arquivo (.csv ou .xlsx, até 5 MB e {{ limite }} linhas)</span>
+        <input type="file" name="arquivo" accept=".csv,.xlsx,.xlsm,text/csv" required></label>
+    </div>
+    <p><strong>Se o {{ cfg.chave }} já estiver cadastrado:</strong><br>
+      <label><input type="radio" name="existentes" value="atualizar" checked> atualizar os dados (colunas vazias não apagam nada)</label><br>
+      <label><input type="radio" name="existentes" value="pular"> pular (não mexer no que já existe)</label></p>
+    <p><label><input type="checkbox" name="simular" value="1"> Só validar, sem gravar (mostra o que aconteceria)</label></p>
+    <button class="botao" type="submit">Importar</button>
+  </form>
+</section>
+
+<section class="cartao">
+  <h2>Colunas aceitas</h2>
+  <div class="rolagem"><table>
+    <thead><tr><th>Coluna</th><th>Obrigatória p/ cadastrar novo</th><th>Observação</th></tr></thead>
+    <tbody>
+    {% for campo, rotulo, obrig, dica in cfg.campos %}
+      <tr><td><code>{{ campo }}</code> <small>({{ rotulo }})</small></td><td>{{ 'sim' if obrig else 'não' }}</td><td>{{ dica }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <small>Os nomes das colunas aceitam variações comuns (ex.: "Cidade", "SKU", "Telefone", "CPF/CNPJ"). Números como CEP, NCM e CPF/CNPJ:
+  se o Excel tiver tirado os zeros à esquerda, eles são recompostos; prefira formatar essas colunas como Texto.
+  {% if tipo == 'cliente' %}Quando faltar o código IBGE, o município ou a UF, buscamos pelo CEP (precisa de internet).{% endif %}</small>
+</section>
+{% endblock %}

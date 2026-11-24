@@ -13,7 +13,7 @@ from flask import (Blueprint, Response, abort, current_app, flash, g, jsonify, r
 from . import security, servico, tenant
 from .integracoes import PLATAFORMAS, ErroIntegracao, importador
 from .integracoes import mercadolivre as ml
-from . import logo
+from . import importacao, logo
 from .db import get_db
 from .nfe import tabelas as T
 from .nfe import tls
@@ -93,7 +93,7 @@ def filtro_data_br(iso, com_hora=True):
 @bp.app_errorhandler(500)
 def erro_http(e):
     codigo = getattr(e, "code", 500)
-    mensagem = {404: "Página não encontrada.", 413: "Arquivo grande demais (máximo 2 MB)."}.get(
+    mensagem = {404: "Página não encontrada.", 413: "Arquivo grande demais (máximo 10 MB)."}.get(
         codigo, getattr(e, "description", None) or "Erro inesperado.")
     if codigo == 500:
         mensagem = "Erro interno. Veja os logs do servidor."
@@ -573,6 +573,71 @@ def cliente_form(cid=None):
         return redirect(url_for("main.clientes"))
     padrao = dict(atual) if atual else {"ind_ie_dest": "9"}
     return render_template("cliente_form.html", c=padrao, cid=cid)
+
+
+# ----------------------------------------------------------------------------------------
+# Importação de clientes (CSV/Excel) e produtos (CSV/Excel)
+# ----------------------------------------------------------------------------------------
+_IMPORTACAO = {
+    "produto": {"titulo": "Importar produtos", "lista": "main.produtos", "rota": "main.produtos_importar",
+                "grupo": "produtos", "campos": importacao.CAMPOS_PRODUTO, "chave": "código (SKU)"},
+    "cliente": {"titulo": "Importar clientes", "lista": "main.clientes", "rota": "main.clientes_importar",
+                "grupo": "clientes", "campos": importacao.CAMPOS_CLIENTE, "chave": "CPF/CNPJ"},
+}
+
+
+def _tela_importacao(tipo, resultado=None):
+    return render_template("importar.html", tipo=tipo, cfg=_IMPORTACAO[tipo], res=resultado,
+                           limite=importacao.MAX_LINHAS)
+
+
+def _importar(tipo):
+    if request.method == "GET":
+        return _tela_importacao(tipo)
+    arquivo = request.files.get("arquivo")
+    if not arquivo or not arquivo.filename:
+        flash("Escolha o arquivo CSV ou Excel (.xlsx).", "erro")
+        return _tela_importacao(tipo)
+    try:
+        registros, ignoradas = importacao.ler_registros(tipo, arquivo.filename,
+                                                        arquivo.read(importacao.TAMANHO_MAX + 1))
+    except importacao.ArquivoInvalido as exc:
+        flash(str(exc), "erro")
+        return _tela_importacao(tipo)
+    db = get_db()
+    cep_fn = None
+    if tipo == "cliente":
+        from .integracoes.importador import consultar_cep as cep_fn
+    res = importacao.aplicar(
+        db, tipo, registros, crt=servico.carregar_empresa(db)["crt"],
+        existentes="pular" if _f("existentes") == "pular" else "atualizar",
+        simular=_f("simular") == "1", cep_fn=cep_fn, ignoradas=ignoradas)
+    return _tela_importacao(tipo, res)
+
+
+@bp.route("/produtos/importar", methods=["GET", "POST"])
+@login_required
+def produtos_importar():
+    return _importar("produto")
+
+
+@bp.route("/clientes/importar", methods=["GET", "POST"])
+@login_required
+def clientes_importar():
+    return _importar("cliente")
+
+
+@bp.get("/<any(produtos,clientes):grupo>/modelo.<any(csv,xlsx):formato>")
+@login_required
+def modelo_planilha(grupo, formato):
+    tipo = "produto" if grupo == "produtos" else "cliente"
+    if formato == "csv":
+        corpo, mime = importacao.modelo_csv(tipo), "text/csv; charset=utf-8"
+    else:
+        corpo = importacao.modelo_xlsx(tipo)
+        mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return Response(corpo, mimetype=mime, headers={
+        "Content-Disposition": f'attachment; filename="modelo-{grupo}.{formato}"'})
 
 
 # ----------------------------------------------------------------------------------------

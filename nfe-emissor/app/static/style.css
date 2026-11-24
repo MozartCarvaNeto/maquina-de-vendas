@@ -94,3 +94,11 @@ td.vazio, p.vazio { color: var(--suave); text-align: center; padding: 18px; }
 .cota { margin-left: auto; font-size: .85rem; opacity: .85; white-space: nowrap; }
 
 .logo-previa { max-width: 260px; max-height: 110px; padding: 6px; background: #fff; border: 1px solid var(--borda, #d8dde6); border-radius: 6px; }
+
+.grupo { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.resumo { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.resumo > div { background: #f4f6f8; border: 1px solid var(--borda); border-radius: 8px; padding: 10px 12px; }
+.resumo strong { display: block; font-size: 1.5rem; }
+.resumo span { color: var(--suave); font-size: .85rem; }
+.resumo .ok { background: #e6f4ec; border-color: #b7dcc7; }
+.resumo .ruim { background: #fde7e5; border-color: #f2b8b4; }

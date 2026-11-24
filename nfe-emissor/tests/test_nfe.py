@@ -615,6 +615,52 @@ class TestAplicacaoWeb(unittest.TestCase):
         self.assertIn("Logotipo removido", r.get_data(as_text=True))
         self.assertEqual(a.get("/configuracoes/logo.png").status_code, 404)
 
+    def test_importacao_web(self):
+        from unittest import mock
+        c = self.cliente(conta="conta-import-aaaaaaaa")
+
+        def token(url):
+            return re.search(r'name="csrf_token" value="([^"]+)"', c.get(url).get_data(as_text=True)).group(1)
+
+        def enviar(url, conteudo, nome, **extra):
+            return c.post(url, content_type="multipart/form-data", data={
+                "csrf_token": token(url), "arquivo": (io.BytesIO(conteudo), nome), **extra})
+
+        # telas e modelos
+        for url in ("/produtos/importar", "/clientes/importar"):
+            self.assertIn("Baixe o modelo", c.get(url).get_data(as_text=True))
+        self.assertIn("Importar planilha", c.get("/produtos").get_data(as_text=True))
+        self.assertIn("Importar planilha", c.get("/clientes").get_data(as_text=True))
+        for grupo, formato, inicio in (("produtos", "csv", b"\xef\xbb\xbfcodigo;"), ("clientes", "csv", b"\xef\xbb\xbfdocumento;"),
+                                       ("produtos", "xlsx", b"PK"), ("clientes", "xlsx", b"PK")):
+            r = c.get(f"/{grupo}/modelo.{formato}")
+            self.assertEqual(r.status_code, 200)
+            self.assertTrue(r.data.startswith(inicio), (grupo, formato))
+            self.assertIn("attachment", r.headers["Content-Disposition"])
+        # produtos: simulação e gravação
+        csv_ = b"codigo;descricao;ncm;preco\nW1;Produto web;61091000;12,34\nW2;Sem NCM;;1,00\n"
+        r = enviar("/produtos/importar", csv_, "p.csv", simular="1")
+        html = r.get_data(as_text=True)
+        self.assertIn("Simulação concluída", html)
+        self.assertNotIn("Produto web", c.get("/produtos").get_data(as_text=True))
+        r = enviar("/produtos/importar", csv_, "p.csv")
+        html = r.get_data(as_text=True)
+        self.assertIn("Importação concluída", html)
+        self.assertIn("NCM deve ter 8 dígitos", html)
+        self.assertIn("Produto web", c.get("/produtos").get_data(as_text=True))
+        # clientes (CEP simulado) e arquivo ruim
+        cli = (b"documento;nome;cep;logradouro;numero;bairro\n12345678909;Cliente Web;13201000;Rua W;5;Centro\n")
+        with mock.patch("app.integracoes.importador.consultar_cep",
+                        return_value={"localidade": "Jundiaí", "uf": "SP", "ibge": "3525904"}):
+            html = enviar("/clientes/importar", cli, "c.csv").get_data(as_text=True)
+        self.assertIn("Importação concluída", html)
+        self.assertIn("Cliente Web", c.get("/clientes").get_data(as_text=True))
+        self.assertIn("coluna obrigatória", enviar("/produtos/importar", b"a;b\n1;2\n", "x.csv").get_data(as_text=True))
+        self.assertIn("Excel antigo", enviar("/produtos/importar", b"\xd0\xcf\x11\xe0" + b"0" * 30, "x.xls").get_data(as_text=True))
+        # sem CSRF não grava
+        self.assertEqual(c.post("/produtos/importar", content_type="multipart/form-data",
+                                data={"arquivo": (io.BytesIO(csv_), "p.csv")}).status_code, 400)
+
     def test_somente_leitura_e_cota(self):
         c = self.cliente(conta="conta-ro-aaaaaaaa", leitura="1")
         self.assertEqual(c.get("/notas").status_code, 200)                       # consulta liberada
@@ -726,6 +772,176 @@ class TestAplicacaoWeb(unittest.TestCase):
 # Integrações com lojas (respostas simuladas no formato descrito na documentação de cada API)
 # ---------------------------------------------------------------------------------------
 CPF_OK = "52998224725"
+
+
+class TestImportacao(unittest.TestCase):
+    """Importação de clientes e produtos por CSV/Excel (sem rede: o CEP é simulado)."""
+
+    def setUp(self):
+        import sqlite3
+        from app.db import SCHEMA
+        self.db = sqlite3.connect(":memory:")
+        self.db.row_factory = sqlite3.Row
+        self.db.executescript(SCHEMA)
+
+    @staticmethod
+    def cep_falso(cep):
+        base = {"logradouro": "Rua do CEP", "bairro": "Centro", "localidade": "Jundiaí", "uf": "SP", "ibge": "3525904"}
+        return {} if cep == "99999999" else base
+
+    def ler(self, tipo, nome, dados):
+        from app import importacao
+        return importacao.ler_registros(tipo, nome, dados)
+
+    def importar(self, tipo, nome, dados, **kw):
+        from app import importacao
+        regs, ign = importacao.ler_registros(tipo, nome, dados)
+        kw.setdefault("cep_fn", self.cep_falso)
+        return importacao.aplicar(self.db, tipo, regs, ignoradas=ign, **kw)
+
+    def test_produtos_csv_br(self):
+        # Excel brasileiro: ponto e vírgula, ANSI (cp1252), vírgula decimal, nomes de coluna variados
+        csv_ = ("SKU;Descrição;NCM;Valor;Un;CSOSN\r\n"
+                "A-1;Camisa básica;61091000;49,90;un;102\r\n"
+                "A-2;Livro de açúcar;1012100;1.234,56;;102\r\n"          # NCM sem o zero da frente
+                "A-3;Sem NCM;;10,00;;102\r\n"
+                "A-4;CST inválido;61091000;10,00;;999\r\n"
+                "A-5;Preço ruim;61091000;abc;;102\r\n").encode("cp1252")
+        r = self.importar("produto", "produtos.csv", csv_, crt="1")
+        self.assertEqual((r.total, r.criados, r.com_erro), (5, 2, 3))
+        self.assertEqual([l for l, _ in r.erros], [4, 5, 6])              # número da linha na planilha
+        a2 = self.db.execute("SELECT * FROM produtos WHERE codigo='A-2'").fetchone()
+        self.assertEqual((a2["ncm"], a2["preco"], a2["cfop"], a2["unidade"]), ("01012100", "1234.56", "5102", "UN"))
+        self.assertEqual(self.db.execute("SELECT unidade FROM produtos WHERE codigo='A-1'").fetchone()[0], "UN")
+
+    def test_produtos_atualizar_sem_apagar(self):
+        self.importar("produto", "a.csv", b"codigo;descricao;ncm;preco;cfop;cest\nP1;Antigo;61091000;10,00;5405;2800100\n")
+        # só preço e descrição vêm na planilha; CFOP e CEST não podem ser perdidos; célula vazia não apaga
+        r = self.importar("produto", "b.csv", b"codigo;descricao;ncm;preco;cest\nP1;Novo nome;;25,50;\n")
+        self.assertEqual((r.criados, r.atualizados, r.com_erro), (0, 1, 0))
+        p = self.db.execute("SELECT * FROM produtos WHERE codigo='P1'").fetchone()
+        self.assertEqual((p["descricao"], p["preco"], p["cfop"], p["cest"], p["ncm"]),
+                         ("Novo nome", "25.50", "5405", "2800100", "61091000"))
+        # modo "pular" não mexe em nada
+        r = self.importar("produto", "c.csv", b"codigo;descricao;ncm\nP1;Outro;61091000\n", existentes="pular")
+        self.assertEqual((r.ignorados, r.atualizados), (1, 0))
+        self.assertEqual(self.db.execute("SELECT descricao FROM produtos WHERE codigo='P1'").fetchone()[0], "Novo nome")
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM produtos").fetchone()[0], 1)
+
+    def test_produtos_xlsx_numeros_do_excel(self):
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.append(["Código", "Produto", "NCM", "Preço de venda", "GTIN", "CST ICMS", "Origem"])
+        ws.append([1001, "Tênis esportivo", 64041100, 199.9, 7891234567895, 102, 0])     # tudo numérico
+        ws.append(["X-7", "Chapéu", 1012100, 19.99, 78912345678, 102, 1])                 # EAN-12 sem o zero? 11 dígitos
+        ws.append([None, None, None, None, None, None, None])                             # linha em branco
+        buf = io.BytesIO()
+        wb.save(buf)
+        r = self.importar("produto", "planilha.xlsx", buf.getvalue(), crt="1")
+        self.assertEqual((r.total, r.criados, r.com_erro), (2, 2, 0), r.erros)
+        p = self.db.execute("SELECT * FROM produtos WHERE codigo='1001'").fetchone()
+        self.assertEqual((p["ncm"], p["preco"], p["ean"], p["cst_icms"]), ("64041100", "199.9", "7891234567895", "102"))
+        self.assertEqual(self.db.execute("SELECT ean, ncm, origem FROM produtos WHERE codigo='X-7'").fetchone()[:],
+                         ("078912345678", "01012100", "1"))
+
+    def test_produtos_regime_normal_cst_sem_zero(self):
+        r = self.importar("produto", "n.csv", b"codigo;descricao;ncm;cst_icms\nN1;Normal;61091000;0\nN2;Isento;61091000;40\n",
+                          crt="3")
+        self.assertEqual((r.criados, r.com_erro), (2, 0), r.erros)
+        self.assertEqual(self.db.execute("SELECT cst_icms FROM produtos WHERE codigo='N1'").fetchone()[0], "00")
+
+    def test_clientes_csv_com_cep(self):
+        csv_ = ("CPF/CNPJ;Nome;CEP;Endereço;Número;Bairro;Cidade;UF;Telefone;E-mail;IE\n"
+                "123.456.789-09;Maria da Silva;13201000;Rua A;10;Centro;;;(11) 99999-8888;maria@x.com;\n"
+                "11.222.333/0001-81;Loja Exemplo Ltda;1310100;Av. Paulista;1000;Bela Vista;;;;;111222333444\n"  # CEP sem 0
+                "123.456.789-00;CPF inválido;13201000;Rua B;1;Centro;;;;;\n"
+                "98765432100;Sem endereço;99999999;;;;;;;;\n"                                                   # CEP não achado
+                "12345678909;Email ruim;13201000;Rua C;2;Centro;;;;email-sem-arroba;\n").encode("utf-8")
+        r = self.importar("cliente", "clientes.csv", csv_)
+        self.assertEqual((r.total, r.criados, r.com_erro), (5, 2, 3), r.erros)
+        maria = self.db.execute("SELECT * FROM clientes WHERE documento='12345678909'").fetchone()
+        self.assertEqual((maria["municipio"], maria["uf"], maria["cod_municipio"], maria["fone"], maria["ind_ie_dest"]),
+                         ("Jundiaí", "SP", "3525904", "11999998888", "9"))
+        loja = self.db.execute("SELECT * FROM clientes WHERE documento='11222333000181'").fetchone()
+        self.assertEqual((loja["cep"], loja["ind_ie_dest"], loja["ie"]), ("01310100", "1", "111222333444"))
+        erros = {linha: " ".join(msgs) for linha, msgs in r.erros}
+        self.assertIn("CPF/CNPJ inválido", erros[4])
+        self.assertIn("IBGE", erros[5])
+        self.assertIn("E-mail inválido", erros[6])
+
+    def test_clientes_atualizar_e_ie_isento(self):
+        base = ("documento;nome;cep;logradouro;numero;bairro;municipio;uf;cod_municipio;ind_ie_dest;ie\n"
+                "12345678909;Maria;13201000;Rua A;10;Centro;Jundiaí;SP;3525904;9;\n")
+        self.importar("cliente", "a.csv", base.encode())
+        r = self.importar("cliente", "b.csv", b"documento;nome;ie\n123.456.789-09;Maria Souza;ISENTO\n")
+        self.assertEqual((r.criados, r.atualizados, r.com_erro), (0, 1, 0), r.erros)
+        c = self.db.execute("SELECT * FROM clientes").fetchone()
+        self.assertEqual((c["nome"], c["logradouro"], c["ind_ie_dest"], c["ie"]), ("Maria Souza", "Rua A", "2", ""))
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM clientes").fetchone()[0], 1)
+        # contribuinte sem IE é recusado
+        r = self.importar("cliente", "c.csv", b"documento;nome;ind_ie_dest\n12345678909;Maria;contribuinte\n")
+        self.assertIn("Inscrição Estadual", " ".join(r.erros[0][1]))
+
+    def test_notacao_cientifica_e_zeros_do_documento(self):
+        r = self.importar("cliente", "n.csv", ("documento;nome;cep;logradouro;numero;bairro\n"
+                                                "1,12345678909E+10;Teste;13201000;Rua A;1;Centro\n"
+                                                "1234567890;CPF sem zero;13201000;Rua A;1;Centro\n").encode())
+        self.assertIn("notação científica", " ".join(r.erros[0][1]))
+
+    def test_simulacao_nao_grava(self):
+        r = self.importar("produto", "s.csv", b"codigo;descricao;ncm\nS1;Simulado;61091000\n", simular=True)
+        self.assertEqual((r.criados, r.simulado), (1, True))
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM produtos").fetchone()[0], 0)
+
+    def test_arquivos_invalidos(self):
+        from app import importacao
+        casos = {
+            "vazio": b"",
+            "sem coluna obrigatória": b"nome;preco\nx;1\n",
+            "só cabeçalho": b"codigo;descricao;ncm\n",
+            "xls antigo": b"\xd0\xcf\x11\xe0" + b"0" * 50,
+            "xlsx corrompido": b"PK\x03\x04" + b"0" * 50,
+        }
+        for nome, dados in casos.items():
+            with self.assertRaises(importacao.ArquivoInvalido, msg=nome):
+                self.ler("produto", "arq.xls" if nome == "xls antigo" else "arq.csv", dados)
+        linhas = "codigo;descricao;ncm\n" + "".join(f"S{i};Item;61091000\n" for i in range(importacao.MAX_LINHAS + 1))
+        with self.assertRaises(importacao.ArquivoInvalido):
+            self.ler("produto", "grande.csv", linhas.encode())
+
+    def test_cep_limitado_nao_trava(self):
+        from app import importacao
+        chamadas = []
+
+        def lento(cep):
+            chamadas.append(cep)
+            return self.cep_falso(cep)
+
+        n = importacao.MAX_CONSULTAS_CEP + 20
+        linhas = "documento;nome;cep;logradouro;numero;bairro\n"
+        # CPFs válidos gerados: 11 dígitos com verificadores corretos
+        def cpf(i):
+            nove = [int(x) for x in f"{i:09d}"]
+            for k in (9, 10):
+                soma = sum(d * (k + 1 - j) for j, d in enumerate(nove))
+                nove.append((soma * 10 % 11) % 10)
+            return "".join(map(str, nove))
+        for i in range(1, n + 1):
+            linhas += f"{cpf(100000 + i)};Cliente {i};{13000000 + i:08d};Rua;1;Centro\n"
+        r = self.importar("cliente", "m.csv", linhas.encode(), cep_fn=lento)
+        self.assertLessEqual(len(chamadas), importacao.MAX_CONSULTAS_CEP)
+        self.assertEqual(r.criados, importacao.MAX_CONSULTAS_CEP)
+        self.assertTrue(r.avisos)
+
+    def test_modelos_sao_importaveis(self):
+        from app import importacao
+        for tipo in ("produto", "cliente"):
+            for gerar, nome in ((importacao.modelo_csv, "m.csv"), (importacao.modelo_xlsx, "m.xlsx")):
+                self.db.execute("DELETE FROM produtos")
+                self.db.execute("DELETE FROM clientes")
+                r = self.importar(tipo, nome, gerar(tipo))
+                self.assertEqual((r.criados, r.com_erro), (2, 0), (tipo, nome, r.erros))
 
 
 class _Resp:

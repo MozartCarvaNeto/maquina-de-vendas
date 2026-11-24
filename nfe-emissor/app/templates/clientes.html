@@ -4,7 +4,8 @@
 <h1>Clientes</h1>
 <div class="barra">
   <form method="get" class="busca"><input type="search" name="q" value="{{ q }}" placeholder="Buscar por nome ou CPF/CNPJ"><button class="botao secundario" type="submit">Buscar</button></form>
-  <a class="botao" href="{{ url_for('main.cliente_form') }}">+ Novo cliente</a>
+  <span class="grupo"><a class="botao secundario" href="{{ url_for('main.clientes_importar') }}">⬆ Importar planilha</a>
+  <a class="botao" href="{{ url_for('main.cliente_form') }}">+ Novo cliente</a></span>
 </div>
 <section class="cartao">
 <div class="rolagem">
