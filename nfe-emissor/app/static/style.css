@@ -102,3 +102,15 @@ td.vazio, p.vazio { color: var(--suave); text-align: center; padding: 18px; }
 .resumo span { color: var(--suave); font-size: .85rem; }
 .resumo .ok { background: #e6f4ec; border-color: #b7dcc7; }
 .resumo .ruim { background: #fde7e5; border-color: #f2b8b4; }
+
+/* Campos com busca (cliente e produto na nota) */
+[hidden] { display: none !important; }
+.cb { position: relative; width: 100%; }
+.cb::after { content: "\25BE"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--suave); pointer-events: none; font-size: .8rem; }
+.cb-input { padding-right: 26px; text-overflow: ellipsis; }
+#tabela-itens .cb-input { min-width: 260px; }
+.cb-lista { position: fixed; z-index: 10000; margin: 0; padding: 4px 0; list-style: none; background: #fff; border: 1px solid var(--borda); border-radius: 8px; box-shadow: 0 8px 24px rgba(20, 32, 46, .18); overflow-y: auto; font-size: .92rem; color: var(--texto); }
+.cb-lista li { padding: 7px 12px; cursor: pointer; }
+.cb-lista li.ativo { background: #eaf1fc; }
+.cb-lista li.atual { font-weight: 600; }
+.cb-lista li.cb-aviso { color: var(--suave); cursor: default; font-size: .8rem; }

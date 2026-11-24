@@ -5,7 +5,7 @@
 {% macro linha(it) -%}
 <tr class="item">
   <td>
-    <select name="produto_id" class="sel-produto" required>
+    <select name="produto_id" class="sel-produto" data-busca="Digite ou cole o nome/código do produto..." required>
       <option value="">Selecione o produto...</option>
       {% for p in produtos %}
       <option value="{{ p.id }}" data-preco="{{ p.preco }}" {{ 'selected' if it and it.produto_id == p.id }}>{{ p.codigo }} - {{ p.descricao }}{{ '' if p.ativo else ' (inativo)' }}</option>
@@ -34,7 +34,7 @@
   <h2>Destinatário</h2>
   <div class="linha">
     <label class="campo g"><span>Cliente *</span>
-      <select name="cliente_id" required>
+      <select name="cliente_id" data-busca="Digite ou cole o nome ou CPF/CNPJ do cliente..." required>
         <option value="">Selecione...</option>
         {% for c in clientes %}<option value="{{ c.id }}" {{ 'selected' if nota.cliente_id == c.id }}>{{ c.nome }} ({{ c.documento }})</option>{% endfor %}
       </select>
