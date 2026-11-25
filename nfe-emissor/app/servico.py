@@ -159,6 +159,19 @@ def testar_conexao(db, cfg) -> dict:
     return r
 
 
+def _pendencias_cadastro(db, cliente, itens) -> list:
+    """Cliente/produtos importados incompletos: avisa o que falta antes de tentar emitir."""
+    erros = []
+    if cliente and cliente.get("pendente"):
+        erros.append(f"Cliente '{cliente['nome']}' está com cadastro incompleto: {cliente.get('pendencias') or 'revise os dados'}")
+    ids = [i["produto_id"] for i in itens if i.get("produto_id")]
+    if ids:
+        marcas = ",".join("?" * len(ids))
+        for p in db.execute(f"SELECT codigo, pendencias FROM produtos WHERE pendente = 1 AND id IN ({marcas})", ids):
+            erros.append(f"Produto '{p['codigo']}' está com cadastro incompleto: {p['pendencias'] or 'revise os dados'}")
+    return erros
+
+
 def emitir(db, cfg, nota_id: int) -> dict:
     nota, cliente, itens = carregar_nota(db, nota_id)
     if nota["status"] not in ("rascunho", "rejeitada"):
@@ -169,9 +182,9 @@ def emitir(db, cfg, nota_id: int) -> dict:
     serie = str(empresa["serie"])
     cert = carregar_certificado(cfg, empresa)
 
-    erros = validar_dados(empresa, cliente, itens, nota)
+    erros = _pendencias_cadastro(db, cliente, itens) + validar_dados(empresa, cliente, itens, nota)
     if erros:
-        raise DadosInvalidos(erros)
+        raise DadosInvalidos(list(dict.fromkeys(erros)))
 
     # número: mantém o já reservado para esta nota se o ambiente/série não mudaram
     if nota["numero"] and nota["ambiente"] == ambiente and nota["serie"] == serie:

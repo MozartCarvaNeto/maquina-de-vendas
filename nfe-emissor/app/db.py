@@ -53,7 +53,9 @@ CREATE TABLE IF NOT EXISTS produtos (
     aliq_pis TEXT NOT NULL DEFAULT '0',
     cst_cofins TEXT NOT NULL DEFAULT '49',
     aliq_cofins TEXT NOT NULL DEFAULT '0',
-    ativo INTEGER NOT NULL DEFAULT 1
+    ativo INTEGER NOT NULL DEFAULT 1,
+    pendente INTEGER NOT NULL DEFAULT 0,            -- 1 = cadastro incompleto (importado com dados faltando)
+    pendencias TEXT NOT NULL DEFAULT ''             -- o que falta corrigir
 );
 
 CREATE TABLE IF NOT EXISTS clientes (
@@ -63,7 +65,9 @@ CREATE TABLE IF NOT EXISTS clientes (
     ind_ie_dest TEXT NOT NULL DEFAULT '9',          -- 1 contribuinte, 2 isento, 9 não contribuinte
     ie TEXT, email TEXT, fone TEXT,
     logradouro TEXT, numero TEXT, complemento TEXT, bairro TEXT,
-    cod_municipio TEXT, municipio TEXT, uf TEXT, cep TEXT
+    cod_municipio TEXT, municipio TEXT, uf TEXT, cep TEXT,
+    pendente INTEGER NOT NULL DEFAULT 0,
+    pendencias TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS notas (
@@ -137,9 +141,24 @@ CREATE TABLE IF NOT EXISTS log_sefaz (
 """
 
 
+def _colunas(con, tabela):
+    return {r[1] for r in con.execute(f"PRAGMA table_info({tabela})")}
+
+
 def migrar(con: sqlite3.Connection):
-    """Índices que aceleram a busca de clientes/produtos (seguro rodar sempre)."""
+    """Ajustes de bancos já existentes (seguro rodar sempre): índices de busca e colunas de pendência."""
     con.execute("CREATE INDEX IF NOT EXISTS idx_clientes_documento ON clientes (documento)")
+    for tabela in ("produtos", "clientes"):
+        cols = _colunas(con, tabela)
+        if "pendente" not in cols:
+            con.execute(f"ALTER TABLE {tabela} ADD COLUMN pendente INTEGER NOT NULL DEFAULT 0")
+        if "pendencias" not in cols:
+            con.execute(f"ALTER TABLE {tabela} ADD COLUMN pendencias TEXT NOT NULL DEFAULT ''")
+    # produtos antigos sem NCM válido passam a aparecer como pendentes (não impede nada que já funcionava)
+    con.execute("UPDATE produtos SET pendente = 1, pendencias = 'NCM deve ter 8 dígitos.' "
+                "WHERE pendente = 0 AND length(COALESCE(ncm, '')) != 8")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_produtos_pendente ON produtos (pendente)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_clientes_pendente ON clientes (pendente)")
     con.commit()
 
 

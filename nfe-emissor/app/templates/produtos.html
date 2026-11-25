@@ -8,6 +8,10 @@
   <span class="grupo"><a class="botao secundario" href="{{ url_for('main.produtos_importar') }}">⬆ Importar planilha</a>
   <a class="botao" href="{{ url_for('main.produto_form') }}">+ Novo produto</a></span>
 </div>
+{% if n_pend %}
+<div class="alerta aviso">{{ n_pend }} produto(s) com cadastro incompleto (não é possível emitir nota com eles até completar).
+  {% if so_pend %}<a href="{{ url_for('main.produtos') }}">Ver todos</a>{% else %}<a href="{{ url_for('main.produtos', filtro='pendentes') }}">Ver só os incompletos</a>{% endif %}</div>
+{% endif %}
 <section class="cartao">
 <div class="rolagem">
 <table>
@@ -15,10 +19,10 @@
   <tbody>
   {% for p in produtos %}
     <tr class="{{ 'inativo' if not p.ativo }}">
-      <td>{{ p.codigo }}</td><td>{{ p.descricao }}</td><td>{{ p.ncm }}</td><td>{{ p.cfop }}</td><td>{{ p.cst_icms }}</td>
+      <td>{{ p.codigo }}</td><td>{{ p.descricao }}{% if p.pendente %} <span class="badge pendente" title="{{ p.pendencias }}">incompleto</span>{% endif %}</td><td>{{ p.ncm }}</td><td>{{ p.cfop }}</td><td>{{ p.cst_icms }}</td>
       <td class="num">R$ {{ p.preco|brl }}</td>
       <td class="acoes">
-        <a href="{{ url_for('main.produto_form', pid=p.id) }}">editar</a>
+        <a href="{{ url_for('main.produto_form', pid=p.id) }}">{{ 'completar' if p.pendente else 'editar' }}</a>
         <form method="post" action="{{ url_for('main.produto_ativo', pid=p.id) }}" class="inline">{{ csrf() }}<button class="link" type="submit">{{ 'inativar' if p.ativo else 'reativar' }}</button></form>
       </td>
     </tr>

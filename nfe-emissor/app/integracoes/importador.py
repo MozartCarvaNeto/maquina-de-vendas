@@ -60,10 +60,16 @@ def _cliente(db, c, cep_fn, avisos):
         "municipio": limpar_texto(viacep.get("localidade") or c["municipio"], 60),
         "uf": (viacep.get("uf") or c["uf"]).upper()[:2], "cep": cep,
     }
+    pend = []
     if len(d["cod_municipio"]) != 7:
         avisos.append("código IBGE do município não encontrado: abra o cliente e use Buscar CEP")
+        pend.append("Código do município (IBGE) deve ter 7 dígitos (use Buscar CEP).")
     if d["uf"] not in T.UF_CODIGO:
         avisos.append("UF do cliente inválida")
+        pend.append("UF inválida.")
+    if len(cep) != 8:
+        pend.append("CEP deve ter 8 dígitos.")
+    d["pendente"], d["pendencias"] = (1 if pend else 0), " | ".join(pend)
     cols = list(d)
     cur = db.execute(f"INSERT INTO clientes ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
                      list(d.values()))
@@ -80,7 +86,8 @@ def _produto(db, it, avisos):
         codigo = sku or "IMP-" + hashlib.sha1(it["descricao"].encode()).hexdigest()[:8].upper()
         prod = db.execute("SELECT * FROM produtos WHERE codigo = ?", (codigo,)).fetchone()
     if prod is None:
-        cur = db.execute("INSERT INTO produtos (codigo, descricao, ncm, preco) VALUES (?,?,?,?)",
+        cur = db.execute("INSERT INTO produtos (codigo, descricao, ncm, preco, pendente, pendencias) "
+                         "VALUES (?,?,?,?,1,'NCM deve ter 8 dígitos.')",
                          (codigo, limpar_texto(it["descricao"], 120) or codigo, "", it["preco"]))
         prod = db.execute("SELECT * FROM produtos WHERE id = ?", (cur.lastrowid,)).fetchone()
         avisos.append(f"produto novo '{codigo}' criado sem NCM: complete em Produtos")

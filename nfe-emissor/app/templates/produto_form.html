@@ -3,6 +3,7 @@
 {% block titulo %}Produto - Emissor de NF-e{% endblock %}
 {% block conteudo %}
 <h1>{{ 'Editar produto' if pid else 'Novo produto' }}</h1>
+{% if pendencias %}<div class="alerta aviso"><strong>Cadastro incompleto.</strong> Falta corrigir: {{ pendencias }}</div>{% endif %}
 <form method="post" class="cartao">
   {{ csrf() }}
   <div class="linha">
@@ -32,6 +33,8 @@
     {{ campo('aliq_cofins', 'Alíquota COFINS (%)', p.aliq_cofins, classe='p', modo='decimal') }}
   </div>
   <button class="botao" type="submit">Salvar produto</button>
+  <button class="botao secundario" type="submit" name="incompleto" value="1"
+          title="Grava mesmo com dados faltando ou inválidos; fica marcado como incompleto para você completar depois.">Salvar incompleto</button>
   <a class="botao secundario" href="{{ url_for('main.produtos') }}">Cancelar</a>
 </form>
 {% endblock %}

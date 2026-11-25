@@ -13,14 +13,40 @@
     <div class="ok"><strong>{{ res.criados }}</strong><span>{{ 'seriam criados' if res.simulado else 'criados' }}</span></div>
     <div class="ok"><strong>{{ res.atualizados }}</strong><span>{{ 'seriam atualizados' if res.simulado else 'atualizados' }}</span></div>
     <div><strong>{{ res.ignorados }}</strong><span>já existiam (pulados)</span></div>
-    <div class="{{ 'ruim' if res.com_erro }}"><strong>{{ res.com_erro }}</strong><span>com erro</span></div>
+    <div class="{{ 'pend' if res.pendentes }}"><strong>{{ res.pendentes }}</strong><span>salvos incompletos</span></div>
+    <div class="{{ 'ruim' if res.com_erro }}"><strong>{{ res.com_erro }}</strong><span>não salvos</span></div>
   </div>
   {% for a in res.avisos %}<div class="alerta aviso">{{ a }}</div>{% endfor %}
   {% if res.colunas_ignoradas %}
   <p><small>Colunas não reconhecidas (ignoradas): {{ res.colunas_ignoradas|join(', ') }}</small></p>
   {% endif %}
+  {% if res.codigos_automaticos %}<div class="alerta aviso">{{ res.codigos_automaticos }} linha(s) sem código receberam um código automático (IMP-...); você pode trocá-lo na edição.</div>{% endif %}
+  {% if res.incompletos %}
+  <h3>Salvos como incompletos <small>({{ 'seriam salvos' if res.simulado else 'já estão no cadastro, marcados como "incompleto"' }}: abra cada um em {{ cfg.grupo|capitalize }} e clique em "completar")</small></h3>
+  <p><a class="botao secundario" href="{{ url_for(cfg.lista, filtro='pendentes') }}">Ver os incompletos</a></p>
+  <div class="rolagem"><table>
+    <thead><tr><th>Linha</th><th>O que falta</th></tr></thead>
+    <tbody>
+    {% for linha, msgs in res.incompletos[:200] %}
+      <tr><td>{{ linha }}</td><td>{{ msgs|join(' ') }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% if res.incompletos|length > 200 %}<p><small>Mostrando as 200 primeiras de {{ res.incompletos|length }}.</small></p>{% endif %}
+  {% endif %}
+  {% if res.ressalvas %}
+  <h3>Cadastros atualizados com ressalva <small>(valor inválido da planilha ignorado; mantido o que já estava cadastrado)</small></h3>
+  <div class="rolagem"><table>
+    <thead><tr><th>Linha</th><th>Valor ignorado</th></tr></thead>
+    <tbody>
+    {% for linha, msgs in res.ressalvas[:100] %}
+      <tr><td>{{ linha }}</td><td>{{ msgs|join(' ') }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% endif %}
   {% if res.erros %}
-  <h3>Linhas com erro <small>(as demais foram {{ 'validadas' if res.simulado else 'importadas' }}; corrija estas na planilha e envie de novo)</small></h3>
+  <h3>Linhas não salvas <small>(sem como identificar o produto/cliente; as demais foram {{ 'validadas' if res.simulado else 'importadas' }})</small></h3>
   <div class="rolagem"><table>
     <thead><tr><th>Linha</th><th>Problema</th></tr></thead>
     <tbody>
@@ -31,16 +57,17 @@
   </table></div>
   {% if res.erros|length > 200 %}<p><small>Mostrando as 200 primeiras de {{ res.erros|length }} linhas com erro.</small></p>{% endif %}
   {% elif res.simulado %}
-  <div class="alerta ok">Nenhum erro encontrado. Envie o mesmo arquivo novamente, sem marcar "Só validar", para gravar.</div>
-  {% else %}
-  <div class="alerta ok">Tudo certo, nenhuma linha com erro.</div>
+  <div class="alerta ok">Nenhuma linha seria descartada. Envie o mesmo arquivo novamente, sem marcar "Só validar", para gravar.</div>
+  {% elif not res.incompletos %}
+  <div class="alerta ok">Tudo certo, todas as linhas foram importadas completas.</div>
   {% endif %}
 </section>
 {% endif %}
 
 <section class="cartao">
   <h2>1. Baixe o modelo</h2>
-  <p>Use os mesmos nomes de coluna na primeira linha. Aceitamos <strong>CSV</strong> (separado por ; ou ,) e <strong>Excel (.xlsx)</strong>.</p>
+  <p>Aceitamos <strong>CSV</strong> (separado por ; , ou tab) e <strong>Excel (.xlsx)</strong>. Os nomes das colunas podem variar (SKU, Cidade, CPF/CNPJ...) e o cabeçalho pode não estar na 1ª linha.
+     <strong>Nada é descartado:</strong> linha com dado faltando ou inválido é salva como <em>incompleta</em> para você completar depois na tela de edição.</p>
   <p><a class="botao secundario" href="{{ url_for('main.modelo_planilha', grupo=cfg.grupo, formato='xlsx') }}">Modelo Excel (.xlsx)</a>
      <a class="botao secundario" href="{{ url_for('main.modelo_planilha', grupo=cfg.grupo, formato='csv') }}">Modelo CSV</a></p>
 </section>
@@ -64,7 +91,7 @@
 <section class="cartao">
   <h2>Colunas aceitas</h2>
   <div class="rolagem"><table>
-    <thead><tr><th>Coluna</th><th>Obrigatória p/ cadastrar novo</th><th>Observação</th></tr></thead>
+    <thead><tr><th>Coluna</th><th>Necessária para emitir nota</th><th>Observação</th></tr></thead>
     <tbody>
     {% for campo, rotulo, obrig, dica in cfg.campos %}
       <tr><td><code>{{ campo }}</code> <small>({{ rotulo }})</small></td><td>{{ 'sim' if obrig else 'não' }}</td><td>{{ dica }}</td></tr>

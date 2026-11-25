@@ -7,14 +7,18 @@
   <span class="grupo"><a class="botao secundario" href="{{ url_for('main.clientes_importar') }}">⬆ Importar planilha</a>
   <a class="botao" href="{{ url_for('main.cliente_form') }}">+ Novo cliente</a></span>
 </div>
+{% if n_pend %}
+<div class="alerta aviso">{{ n_pend }} cliente(s) com cadastro incompleto (não é possível emitir nota para eles até completar).
+  {% if so_pend %}<a href="{{ url_for('main.clientes') }}">Ver todos</a>{% else %}<a href="{{ url_for('main.clientes', filtro='pendentes') }}">Ver só os incompletos</a>{% endif %}</div>
+{% endif %}
 <section class="cartao">
 <div class="rolagem">
 <table>
   <thead><tr><th>Nome</th><th>CPF/CNPJ</th><th>Cidade</th><th>UF</th><th></th></tr></thead>
   <tbody>
   {% for c in clientes %}
-    <tr><td>{{ c.nome }}</td><td>{{ c.documento }}</td><td>{{ c.municipio }}</td><td>{{ c.uf }}</td>
-        <td><a href="{{ url_for('main.cliente_form', cid=c.id) }}">editar</a></td></tr>
+    <tr><td>{{ c.nome }}{% if c.pendente %} <span class="badge pendente" title="{{ c.pendencias }}">incompleto</span>{% endif %}</td><td>{{ c.documento }}</td><td>{{ c.municipio }}</td><td>{{ c.uf }}</td>
+        <td><a href="{{ url_for('main.cliente_form', cid=c.id) }}">{{ 'completar' if c.pendente else 'editar' }}</a></td></tr>
   {% else %}
     <tr><td colspan="5" class="vazio">Nenhum cliente cadastrado.</td></tr>
   {% endfor %}

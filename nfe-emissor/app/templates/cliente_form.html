@@ -3,6 +3,7 @@
 {% block titulo %}Cliente - Emissor de NF-e{% endblock %}
 {% block conteudo %}
 <h1>{{ 'Editar cliente' if cid else 'Novo cliente' }}</h1>
+{% if pendencias %}<div class="alerta aviso"><strong>Cadastro incompleto.</strong> Falta corrigir: {{ pendencias }}</div>{% endif %}
 <form method="post" class="cartao">
   {{ csrf() }}
   <div class="linha">
@@ -30,6 +31,8 @@
     <label class="campo p"><span>UF *</span><select name="uf" id="uf">{{ ufs(c.uf) }}</select></label>
   </div>
   <button class="botao" type="submit">Salvar cliente</button>
+  <button class="botao secundario" type="submit" name="incompleto" value="1"
+          title="Grava mesmo com dados faltando ou inválidos; fica marcado como incompleto para você completar depois.">Salvar incompleto</button>
   <a class="botao secundario" href="{{ url_for('main.clientes') }}">Cancelar</a>
 </form>
 {% endblock %}

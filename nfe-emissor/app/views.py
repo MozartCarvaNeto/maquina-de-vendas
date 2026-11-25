@@ -486,12 +486,19 @@ def api_busca_produtos():
 @login_required
 def produtos():
     q = request.args.get("q", "").strip()
-    sql, args = "SELECT * FROM produtos", []
+    so_pend = request.args.get("filtro") == "pendentes"
+    db = get_db()
+    onde, args = [], []
     if q:
-        sql += " WHERE codigo LIKE ? OR descricao LIKE ? OR ncm LIKE ?"
+        onde.append("(codigo LIKE ? OR descricao LIKE ? OR ncm LIKE ?)")
         args = [f"%{q}%"] * 3
-    sql += " ORDER BY ativo DESC, descricao LIMIT 500"
-    return render_template("produtos.html", produtos=get_db().execute(sql, args).fetchall(), q=q)
+    if so_pend:
+        onde.append("pendente = 1")
+    sql = "SELECT * FROM produtos" + (" WHERE " + " AND ".join(onde) if onde else "")
+    sql += " ORDER BY pendente DESC, ativo DESC, descricao LIMIT 500"
+    n_pend = db.execute("SELECT COUNT(*) FROM produtos WHERE pendente = 1").fetchone()[0]
+    return render_template("produtos.html", produtos=db.execute(sql, args).fetchall(), q=q,
+                           so_pend=so_pend, n_pend=n_pend)
 
 
 def _ler_produto():
@@ -539,14 +546,23 @@ def produto_form(pid=None):
             abort(404)
     if request.method == "POST":
         d, erros = _ler_produto()
-        if not erros:
+        incompleto = _f("incompleto") == "1"
+        if incompleto and not d["codigo"] and d["descricao"]:
+            d["codigo"] = importacao._codigo_automatico(d["descricao"])
+            erros = [e for e in erros if not e.startswith("Informe o código")]
+        if not erros or (incompleto and d["codigo"]):
             dup = db.execute("SELECT id FROM produtos WHERE codigo = ? AND id != ?",
                              (d["codigo"], pid or 0)).fetchone()
             if dup:
-                erros.append("Já existe um produto com este código.")
-        if erros:
+                erros = erros + ["Já existe um produto com este código."]
+                incompleto = False
+        if erros and not incompleto:
             _flash_erros(erros)
             return render_template("produto_form.html", p=d, pid=pid, crt=empresa["crt"])
+        if erros:      # "salvar incompleto": grava e deixa marcado como pendente
+            d["descricao"] = d["descricao"] or d["codigo"]
+        d["pendente"] = 1 if erros else 0
+        d["pendencias"] = " | ".join(erros)[:900]
         cols = list(d)
         if pid:
             db.execute(f"UPDATE produtos SET {', '.join(c + '=?' for c in cols)} WHERE id=?",
@@ -555,13 +571,15 @@ def produto_form(pid=None):
             db.execute(f"INSERT INTO produtos ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
                        list(d.values()))
         db.commit()
-        flash("Produto salvo.", "ok")
+        flash("Produto salvo como INCOMPLETO. Falta: " + " ".join(erros) if erros else "Produto salvo.",
+              "aviso" if erros else "ok")
         return redirect(url_for("main.produtos"))
     padrao = dict(atual) if atual else {
         "unidade": "UN", "origem": "0", "cfop": "5102", "cst_pis": "49", "cst_cofins": "49",
         "cst_icms": "102" if empresa["crt"] in ("1", "2") else "00", "aliq_icms": "0",
         "aliq_pis": "0", "aliq_cofins": "0", "preco": "0.00"}
-    return render_template("produto_form.html", p=padrao, pid=pid, crt=empresa["crt"])
+    return render_template("produto_form.html", p=padrao, pid=pid, crt=empresa["crt"],
+                           pendencias=(atual["pendencias"] if atual and atual["pendente"] else ""))
 
 
 @bp.post("/produtos/<int:pid>/ativo")
@@ -580,12 +598,19 @@ def produto_ativo(pid):
 @login_required
 def clientes():
     q = request.args.get("q", "").strip()
-    sql, args = "SELECT * FROM clientes", []
+    so_pend = request.args.get("filtro") == "pendentes"
+    db = get_db()
+    onde, args = [], []
     if q:
-        sql += " WHERE nome LIKE ? OR documento LIKE ?"
+        onde.append("(nome LIKE ? OR documento LIKE ?)")
         args = [f"%{q}%", f"%{so_digitos(q) or q}%"]
-    sql += " ORDER BY nome LIMIT 500"
-    return render_template("clientes.html", clientes=get_db().execute(sql, args).fetchall(), q=q)
+    if so_pend:
+        onde.append("pendente = 1")
+    sql = "SELECT * FROM clientes" + (" WHERE " + " AND ".join(onde) if onde else "")
+    sql += " ORDER BY pendente DESC, nome LIMIT 500"
+    n_pend = db.execute("SELECT COUNT(*) FROM clientes WHERE pendente = 1").fetchone()[0]
+    return render_template("clientes.html", clientes=db.execute(sql, args).fetchall(), q=q,
+                           so_pend=so_pend, n_pend=n_pend)
 
 
 @bp.route("/clientes/novo", methods=["GET", "POST"])
@@ -628,9 +653,15 @@ def cliente_form(cid=None):
             erros.append("Contribuinte do ICMS precisa de Inscrição Estadual.")
         if d["email"] and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", d["email"]):
             erros.append("E-mail inválido.")
-        if erros:
+        incompleto = _f("incompleto") == "1" and bool(d["nome"] or d["documento"])
+        if erros and not incompleto:
             _flash_erros(erros)
             return render_template("cliente_form.html", c=d, cid=cid)
+        d["nome"] = d["nome"] or "(SEM NOME)"
+        if d["uf"] not in T.UF_CODIGO:
+            d["uf"] = ""
+        d["pendente"] = 1 if erros else 0
+        d["pendencias"] = " | ".join(erros)[:900]
         cols = list(d)
         if cid:
             db.execute(f"UPDATE clientes SET {', '.join(c + '=?' for c in cols)} WHERE id=?",
@@ -639,10 +670,12 @@ def cliente_form(cid=None):
             db.execute(f"INSERT INTO clientes ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
                        list(d.values()))
         db.commit()
-        flash("Cliente salvo.", "ok")
+        flash("Cliente salvo como INCOMPLETO. Falta: " + " ".join(erros) if erros else "Cliente salvo.",
+              "aviso" if erros else "ok")
         return redirect(url_for("main.clientes"))
     padrao = dict(atual) if atual else {"ind_ie_dest": "9"}
-    return render_template("cliente_form.html", c=padrao, cid=cid)
+    return render_template("cliente_form.html", c=padrao, cid=cid,
+                           pendencias=(atual["pendencias"] if atual and atual["pendente"] else ""))
 
 
 # ----------------------------------------------------------------------------------------

@@ -68,6 +68,7 @@ tr.inativo td { color: #98a3af; }
 td.vazio, p.vazio { color: var(--suave); text-align: center; padding: 18px; }
 #tabela-itens input, #tabela-itens select { min-width: 90px; }
 
+.badge.pendente { background: #fff0c2; color: #6b4a00; }
 .badge { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: .75rem; font-weight: 600; background: #e5eaf0; color: #3b4a5a; }
 .st-autorizada { background: #d9f0e2; color: #14522f; }
 .st-rejeitada, .st-denegada { background: #fbdcd9; color: #7a1b16; }
@@ -99,6 +100,7 @@ td.vazio, p.vazio { color: var(--suave); text-align: center; padding: 18px; }
 .resumo > div { background: #f4f6f8; border: 1px solid var(--borda); border-radius: 8px; padding: 10px 12px; }
 .resumo strong { display: block; font-size: 1.5rem; }
 .resumo span { color: var(--suave); font-size: .85rem; }
+.resumo .pend { background: #fff7e0; border-color: #f0dba0; }
 .resumo .ok { background: #e6f4ec; border-color: #b7dcc7; }
 .resumo .ruim { background: #fde7e5; border-color: #f2b8b4; }
 

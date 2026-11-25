@@ -2,13 +2,16 @@
 
 Fluxo: ler_registros() abre o arquivo e mapeia as colunas pelo nome do cabeçalho (aceita variações
 como "CPF/CNPJ", "Cidade", "SKU"); aplicar() valida linha a linha com as MESMAS regras do cadastro
-manual e grava. Linhas com erro não impedem as válidas: o relatório diz a linha e o motivo.
+manual e grava. Linha com dado faltando/inválido NÃO é descartada: é salva como cadastro INCOMPLETO
+(pendente), com a lista do que falta, para o usuário completar depois na tela de edição. Só não é salva
+a linha que não dá para identificar (produto sem código e sem descrição; cliente sem CPF/CNPJ e sem nome).
 
 Quem já existe (produto: mesmo código; cliente: mesmo CPF/CNPJ) é atualizado ou pulado, conforme
 a escolha do usuário. Na atualização, só mudam as colunas presentes na planilha e com valor
 preenchido: célula vazia nunca apaga o que já está cadastrado.
 """
 import csv
+import hashlib
 import io
 import re
 import time
@@ -61,11 +64,11 @@ CAMPOS_CLIENTE = [
 ]
 
 _ALIASES_PRODUTO = {
-    "codigo": ["codigo", "cod", "sku", "codigo_sku", "referencia", "ref", "codigo_do_produto", "cod_produto"],
+    "codigo": ["codigo", "cod", "sku", "codigo_sku", "referencia", "ref", "codigo_do_produto", "cod_produto", "codigo_interno", "id", "item"],
     "descricao": ["descricao", "nome", "produto", "descricao_do_produto", "titulo", "nome_do_produto"],
-    "ncm": ["ncm", "codigo_ncm", "ncm_sh"],
-    "preco": ["preco", "valor", "preco_venda", "preco_de_venda", "valor_unitario", "valor_venda", "preco_unitario"],
-    "unidade": ["unidade", "un", "und", "unid", "unidade_de_medida"],
+    "ncm": ["ncm", "codigo_ncm", "ncm_sh", "classificacao_fiscal"],
+    "preco": ["preco", "valor", "preco_venda", "preco_de_venda", "valor_unitario", "valor_venda", "preco_unitario", "vlr", "vl_unitario", "preco_r", "valor_r"],
+    "unidade": ["unidade", "un", "und", "unid", "unidade_de_medida", "medida"],
     "cfop": ["cfop"],
     "cst_icms": ["cst_icms", "csosn", "cst", "cst_csosn", "csosn_cst", "icms_cst", "csosn_icms", "cst_ou_csosn"],
     "aliq_icms": ["aliq_icms", "aliquota_icms", "icms", "p_icms", "icms_aliquota", "aliq_icms_percent"],
@@ -78,9 +81,9 @@ _ALIASES_PRODUTO = {
     "aliq_cofins": ["aliq_cofins", "aliquota_cofins", "cofins", "p_cofins"],
 }
 _ALIASES_CLIENTE = {
-    "documento": ["documento", "cpf_cnpj", "cnpj_cpf", "cpf", "cnpj", "cpfcnpj", "cnpjcpf", "doc", "cpf_ou_cnpj"],
+    "documento": ["documento", "cpf_cnpj", "cnpj_cpf", "cpf", "cnpj", "cpfcnpj", "cnpjcpf", "doc", "cpf_ou_cnpj", "cpf_cnpj_do_cliente", "documento_cliente"],
     "nome": ["nome", "razao_social", "cliente", "nome_razao_social", "nome_cliente", "razao_social_nome",
-             "nome_completo"],
+             "nome_completo", "comprador", "destinatario"],
     "cep": ["cep"],
     "logradouro": ["logradouro", "endereco", "rua", "avenida", "end"],
     "numero": ["numero", "num", "n", "nro", "numero_endereco"],
@@ -94,7 +97,7 @@ _ALIASES_CLIENTE = {
                     "indicador_de_ie"],
     "ie": ["ie", "inscricao_estadual", "insc_estadual", "inscricao_est"],
     "email": ["email", "e_mail"],
-    "fone": ["fone", "telefone", "celular", "whatsapp", "tel", "telefone_celular"],
+    "fone": ["fone", "telefone", "celular", "whatsapp", "tel", "telefone_celular", "contato"],
 }
 _TIPOS = {
     "produto": (CAMPOS_PRODUTO, _ALIASES_PRODUTO),
@@ -102,7 +105,8 @@ _TIPOS = {
 }
 
 
-_IDENTIFICADOR = {"produto": "codigo", "cliente": "documento"}   # única coluna exigida no cabeçalho
+# Para o cabeçalho ser aceito basta UMA destas colunas (cada tipo precisa conseguir identificar a linha)
+_IDENTIFICADOR = {"produto": ("codigo", "descricao"), "cliente": ("documento", "nome")}
 
 
 class ArquivoInvalido(ValueError):
@@ -116,7 +120,11 @@ class Resultado:
     criados: int = 0
     atualizados: int = 0
     ignorados: int = 0
-    erros: list = field(default_factory=list)          # [(linha, [mensagens])]
+    erros: list = field(default_factory=list)          # linhas NÃO salvas: [(linha, [mensagens])]
+    incompletos: list = field(default_factory=list)    # linhas salvas como pendentes: [(linha, [o que falta])]
+    ressalvas: list = field(default_factory=list)      # cadastro existente mantido: [(linha, [valores ignorados])]
+    pendentes: int = 0
+    codigos_automaticos: int = 0
     colunas_ignoradas: list = field(default_factory=list)
     avisos: list = field(default_factory=list)
     simulado: bool = False
@@ -215,33 +223,41 @@ def ler_registros(tipo: str, nome_arquivo: str, dados: bytes):
         linhas = _linhas_csv(dados)
 
     mapa, ignoradas, cabecalho_em = {}, [], None
-    registros = []
+    registros, vistas = [], []
     por_alias = {_chave(a): campo for campo, lista in aliases.items() for a in lista}
+    por_alias.update({_chave(rot): campo for campo, rot, *_ in campos})
+    ident = _IDENTIFICADOR[tipo]
     for n, celulas in linhas:
         if cabecalho_em is None:
             if not any(celulas):
                 continue
-            cabecalho_em = n
+            # o cabeçalho pode não ser a 1ª linha (títulos, logotipo, linhas em branco): procura nas 15 primeiras
+            achados, ign = {}, []
             for i, titulo in enumerate(celulas):
                 if not titulo:
                     continue
                 campo = por_alias.get(_chave(titulo))
-                if campo and campo not in mapa:
-                    mapa[campo] = i
+                if campo and campo not in achados:
+                    achados[campo] = i
                 else:
-                    ignoradas.append(titulo)
-            ident = _IDENTIFICADOR[tipo]
-            if ident not in mapa:
-                rotulo = next(rot for c, rot, *_ in campos if c == ident)
-                raise ArquivoInvalido(
-                    f"Não encontrei no cabeçalho a coluna obrigatória: {rotulo}. "
-                    "Baixe o modelo de planilha e use os mesmos nomes de coluna.")
+                    ign.append(titulo)
+            if any(c in achados for c in ident):
+                cabecalho_em, mapa, ignoradas = n, achados, ign
+                continue
+            vistas.append(celulas)
+            if len(vistas) >= 15:
+                break
             continue
         if not any(celulas):
             continue
         registros.append((n, {c: (celulas[i] if i < len(celulas) else "") for c, i in mapa.items()}))
         if len(registros) > MAX_LINHAS:
             raise ArquivoInvalido(f"Arquivo com mais de {MAX_LINHAS} linhas. Divida em partes menores.")
+    if cabecalho_em is None and vistas:
+        rotulos = " ou ".join(next(rot for c, rot, *_ in campos if c == i) for i in ident)
+        raise ArquivoInvalido(
+            f"Não encontrei no cabeçalho a coluna de identificação: {rotulos}. "
+            "Baixe o modelo de planilha e use os mesmos nomes de coluna.")
     if cabecalho_em is None:
         raise ArquivoInvalido("Não encontrei nenhum dado no arquivo.")
     if not registros:
@@ -266,6 +282,7 @@ def _digitos(bruto: str, rotulo: str, erros: list, zeros: int = 0) -> str:
 
 
 def _decimal(bruto: str, rotulo: str, erros: list, padrao: str = "0") -> str:
+    bruto = re.sub(r"(?i)r\$|%|\s", "", bruto or "")          # "R$ 49,90", "18 %"
     try:
         v = parse_decimal(bruto or padrao)
         if v < 0:
@@ -274,6 +291,12 @@ def _decimal(bruto: str, rotulo: str, erros: list, padrao: str = "0") -> str:
     except ValueError:
         erros.append(f"{rotulo}: número inválido ({bruto}).")
         return padrao
+
+
+_UNIDADES = {"UNIDADE": "UN", "UNID": "UN", "UND": "UN", "UNIDADES": "UN", "PECA": "PC", "PEÇA": "PC",
+             "PECAS": "PC", "PEÇAS": "PC", "QUILO": "KG", "QUILOS": "KG", "LITRO": "L", "LITROS": "L",
+             "CAIXA": "CX", "PACOTE": "PCT", "METRO": "M", "METROS": "M", "PAR": "PAR", "PARES": "PAR"}
+_ORIGENS = {"NACIONAL": "0", "IMPORTADO": "1", "ESTRANGEIRA": "1"}
 
 
 def padrao_produto(crt: str) -> dict:
@@ -288,8 +311,8 @@ def validar_produto(m: dict, crt: str):
     d = {
         "codigo": limpar_texto(m["codigo"], 60), "descricao": limpar_texto(m["descricao"], 120),
         "ncm": _digitos(m["ncm"], "NCM", erros, 8), "cest": _digitos(m["cest"], "CEST", erros, 7),
-        "unidade": limpar_texto(m["unidade"], 6).upper() or "UN",
-        "origem": _digitos(m["origem"], "Origem", erros) or "0",
+        "unidade": _UNIDADES.get(limpar_texto(m["unidade"], 20).upper(), limpar_texto(m["unidade"], 6).upper()) or "UN",
+        "origem": _digitos(_ORIGENS.get((m["origem"] or "").strip().upper(), m["origem"]), "Origem", erros) or "0",
         "cfop": _digitos(m["cfop"], "CFOP", erros),
         "cst_icms": so_digitos(m["cst_icms"]), "cst_pis": so_digitos(m["cst_pis"]) or "49",
         "cst_cofins": so_digitos(m["cst_cofins"]) or "49",
@@ -374,7 +397,9 @@ def validar_cliente(m: dict, cep_fn=None):
         d["uf"] = d["uf"] or (info.get("uf") or "").upper()
         d["logradouro"] = d["logradouro"] or limpar_texto(info.get("logradouro"), 60)
         d["bairro"] = d["bairro"] or limpar_texto(info.get("bairro"), 60)
-    if not validar_documento(d["documento"]):
+    if not d["documento"]:
+        erros.append("CPF/CNPJ não informado.")
+    elif not validar_documento(d["documento"]):
         erros.append("CPF/CNPJ inválido.")
     if not d["nome"]:
         erros.append("Informe o nome.")
@@ -425,30 +450,75 @@ class _ConsultaCep:
         return info
 
 
+_PREFIXOS_PRODUTO = [("NCM", "ncm"), ("CEST", "cest"), ("GTIN", "ean"), ("CFOP", "cfop"), ("Origem", "origem"),
+                     ("CST/CSOSN", "cst_icms"), ("CST PIS", "cst_pis"), ("CST COFINS", "cst_cofins"),
+                     ("Preço", "preco"), ("Alíquota ICMS", "aliq_icms"), ("Alíquota PIS", "aliq_pis"),
+                     ("Alíquota COFINS", "aliq_cofins")]
+_PREFIXOS_CLIENTE = [("CPF/CNPJ", "documento"), ("CEP", "cep"), ("UF", "uf"), ("Código do município", "cod_municipio"),
+                     ("Contribuinte ICMS", "ind_ie_dest"), ("E-mail", "email")]
+
+
+def _campos_ruins(erros, prefixos) -> set:
+    return {campo for e in erros for pre, campo in prefixos if e.startswith(pre)}
+
+
+def _codigo_automatico(descricao: str) -> str:
+    return "IMP-" + hashlib.sha1(descricao.lower().encode()).hexdigest()[:8].upper()
+
+
+def _identificar(tipo: str, fornecidos: dict, res: Resultado) -> str:
+    if tipo == "produto":
+        ident = limpar_texto(fornecidos.get("codigo", ""), 60)
+        if not ident and fornecidos.get("descricao"):
+            ident = _codigo_automatico(limpar_texto(fornecidos["descricao"], 120))
+            res.codigos_automaticos += 1
+        return ident
+    ident = normalizar_cnpj(fornecidos.get("documento", ""))
+    if ident.isdigit():
+        ident = ident.zfill(11) if len(ident) <= 11 else (ident.zfill(14) if len(ident) < 14 else ident)
+    return ident
+
+
+def _buscar_atual(db, tipo: str, ident: str, fornecidos: dict):
+    if tipo == "produto":
+        return db.execute("SELECT * FROM produtos WHERE codigo = ?", (ident,)).fetchone() if ident else None
+    if ident:
+        return db.execute("SELECT * FROM clientes WHERE documento = ?", (ident,)).fetchone()
+    nome = limpar_texto(fornecidos.get("nome", ""), 60)       # sem documento: reconhece pelo nome
+    return db.execute("SELECT * FROM clientes WHERE documento = '' AND lower(nome) = lower(?)",
+                      (nome,)).fetchone() if nome else None
+
+
 def aplicar(db, tipo: str, registros, crt: str = "1", existentes: str = "atualizar", simular: bool = False,
             cep_fn=None, ignoradas=()) -> Resultado:
-    """Valida e grava. `existentes`: 'atualizar' ou 'pular'. `simular`: valida tudo e não grava."""
+    """Valida e grava. `existentes`: 'atualizar' ou 'pular'. `simular`: valida tudo e não grava.
+
+    Linha com problema é salva como cadastro incompleto (pendente=1, pendencias=o que falta). Em cadastro que
+    já existia, o valor inválido da planilha é ignorado (mantém o que estava) e o fato é anotado em `ressalvas`.
+    """
     res = Resultado(tipo=tipo, total=len(registros), simulado=simular, colunas_ignoradas=list(ignoradas))
     consulta = _ConsultaCep(cep_fn, res) if (tipo == "cliente" and cep_fn) else None
-    tabela, chave = ("produtos", "codigo") if tipo == "produto" else ("clientes", "documento")
+    tabela = "produtos" if tipo == "produto" else "clientes"
+    prefixos = _PREFIXOS_PRODUTO if tipo == "produto" else _PREFIXOS_CLIENTE
     try:
         for linha, bruto in registros:
             fornecidos = {c: v for c, v in bruto.items() if v not in ("", None)}
-            if tipo == "produto":
-                ident = limpar_texto(fornecidos.get("codigo", ""), 60)
-            else:
-                ident = normalizar_cnpj(fornecidos.get("documento", ""))
-                if ident.isdigit():
-                    ident = ident.zfill(11) if len(ident) <= 11 else (ident.zfill(14) if len(ident) < 14 else ident)
-            atual = (db.execute(f"SELECT * FROM {tabela} WHERE {chave} = ?", (ident,)).fetchone()
-                     if ident else None)
-            if atual is not None and existentes == "pular":
+            ident = _identificar(tipo, fornecidos, res)
+            if tipo == "produto" and ident and "codigo" not in fornecidos:
+                fornecidos["codigo"] = ident
+            if not ident and not (tipo == "cliente" and fornecidos.get("nome")):
+                res.erros.append((linha, ["Linha sem identificação: informe o código/descrição do produto."
+                                          if tipo == "produto" else
+                                          "Linha sem identificação: informe o CPF/CNPJ ou o nome do cliente."]))
+                continue
+            atual = _buscar_atual(db, tipo, ident, fornecidos)
+            if atual is not None and existentes == "pular" and not atual["pendente"]:
                 res.ignorados += 1
                 continue
             if tipo == "produto":
-                base = {k: str(atual[k]) for k in padrao_produto(crt)} if atual else padrao_produto(crt)
-                mesclado = {**base, **fornecidos}
-                dados, erros = validar_produto(mesclado, crt)
+                padrao = padrao_produto(crt)
+                base = {k: str(atual[k]) for k in padrao} if atual else padrao
+                dados, erros = validar_produto({**base, **fornecidos}, crt)
             else:
                 modelo = {c: "" for c, *_ in CAMPOS_CLIENTE}
                 base = {k: ("" if atual[k] is None else str(atual[k])) for k in modelo} if atual else modelo
@@ -456,18 +526,49 @@ def aplicar(db, tipo: str, registros, crt: str = "1", existentes: str = "atualiz
                 if atual is not None and "ind_ie_dest" not in fornecidos:
                     mesclado["ind_ie_dest"] = str(atual["ind_ie_dest"])
                 dados, erros = validar_cliente(mesclado, consulta)
+
+            if tipo == "produto":
+                if not dados["descricao"]:
+                    dados["descricao"] = dados["codigo"]
+                if dados["ncm"] and len(dados["ncm"]) > 8:
+                    dados["ncm"] = dados["ncm"][:8]
+            elif not dados["nome"]:
+                dados["nome"] = "(SEM NOME)"
+            pendencias = list(erros)
             if erros:
-                res.erros.append((linha, erros))
-                continue
+                ruins = _campos_ruins(erros, prefixos)
+                for campo in ruins & set(dados):
+                    if atual is not None:                        # cadastro existente: mantém o valor antigo
+                        dados[campo] = base[campo] if tipo == "produto" else (atual[campo] or "")
+                    elif tipo == "produto" and campo != "ncm":
+                        dados[campo] = padrao[campo]
+                    elif tipo == "cliente" and campo in ("uf", "cod_municipio", "email"):
+                        dados[campo] = ""
+                    elif tipo == "cliente" and campo == "ind_ie_dest":
+                        dados[campo] = "9"
+                if atual is not None:
+                    # o que continua faltando no cadastro depois de manter os valores antigos
+                    if tipo == "produto":
+                        pendencias = validar_produto({**{k: str(v) for k, v in dados.items()}}, crt)[1]
+                    else:
+                        pendencias = validar_cliente({k: str(v or "") for k, v in dados.items()}, consulta)[1]
+            dados["pendente"] = 1 if pendencias else 0
+            dados["pendencias"] = " | ".join(pendencias)[:900]
+
             if atual is not None:
                 cols = list(dados)
                 db.execute(f"UPDATE {tabela} SET {', '.join(c + '=?' for c in cols)} WHERE id=?",
                            [*dados.values(), atual["id"]])
                 res.atualizados += 1
+                if erros and not pendencias:
+                    res.ressalvas.append((linha, erros))
             else:
                 db.execute(f"INSERT INTO {tabela} ({', '.join(dados)}) VALUES ({', '.join('?' * len(dados))})",
                            list(dados.values()))
                 res.criados += 1
+            if pendencias:
+                res.pendentes += 1
+                res.incompletos.append((linha, pendencias))
         if simular:
             db.rollback()
         else:

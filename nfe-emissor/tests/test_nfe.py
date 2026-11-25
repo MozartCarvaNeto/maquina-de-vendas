@@ -647,6 +647,9 @@ class TestAplicacaoWeb(unittest.TestCase):
         html = r.get_data(as_text=True)
         self.assertIn("Importação concluída", html)
         self.assertIn("NCM deve ter 8 dígitos", html)
+        self.assertIn("Salvos como incompletos", html)
+        self.assertIn("Sem NCM", c.get("/produtos?filtro=pendentes").get_data(as_text=True))
+        self.assertNotIn("Produto web", c.get("/produtos?filtro=pendentes").get_data(as_text=True))
         self.assertIn("Produto web", c.get("/produtos").get_data(as_text=True))
         # clientes (CEP simulado) e arquivo ruim
         cli = (b"documento;nome;cep;logradouro;numero;bairro\n12345678909;Cliente Web;13201000;Rua W;5;Centro\n")
@@ -655,11 +658,54 @@ class TestAplicacaoWeb(unittest.TestCase):
             html = enviar("/clientes/importar", cli, "c.csv").get_data(as_text=True)
         self.assertIn("Importação concluída", html)
         self.assertIn("Cliente Web", c.get("/clientes").get_data(as_text=True))
-        self.assertIn("coluna obrigatória", enviar("/produtos/importar", b"a;b\n1;2\n", "x.csv").get_data(as_text=True))
+        self.assertIn("coluna de identificação", enviar("/produtos/importar", b"a;b\n1;2\n", "x.csv").get_data(as_text=True))
         self.assertIn("Excel antigo", enviar("/produtos/importar", b"\xd0\xcf\x11\xe0" + b"0" * 30, "x.xls").get_data(as_text=True))
         # sem CSRF não grava
         self.assertEqual(c.post("/produtos/importar", content_type="multipart/form-data",
                                 data={"arquivo": (io.BytesIO(csv_), "p.csv")}).status_code, 400)
+
+    def test_salvar_incompleto_nos_formularios(self):
+        c = self.cliente(conta="conta-incompleto-aaaaaaaa")
+
+        def token(url):
+            return re.search(r'name="csrf_token" value="([^"]+)"', c.get(url).get_data(as_text=True)).group(1)
+
+        # produto: sem o botão, os erros bloqueiam; com "Salvar incompleto", grava e marca pendente
+        dados = {"csrf_token": token("/produtos/novo"), "codigo": "INC1", "descricao": "Produto incompleto",
+                 "ncm": "123", "cfop": "5102", "cst_icms": "102", "preco": "5"}
+        r = c.post("/produtos/novo", data=dados)
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn("INC1", c.get("/produtos").get_data(as_text=True))
+        r = c.post("/produtos/novo", data={**dados, "incompleto": "1"}, follow_redirects=True)
+        html = r.get_data(as_text=True)
+        self.assertIn("INCOMPLETO", html)
+        self.assertIn("incompleto</span>", html)
+        # completar limpa a pendência
+        pid = re.search(r"/produtos/(\d+)\">completar", html).group(1)
+        self.assertIn("NCM deve ter 8 dígitos", c.get(f"/produtos/{pid}").get_data(as_text=True))
+        c.post(f"/produtos/{pid}", data={**dados, "csrf_token": token(f"/produtos/{pid}"), "ncm": "61091000"})
+        html = c.get("/produtos").get_data(as_text=True)
+        self.assertNotIn("incompleto</span>", html)
+        self.assertIn("INC1", html)
+        # cliente: só o nome já permite salvar incompleto
+        r = c.post("/clientes/novo", data={"csrf_token": token("/clientes/novo"), "nome": "So o Nome",
+                                           "incompleto": "1"}, follow_redirects=True)
+        html = r.get_data(as_text=True)
+        self.assertIn("So o Nome", html)
+        self.assertIn("1 cliente(s) com cadastro incompleto", html)
+
+    def test_banco_antigo_ganha_colunas_de_pendencia(self):
+        import sqlite3
+        from app.db import migrar
+        con = sqlite3.connect(":memory:")
+        con.executescript("CREATE TABLE produtos (id INTEGER PRIMARY KEY, codigo TEXT, descricao TEXT, ncm TEXT);"
+                          "CREATE TABLE clientes (id INTEGER PRIMARY KEY, documento TEXT, nome TEXT);"
+                          "INSERT INTO produtos (codigo, descricao, ncm) VALUES ('A','a','61091000'),('B','b','');"
+                          "INSERT INTO clientes (documento, nome) VALUES ('1','x');")
+        migrar(con)
+        migrar(con)                                           # idempotente
+        self.assertEqual([r[0] for r in con.execute("SELECT pendente FROM produtos ORDER BY id")], [0, 1])
+        self.assertEqual(con.execute("SELECT pendente FROM clientes").fetchone()[0], 0)
 
     def test_busca_cliente_produto_na_nota(self):
         """Campos Cliente/Produto da nota: busca no servidor (não embute milhares de <option> na página)."""
@@ -867,8 +913,16 @@ class TestImportacao(unittest.TestCase):
                 "A-4;CST inválido;61091000;10,00;;999\r\n"
                 "A-5;Preço ruim;61091000;abc;;102\r\n").encode("cp1252")
         r = self.importar("produto", "produtos.csv", csv_, crt="1")
-        self.assertEqual((r.total, r.criados, r.com_erro), (5, 2, 3))
-        self.assertEqual([l for l, _ in r.erros], [4, 5, 6])              # número da linha na planilha
+        # nada é descartado: as 3 linhas com problema ficam salvas como INCOMPLETAS para editar depois
+        self.assertEqual((r.total, r.criados, r.com_erro, r.pendentes), (5, 5, 0, 3))
+        self.assertEqual([l for l, _ in r.incompletos], [4, 5, 6])        # número da linha na planilha
+        pend = {c: (p, t) for c, p, t in self.db.execute("SELECT codigo, pendente, pendencias FROM produtos")}
+        self.assertEqual([c for c, (p, _) in pend.items() if p], ["A-3", "A-4", "A-5"])
+        self.assertIn("NCM", pend["A-3"][1])
+        self.assertIn("CST/CSOSN", pend["A-4"][1])
+        self.assertIn("Preço", pend["A-5"][1])
+        a4 = self.db.execute("SELECT cst_icms, preco FROM produtos WHERE codigo='A-5'").fetchone()
+        self.assertEqual((a4["cst_icms"], a4["preco"]), ("102", "0.00"))   # valor ruim vira o padrão
         a2 = self.db.execute("SELECT * FROM produtos WHERE codigo='A-2'").fetchone()
         self.assertEqual((a2["ncm"], a2["preco"], a2["cfop"], a2["unidade"]), ("01012100", "1234.56", "5102", "UN"))
         self.assertEqual(self.db.execute("SELECT unidade FROM produtos WHERE codigo='A-1'").fetchone()[0], "UN")
@@ -918,16 +972,18 @@ class TestImportacao(unittest.TestCase):
                 "98765432100;Sem endereço;99999999;;;;;;;;\n"                                                   # CEP não achado
                 "12345678909;Email ruim;13201000;Rua C;2;Centro;;;;email-sem-arroba;\n").encode("utf-8")
         r = self.importar("cliente", "clientes.csv", csv_)
-        self.assertEqual((r.total, r.criados, r.com_erro), (5, 2, 3), r.erros)
+        # 5ª linha repete o CPF da Maria: atualiza o cadastro dela, ignorando o e-mail inválido
+        self.assertEqual((r.total, r.criados, r.atualizados, r.com_erro, r.pendentes), (5, 4, 1, 0, 2), r.erros)
+        self.assertEqual([l for l, _ in r.ressalvas], [6])
         maria = self.db.execute("SELECT * FROM clientes WHERE documento='12345678909'").fetchone()
         self.assertEqual((maria["municipio"], maria["uf"], maria["cod_municipio"], maria["fone"], maria["ind_ie_dest"]),
                          ("Jundiaí", "SP", "3525904", "11999998888", "9"))
         loja = self.db.execute("SELECT * FROM clientes WHERE documento='11222333000181'").fetchone()
         self.assertEqual((loja["cep"], loja["ind_ie_dest"], loja["ie"]), ("01310100", "1", "111222333444"))
-        erros = {linha: " ".join(msgs) for linha, msgs in r.erros}
+        erros = {linha: " ".join(msgs) for linha, msgs in r.incompletos}
         self.assertIn("CPF/CNPJ inválido", erros[4])
         self.assertIn("IBGE", erros[5])
-        self.assertIn("E-mail inválido", erros[6])
+        self.assertEqual(maria["email"], "maria@x.com")
 
     def test_clientes_atualizar_e_ie_isento(self):
         base = ("documento;nome;cep;logradouro;numero;bairro;municipio;uf;cod_municipio;ind_ie_dest;ie\n"
@@ -938,15 +994,73 @@ class TestImportacao(unittest.TestCase):
         c = self.db.execute("SELECT * FROM clientes").fetchone()
         self.assertEqual((c["nome"], c["logradouro"], c["ind_ie_dest"], c["ie"]), ("Maria Souza", "Rua A", "2", ""))
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM clientes").fetchone()[0], 1)
-        # contribuinte sem IE é recusado
+        # contribuinte sem IE: salvo, mas marcado como pendente
         r = self.importar("cliente", "c.csv", b"documento;nome;ind_ie_dest\n12345678909;Maria;contribuinte\n")
-        self.assertIn("Inscrição Estadual", " ".join(r.erros[0][1]))
+        self.assertIn("Inscrição Estadual", " ".join(r.incompletos[0][1]))
+        self.assertEqual(self.db.execute("SELECT pendente FROM clientes").fetchone()[0], 1)
 
     def test_notacao_cientifica_e_zeros_do_documento(self):
         r = self.importar("cliente", "n.csv", ("documento;nome;cep;logradouro;numero;bairro\n"
                                                 "1,12345678909E+10;Teste;13201000;Rua A;1;Centro\n"
                                                 "1234567890;CPF sem zero;13201000;Rua A;1;Centro\n").encode())
-        self.assertIn("notação científica", " ".join(r.erros[0][1]))
+        self.assertIn("notação científica", " ".join(r.incompletos[0][1]))
+
+    def test_cabecalho_fora_da_primeira_linha_e_formatos_livres(self):
+        csv_ = ("Lista de produtos da loja\n\nCódigo;Nome do Produto;Preço;Unidade;NCM\n"
+                "Z1;Meia;R$ 12,50;Unidade;61159500\n").encode("utf-8")
+        r = self.importar("produto", "x.csv", csv_)
+        self.assertEqual((r.criados, r.pendentes), (1, 0), r.incompletos)
+        p = self.db.execute("SELECT * FROM produtos").fetchone()
+        self.assertEqual((p["preco"], p["unidade"], p["pendente"]), ("12.50", "UN", 0))
+
+    def test_produto_sem_codigo_ganha_codigo_automatico(self):
+        csv_ = b"descricao;ncm\nCaneca azul;69120000\n"
+        r1 = self.importar("produto", "a.csv", csv_)
+        r2 = self.importar("produto", "a.csv", csv_)             # reimportar não duplica
+        self.assertEqual((r1.criados, r1.codigos_automaticos, r2.atualizados), (1, 1, 1))
+        self.assertTrue(self.db.execute("SELECT codigo FROM produtos").fetchone()[0].startswith("IMP-"))
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM produtos").fetchone()[0], 1)
+
+    def test_linha_sem_identificacao_nao_e_salva(self):
+        r = self.importar("produto", "a.csv", b"codigo;descricao;ncm\n;;61091000\nOK;Item;61091000\n")
+        self.assertEqual((r.criados, r.com_erro), (1, 1))
+        r = self.importar("cliente", "b.csv", b"documento;nome;cep\n;;13201000\n")
+        self.assertEqual((r.criados, r.com_erro), (0, 1))
+
+    def test_cliente_sem_documento_fica_pendente_e_nao_duplica(self):
+        csv_ = b"nome;cep;logradouro;numero;bairro\nJoao Sem CPF;13201000;Rua A;1;Centro\n"
+        r1 = self.importar("cliente", "a.csv", csv_)
+        r2 = self.importar("cliente", "a.csv", csv_)
+        self.assertEqual((r1.criados, r1.pendentes, r2.atualizados), (1, 1, 1))
+        c = self.db.execute("SELECT * FROM clientes").fetchone()
+        self.assertEqual((c["documento"], c["pendente"]), ("", 1))
+        self.assertIn("não informado", c["pendencias"])
+
+    def test_completar_pendente_pela_planilha_limpa_a_pendencia(self):
+        self.importar("produto", "a.csv", b"codigo;descricao\nP9;Sem NCM\n")
+        self.assertEqual(self.db.execute("SELECT pendente FROM produtos").fetchone()[0], 1)
+        # modo "pular" não pode impedir de completar um cadastro pendente
+        r = self.importar("produto", "b.csv", b"codigo;ncm\nP9;61091000\n", existentes="pular")
+        self.assertEqual(r.atualizados, 1)
+        p = self.db.execute("SELECT * FROM produtos").fetchone()
+        self.assertEqual((p["pendente"], p["pendencias"], p["descricao"], p["ncm"]), (0, "", "Sem NCM", "61091000"))
+
+    def test_valor_ruim_nao_estraga_cadastro_existente(self):
+        self.importar("produto", "a.csv", b"codigo;descricao;ncm;cfop\nP1;Bom;61091000;5405\n")
+        r = self.importar("produto", "b.csv", b"codigo;cfop;ncm\nP1;54;abc\n")
+        p = self.db.execute("SELECT * FROM produtos").fetchone()
+        self.assertEqual((p["cfop"], p["ncm"], p["pendente"]), ("5405", "61091000", 0))
+        self.assertEqual(len(r.ressalvas), 1)
+
+    def test_pendencias_de_cadastro_bloqueiam_emissao(self):
+        from app import servico
+        self.importar("produto", "a.csv", b"codigo;descricao\nP1;Sem NCM\n")
+        self.importar("cliente", "c.csv", b"nome\nSem Documento\n")
+        cli = dict(self.db.execute("SELECT * FROM clientes").fetchone())
+        pid = self.db.execute("SELECT id FROM produtos").fetchone()[0]
+        erros = servico._pendencias_cadastro(self.db, cli, [{"produto_id": pid}])
+        self.assertEqual(len(erros), 2)
+        self.assertIn("incompleto", erros[0] + erros[1])
 
     def test_simulacao_nao_grava(self):
         r = self.importar("produto", "s.csv", b"codigo;descricao;ncm\nS1;Simulado;61091000\n", simular=True)
@@ -957,7 +1071,7 @@ class TestImportacao(unittest.TestCase):
         from app import importacao
         casos = {
             "vazio": b"",
-            "sem coluna obrigatória": b"nome;preco\nx;1\n",
+            "sem coluna de identificação": b"preco;estoque\n1;2\n",
             "só cabeçalho": b"codigo;descricao;ncm\n",
             "xls antigo": b"\xd0\xcf\x11\xe0" + b"0" * 50,
             "xlsx corrompido": b"PK\x03\x04" + b"0" * 50,
@@ -990,7 +1104,8 @@ class TestImportacao(unittest.TestCase):
             linhas += f"{cpf(100000 + i)};Cliente {i};{13000000 + i:08d};Rua;1;Centro\n"
         r = self.importar("cliente", "m.csv", linhas.encode(), cep_fn=lento)
         self.assertLessEqual(len(chamadas), importacao.MAX_CONSULTAS_CEP)
-        self.assertEqual(r.criados, importacao.MAX_CONSULTAS_CEP)
+        self.assertEqual(r.criados, n)                       # ninguém é perdido...
+        self.assertEqual(r.pendentes, n - importacao.MAX_CONSULTAS_CEP)   # ...as sem IBGE ficam pendentes
         self.assertTrue(r.avisos)
 
     def test_modelos_sao_importaveis(self):
