@@ -46,6 +46,12 @@ exports.createConnection = async (req, res, next) => {
       return res.status(403).json({ error: limit.message, code: 'PLAN_LIMIT' });
     }
 
+    // Cada número abre um navegador de ~300-500 MB: sem memória livre, recusa com aviso claro.
+    const capacity = nativeWhatsappService.checkCapacity();
+    if (!capacity.ok) {
+      return res.status(503).json({ error: capacity.message, code: 'SERVER_CAPACITY' });
+    }
+
     const connection = await prisma.whatsappConnection.create({
       data: { userId: req.userId, instanceName, status: 'pendente' }
     });
@@ -134,7 +140,7 @@ exports.deleteConnection = async (req, res, next) => {
     }
 
     if (connection.provider !== 'cloud_api') {
-      await nativeWhatsappService.destroySession(connection.id);
+      await nativeWhatsappService.destroySession(connection.id, { permanent: true });
     }
     await prisma.whatsappConnection.delete({ where: { id: connection.id } });
 

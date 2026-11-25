@@ -76,6 +76,13 @@ module.exports = {
   whatsappWebVersion: process.env.WHATSAPP_WEB_VERSION || null,
   whatsappWebVersionCacheUrl: process.env.WHATSAPP_WEB_VERSION_CACHE_URL || null,
 
+  // Capacidade do servidor para WhatsApp (cada número conectado abre um Chromium de ~300-500 MB).
+  // Memória livre mínima (MB) para aceitar um NOVO número; abaixo disso o sistema recusa com aviso claro
+  // em vez de deixar o servidor lento e as conexões falharem. 0 desliga a proteção.
+  whatsappMinFreeMb: Number(process.env.WHATSAPP_MIN_FREE_MB || 400),
+  // Opções extras do Chromium (separadas por espaço) para experimentar economia de memória, sem mexer no código.
+  whatsappChromiumArgs: (process.env.WHATSAPP_CHROMIUM_ARGS || '').split(/\s+/).filter(Boolean),
+
   // NOVO: Twilio direto pelo .env — se preenchidos, o sistema usa estes
   // valores automaticamente, sem precisar configurar nada pela tela
   // Configurações. Se você preencher pela tela também, o que estiver

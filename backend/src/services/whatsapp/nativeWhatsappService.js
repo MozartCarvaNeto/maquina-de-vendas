@@ -9,6 +9,7 @@ const prisma = require('../../config/db');
 const env = require('../../config/env');
 const chatMediaService = require('./chatMediaService');
 const audioConvertService = require('./audioConvertService');
+const chromiumGuard = require('./chromiumGuard');
 
 // Marca (em mediaMime) uma mensagem cujo anexo não baixou; mediaName guarda o id da mensagem no WhatsApp.
 const PENDING_MEDIA_MIME = 'pending/whatsapp';
@@ -80,6 +81,7 @@ class NativeWhatsappService {
     this.healthTimer = null;
     this.healthRunning = false;
     this.shuttingDown = false;
+    this.deleted = new Set();       // conexões apagadas de propósito: nenhuma abertura em andamento pode ressuscitá-las
   }
 
   isReady(connectionId) {
@@ -235,6 +237,73 @@ class NativeWhatsappService {
     return !clearFiles || !fs.existsSync(path.join(this.getSessionsRoot(), `session-${connectionId}`));
   }
 
+  /**
+   * Fecha de vez o navegador de um Client que já não vale (sessão apagada, trocada ou reiniciada
+   * enquanto ele ainda estava abrindo). Nunca mexe no navegador de uma sessão atual com o mesmo id.
+   */
+  async disposeStaleClient(connectionId, client) {
+    try {
+      await Promise.race([Promise.resolve(client.destroy()).catch(() => null), sleep(15000)]);
+    } catch {
+      // já fechado
+    }
+    try {
+      const proc = client?.pupBrowser?.process?.();
+      if (proc && !proc.killed) proc.kill('SIGKILL');
+    } catch {
+      // já encerrado
+    }
+    if (!this.isSessionInUse(connectionId)) await this.killOrphanBrowsers(connectionId);
+    console.log(`🧹 [${connectionId}] Navegador de sessão antiga encerrado (evita ficar na memória).`);
+  }
+
+  isSessionInUse(connectionId) {
+    return this.clients.has(connectionId) || this.initializing.has(connectionId) || this.destroying.has(connectionId);
+  }
+
+  /**
+   * Mata todo Chromium de sessão que NENHUMA sessão ativa reconhece: sobras de sessão apagada, de
+   * reinício forçado do servidor (o pm2 mata o Node em 1,6 s, antes de fechar os navegadores) etc.
+   * Roda ao ligar o servidor e a cada 2 minutos.
+   */
+  async reapOrphanBrowsers() {
+    const procs = await chromiumGuard.listChromium(this.getSessionsRoot());
+    const orfas = new Set(procs.filter((p) => !this.isSessionInUse(p.sessionId)).map((p) => p.sessionId));
+    for (const id of orfas) {
+      await this.killOrphanBrowsers(id);
+      console.warn(`🧹 Chromium órfão encerrado (sessão ${id} não está mais ativa) — memória liberada.`);
+    }
+    return { processes: procs.length, orphans: orfas.size };
+  }
+
+  /** Quantas sessões estão abertas e quanta memória cada uma usa (aproximado). Vai para o log a cada 5 min. */
+  async logCapacity() {
+    const procs = await chromiumGuard.listChromium(this.getSessionsRoot());
+    const porSessao = new Map();
+    for (const p of procs) porSessao.set(p.sessionId, (porSessao.get(p.sessionId) || 0) + p.rssMb);
+    const total = Array.from(porSessao.values()).reduce((a, b) => a + b, 0);
+    const livre = chromiumGuard.memoryAvailableMb();
+    console.log(
+      `📊 WhatsApp: ${this.clients.size} sessão(ões) no sistema, ${porSessao.size} navegador(es) rodando, ` +
+        `~${porSessao.size ? Math.round(total / porSessao.size) : 0} MB por sessão (${Math.round(total)} MB no total), ` +
+        `memória disponível no servidor: ${livre === null ? 'n/d' : livre + ' MB'}`
+    );
+  }
+
+  /** Há memória para abrir mais um navegador de WhatsApp? Evita travar o servidor e falhar conexões. */
+  checkCapacity() {
+    const minimo = env.whatsappMinFreeMb;
+    const livre = chromiumGuard.memoryAvailableMb();
+    if (!minimo || livre === null || livre >= minimo) return { ok: true, availableMb: livre };
+    return {
+      ok: false,
+      availableMb: livre,
+      message:
+        `O servidor está com pouca memória (${livre} MB livres; mínimo ${minimo} MB) para abrir mais um WhatsApp. ` +
+        'Apague conexões que não usa mais ou aumente a memória do servidor, e tente de novo.'
+    };
+  }
+
   emitStatus(userId, connectionId, status, extra = {}) {
     const io = global.socketIoInstance;
     if (io) io.to(`user:${userId}`).emit('whatsapp:status', { connectionId, status, ...extra });
@@ -359,6 +428,7 @@ class NativeWhatsappService {
 
   async initSession({ id: connectionId, userId, forceNew = false }) {
     if (this.shuttingDown) return null;
+    if (this.deleted.has(connectionId)) return null;
 
     if (this.destroying.has(connectionId)) {
       console.log(`⏳ Sessão ${connectionId} ainda está sendo encerrada. Nova inicialização aguardará.`);
@@ -394,6 +464,10 @@ class NativeWhatsappService {
 
     // Libera qualquer Chromium órfão que ainda segure o perfil desta sessão.
     await this.killOrphanBrowsers(connectionId);
+    if (this.deleted.has(connectionId)) {   // apagada enquanto chegávamos aqui: não abre navegador nenhum
+      this.initializing.delete(connectionId);
+      return null;
+    }
 
     if (forceNew) {
       const cleaned = await this.clearSessionFiles(connectionId);
@@ -405,6 +479,11 @@ class NativeWhatsappService {
         });
         return null;
       }
+    }
+
+    if (this.deleted.has(connectionId)) {
+      this.initializing.delete(connectionId);
+      return null;
     }
 
     // Sessão preservada: remove travas deixadas por um encerramento brusco.
@@ -432,7 +511,8 @@ class NativeWhatsappService {
         // computador fica ocioso/minimizado (causa comum de quedas silenciosas).
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding'
+        '--disable-renderer-backgrounding',
+        ...(env.whatsappChromiumArgs || [])
       ]
     };
 
@@ -646,9 +726,17 @@ class NativeWhatsappService {
 
     client
       .initialize()
-      .then(() => console.log(`🚀 [${connectionId}] initialize() concluído`))
+      .then(() => {
+        console.log(`🚀 [${connectionId}] initialize() concluído`);
+        // A sessão foi apagada/substituída ENQUANTO o navegador ainda abria: ele terminou de subir "sozinho"
+        // e ficaria ligado na memória para sempre. Fecha agora.
+        if (!this.isCurrent(connectionId, client, generation)) this.disposeStaleClient(connectionId, client);
+      })
       .catch((error) => {
-        if (!this.isCurrent(connectionId, client, generation)) return;
+        if (!this.isCurrent(connectionId, client, generation)) {
+          this.disposeStaleClient(connectionId, client);
+          return;
+        }
         console.error(`Erro ao inicializar sessão WhatsApp ${connectionId}:`, error.message);
         this.handleSessionFailure(connectionId, userId, `initialize() rejeitou: ${error.message}`, {
           client,
@@ -1215,18 +1303,36 @@ class NativeWhatsappService {
     }
   }
 
-  async destroySession(connectionId) {
+  async destroySession(connectionId, { permanent = false } = {}) {
+    if (permanent) {
+      // Conexão apagada de vez: se uma abertura dela estiver no meio do caminho, ela desiste sozinha.
+      this.deleted.add(connectionId);
+      setTimeout(() => this.deleted.delete(connectionId), 10 * 60 * 1000).unref?.();
+    }
     this.clearTimers(connectionId);
     this.retryCounts.delete(connectionId);
 
     const client = this.clients.get(connectionId);
     await this.shutdownClient(connectionId, client, { clearFiles: true });
+
+    // Sessão apagada de propósito: não deixa NADA dela guardado na memória do sistema.
+    // (Eventos atrasados do Client antigo continuam ignorados: sem geração registrada, isCurrent() é falso.)
+    this.owners.delete(connectionId);
+    this.generations.delete(connectionId);
+    this.retryCounts.delete(connectionId);
+    this.initializing.delete(connectionId);
+    this.clearTimers(connectionId);
   }
 
   async bootstrapExistingSessions() {
     this.startHealthMonitor();
 
+    // Antes de abrir qualquer sessão: encerra Chromium que sobrou de um desligamento anterior (inclusive
+    // de conexões já apagadas) e apaga pastas de sessão sem conexão — libera memória e disco.
+    await this.reapOrphanBrowsers().catch((err) => console.error('Limpeza de navegadores órfãos:', err.message));
+
     const all = await prisma.whatsappConnection.findMany({ orderBy: { createdAt: 'asc' } });
+    this.removeDanglingSessionDirs(new Set(all.map((c) => c.id)));
 
     // Restaura toda conexão que ainda tenha sessão salva em disco (mesmo que o
     // status esteja "desconectado"/"erro" por uma queda anterior) e as que
@@ -1260,11 +1366,33 @@ class NativeWhatsappService {
     }
   }
 
+  /** Pastas session-<id> de conexões que não existem mais no banco só ocupam disco. */
+  removeDanglingSessionDirs(knownIds) {
+    try {
+      const root = this.getSessionsRoot();
+      if (!fs.existsSync(root)) return;
+      for (const name of fs.readdirSync(root)) {
+        const m = name.match(/^session-([0-9a-f-]{36})$/i);
+        if (!m || knownIds.has(m[1]) || this.isSessionInUse(m[1])) continue;
+        fs.rmSync(path.join(root, name), { recursive: true, force: true });
+        console.log(`🧹 Pasta de sessão sem conexão removida: ${name}`);
+      }
+    } catch (err) {
+      console.error('Limpeza de pastas de sessão:', err.message);
+    }
+  }
+
   // ==================== MONITOR DE SAÚDE ====================
 
   startHealthMonitor() {
     if (this.healthTimer) return;
+    this.healthTick = 0;
     this.healthTimer = setInterval(() => {
+      this.healthTick += 1;
+      if (this.healthTick % 2 === 0) {
+        this.reapOrphanBrowsers().catch((err) => console.error('Limpeza de navegadores órfãos:', err.message));
+      }
+      if (this.healthTick % 5 === 0) this.logCapacity().catch(() => null);
       this.runHealthCheck().catch((err) => console.error('Erro no monitor de saúde do WhatsApp:', err.message));
     }, HEALTH_INTERVAL_MS);
     console.log('✅ Monitor de saúde do WhatsApp ativo (1 min)');
@@ -1338,4 +1466,4 @@ class NativeWhatsappService {
   }
 }
 
-module.exports = new NativeWhatsappService();
+module.exports = new NativeWhatsappService();
