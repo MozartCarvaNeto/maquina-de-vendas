@@ -79,6 +79,9 @@ module.exports = {
   // Capacidade do servidor para WhatsApp (cada número conectado abre um Chromium de ~300-500 MB).
   // Memória livre mínima (MB) para aceitar um NOVO número; abaixo disso o sistema recusa com aviso claro
   // em vez de deixar o servidor lento e as conexões falharem. 0 desliga a proteção.
+  // Como conectar os números por QR Code: 'wwebjs' (padrão; abre um Chromium por número, ~300-500 MB cada) ou
+  // 'baileys' (sem navegador, dezenas de MB por número). Trocar exige ler o QR de novo em cada número.
+  whatsappDriver: String(process.env.WHATSAPP_DRIVER || 'wwebjs').trim().toLowerCase() === 'baileys' ? 'baileys' : 'wwebjs',
   whatsappMinFreeMb: Number(process.env.WHATSAPP_MIN_FREE_MB || 400),
   // Opções extras do Chromium (separadas por espaço) para experimentar economia de memória, sem mexer no código.
   whatsappChromiumArgs: (process.env.WHATSAPP_CHROMIUM_ARGS || '').split(/\s+/).filter(Boolean),

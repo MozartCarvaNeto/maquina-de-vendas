@@ -1,6 +1,4 @@
 // backend/src/services/whatsapp/nativeWhatsappService.js
-require('./patchWwebjs'); // precisa vir ANTES do whatsapp-web.js (corrige envio de mídia)
-const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
 const path = require('path');
 const fs = require('fs');
@@ -10,6 +8,43 @@ const env = require('../../config/env');
 const chatMediaService = require('./chatMediaService');
 const audioConvertService = require('./audioConvertService');
 const chromiumGuard = require('./chromiumGuard');
+
+// Driver de conexão: 'wwebjs' (padrão, abre um Chromium por número) ou 'baileys' (sem navegador, bem mais leve).
+// Escolhido por WHATSAPP_DRIVER no .env. A biblioteca do driver NÃO escolhido nem chega a ser carregada.
+const USE_BAILEYS = env.whatsappDriver === 'baileys';
+let wwebjsLib = null;
+function wwebjs() {
+  if (!wwebjsLib) {
+    require('./patchWwebjs'); // precisa vir ANTES do whatsapp-web.js (corrige envio de mídia)
+    wwebjsLib = require('whatsapp-web.js');
+  }
+  return wwebjsLib;
+}
+
+const MIME_BY_EXT = {
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif',
+  '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4',
+  '.opus': 'audio/ogg', '.wav': 'audio/wav', '.pdf': 'application/pdf', '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls': 'application/vnd.ms-excel', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.txt': 'text/plain', '.csv': 'text/csv', '.zip': 'application/zip'
+};
+
+/** Anexo no formato do driver ativo (o do Baileys é só um objeto com mimetype/data/filename). */
+function buildMedia(filePath, mime, name) {
+  const fileName = name || path.basename(filePath);
+  if (!USE_BAILEYS) {
+    const { MessageMedia } = wwebjs();
+    return mime
+      ? new MessageMedia(mime, fs.readFileSync(filePath).toString('base64'), fileName)
+      : MessageMedia.fromFilePath(filePath);
+  }
+  return {
+    mimetype: mime || MIME_BY_EXT[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
+    data: fs.readFileSync(filePath).toString('base64'),
+    filename: fileName
+  };
+}
 
 // Marca (em mediaMime) uma mensagem cujo anexo não baixou; mediaName guarda o id da mensagem no WhatsApp.
 const PENDING_MEDIA_MIME = 'pending/whatsapp';
@@ -426,71 +461,13 @@ class NativeWhatsappService {
     await this.scheduleReconnect(connectionId, userId, { forceNew, reason });
   }
 
-  async initSession({ id: connectionId, userId, forceNew = false }) {
-    if (this.shuttingDown) return null;
-    if (this.deleted.has(connectionId)) return null;
-
-    if (this.destroying.has(connectionId)) {
-      console.log(`⏳ Sessão ${connectionId} ainda está sendo encerrada. Nova inicialização aguardará.`);
-      return null;
+  /** Cria o cliente do WhatsApp conforme o driver escolhido (WHATSAPP_DRIVER). */
+  createClient(connectionId) {
+    if (USE_BAILEYS) {
+      const { BaileysClient } = require('./baileysClient');
+      return new BaileysClient({ clientId: connectionId, dataPath: this.getSessionsRoot() });
     }
-
-    // Conta vencida/bloqueada: não abre navegador nenhum para ela.
-    if (await require('../accessService').isAccountBlocked(userId)) {
-      console.log(`⛔ Sessão ${connectionId} não iniciada: conta ${userId} sem acesso ativo.`);
-      return null;
-    }
-
-    // Plano sem o módulo de Conexões de WhatsApp: não abre navegador.
-    if (!(await require('../featureService').accountHasFeature(userId, 'conexoes'))) {
-      console.log(`⛔ Sessão ${connectionId} não iniciada: o plano da conta ${userId} não inclui WhatsApp.`);
-      return null;
-    }
-
-    if (this.clients.has(connectionId)) return this.clients.get(connectionId);
-    if (this.initializing.has(connectionId)) {
-      console.log(`⏳ Sessão ${connectionId} já está inicializando, aguarde...`);
-      return null;
-    }
-
-    this.initializing.add(connectionId);
-    this.owners.set(connectionId, userId);
-    this.clearTimers(connectionId);
-    this.authenticatedFlags.delete(connectionId);
-    this.readyFlags.delete(connectionId);
-    this.qrFlags.delete(connectionId);
-    this.healthMisses.delete(connectionId);
-    this.clearRetryTimer(connectionId);
-
-    // Libera qualquer Chromium órfão que ainda segure o perfil desta sessão.
-    await this.killOrphanBrowsers(connectionId);
-    if (this.deleted.has(connectionId)) {   // apagada enquanto chegávamos aqui: não abre navegador nenhum
-      this.initializing.delete(connectionId);
-      return null;
-    }
-
-    if (forceNew) {
-      const cleaned = await this.clearSessionFiles(connectionId);
-      if (!cleaned) {
-        this.initializing.delete(connectionId);
-        await this.setStatus(connectionId, 'erro');
-        this.emitStatus(userId, connectionId, 'erro', {
-          message: 'Não foi possível liberar os arquivos da sessão anterior. O navegador ainda pode estar encerrando; tente gerar o QR novamente em alguns segundos.'
-        });
-        return null;
-      }
-    }
-
-    if (this.deleted.has(connectionId)) {
-      this.initializing.delete(connectionId);
-      return null;
-    }
-
-    // Sessão preservada: remove travas deixadas por um encerramento brusco.
-    if (!forceNew) this.clearStaleLocks(connectionId);
-
-    const generation = this.nextGeneration(connectionId);
-
+    const { Client, LocalAuth } = wwebjs();
     const puppeteerOptions = {
       headless: true,
       args: [
@@ -556,7 +533,81 @@ class NativeWhatsappService {
       console.log(`📌 [${connectionId}] WhatsApp Web fixado em ${env.whatsappWebVersion}`);
     }
 
-    const client = new Client(clientOptions);
+    return new Client(clientOptions);
+  }
+
+  /** A sessão tem credenciais salvas que este driver consegue reabrir sem pedir QR? */
+  hasSavedSession(connectionId) {
+    if (USE_BAILEYS) return fs.existsSync(path.join(this.sessionDirOf(connectionId), 'creds.json'));
+    return fs.existsSync(this.sessionDirOf(connectionId));
+  }
+
+  async initSession({ id: connectionId, userId, forceNew = false }) {
+    if (this.shuttingDown) return null;
+    if (this.deleted.has(connectionId)) return null;
+
+    if (this.destroying.has(connectionId)) {
+      console.log(`⏳ Sessão ${connectionId} ainda está sendo encerrada. Nova inicialização aguardará.`);
+      return null;
+    }
+
+    // Conta vencida/bloqueada: não abre navegador nenhum para ela.
+    if (await require('../accessService').isAccountBlocked(userId)) {
+      console.log(`⛔ Sessão ${connectionId} não iniciada: conta ${userId} sem acesso ativo.`);
+      return null;
+    }
+
+    // Plano sem o módulo de Conexões de WhatsApp: não abre navegador.
+    if (!(await require('../featureService').accountHasFeature(userId, 'conexoes'))) {
+      console.log(`⛔ Sessão ${connectionId} não iniciada: o plano da conta ${userId} não inclui WhatsApp.`);
+      return null;
+    }
+
+    if (this.clients.has(connectionId)) return this.clients.get(connectionId);
+    if (this.initializing.has(connectionId)) {
+      console.log(`⏳ Sessão ${connectionId} já está inicializando, aguarde...`);
+      return null;
+    }
+
+    this.initializing.add(connectionId);
+    this.owners.set(connectionId, userId);
+    this.clearTimers(connectionId);
+    this.authenticatedFlags.delete(connectionId);
+    this.readyFlags.delete(connectionId);
+    this.qrFlags.delete(connectionId);
+    this.healthMisses.delete(connectionId);
+    this.clearRetryTimer(connectionId);
+
+    // Libera qualquer Chromium órfão que ainda segure o perfil desta sessão.
+    await this.killOrphanBrowsers(connectionId);
+    if (this.deleted.has(connectionId)) {   // apagada enquanto chegávamos aqui: não abre navegador nenhum
+      this.initializing.delete(connectionId);
+      return null;
+    }
+
+    if (forceNew) {
+      const cleaned = await this.clearSessionFiles(connectionId);
+      if (!cleaned) {
+        this.initializing.delete(connectionId);
+        await this.setStatus(connectionId, 'erro');
+        this.emitStatus(userId, connectionId, 'erro', {
+          message: 'Não foi possível liberar os arquivos da sessão anterior. O navegador ainda pode estar encerrando; tente gerar o QR novamente em alguns segundos.'
+        });
+        return null;
+      }
+    }
+
+    if (this.deleted.has(connectionId)) {
+      this.initializing.delete(connectionId);
+      return null;
+    }
+
+    // Sessão preservada: remove travas deixadas por um encerramento brusco.
+    if (!forceNew) this.clearStaleLocks(connectionId);
+
+    const generation = this.nextGeneration(connectionId);
+
+    const client = this.createClient(connectionId);
     this.clients.set(connectionId, client);
 
     client.on('qr', async (qr) => {
@@ -1221,13 +1272,7 @@ class NativeWhatsappService {
         // Mensagem de voz precisa do tipo COMPLETO "audio/ogg; codecs=opus"; só "audio/ogg" faz o
         // celular do contato mostrar o áudio como indisponível/sem tocar.
         const sendMime = options.asVoice ? 'audio/ogg; codecs=opus' : options.mediaMime;
-        const media = sendMime
-          ? new MessageMedia(
-              sendMime,
-              fs.readFileSync(mediaFilePath).toString('base64'),
-              options.mediaName || path.basename(mediaFilePath)
-            )
-          : MessageMedia.fromFilePath(mediaFilePath);
+        const media = buildMedia(mediaFilePath, sendMime, options.mediaName);
         const mediaSendOptions = { ...sendOptions, caption: text || '' };
         // Documentos (PDF, Word, Excel...) precisam ir como arquivo, não como foto.
         if (options.asDocument) mediaSendOptions.sendMediaAsDocument = true;
@@ -1337,11 +1382,22 @@ class NativeWhatsappService {
     // Restaura toda conexão que ainda tenha sessão salva em disco (mesmo que o
     // status esteja "desconectado"/"erro" por uma queda anterior) e as que
     // estavam ativas/pendentes.
-    const connections = all.filter(
+    let connections = all.filter(
       (conn) =>
         ['conectado', 'pendente', 'desconectado'].includes(conn.status) ||
-        fs.existsSync(this.sessionDirOf(conn.id))
+        this.hasSavedSession(conn.id)
     );
+
+    // Driver sem navegador: sessões antigas (do Chromium) não valem para ele. Em vez de abrir um QR por
+    // conexão no boot, marca como desconectadas; o usuário gera o QR delas quando quiser.
+    if (USE_BAILEYS) {
+      const semCredenciais = connections.filter((conn) => !this.hasSavedSession(conn.id));
+      connections = connections.filter((conn) => this.hasSavedSession(conn.id));
+      for (const conn of semCredenciais) {
+        if (conn.status !== 'desconectado') await this.setStatus(conn.id, 'desconectado').catch(() => null);
+        console.log(`ℹ️ [${conn.id}] Sem credenciais do novo driver: gere um novo QR em Conexões para reconectar.`);
+      }
+    }
 
     if (connections.length === 0) {
       console.log('ℹ️ Nenhuma sessão de WhatsApp para restaurar.');
