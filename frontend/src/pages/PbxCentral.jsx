@@ -4,9 +4,11 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../services/api';
 import PbxNumeros from '../components/pbx/PbxNumeros';
 import PbxServidor from '../components/pbx/PbxServidor';
+import PbxServicos from '../components/pbx/PbxServicos';
 import './PbxCentral.css';
 
 const TABS = [
+  ['servicos', '💳 Serviços e tarifas'],
   ['rotas', '📥 Rotas de entrada'],
   ['ura', '🎛️ URA (menu de voz)'],
   ['filas', '👥 Filas de atendimento'],
@@ -18,6 +20,8 @@ const TABS = [
   ['vozes', '🗣️ Vozes e fala'],
   ['instalar', '⚙️ Instalação e IA']
 ];
+// Abas de CONFIGURAÇÃO da central: só o administrador da plataforma. O assinante vê as demais.
+const ADMIN_ONLY_TABS = ['rotas', 'ura', 'filas', 'audios', 'vozes', 'numeros', 'servidor', 'instalar'];
 const DAYS = [['mon', 'Seg'], ['tue', 'Ter'], ['wed', 'Qua'], ['thu', 'Qui'], ['fri', 'Sex'], ['sat', 'Sáb'], ['sun', 'Dom']];
 const STRATEGIES = [
   ['rrmemory', 'Rodízio (revezando entre todos)'],
@@ -77,7 +81,22 @@ function AudioSelect({ value, onChange, audios, kind, empty = '— sem áudio �
 
 export default function PbxCentral() {
   const isPlatform = (() => { try { return Boolean(JSON.parse(localStorage.getItem('mdv_user') || '{}').isPlatformAdmin); } catch { return false; } })();
-  const [tab, setTab] = useState('rotas');
+  // Administrador: pode configurar a central "em nome de" um cliente (a conta escolhida vai no cabeçalho x-act-as-account).
+  const [actAs, setActAs] = useState('');
+  const [accounts, setAccounts] = useState([]);
+  useEffect(() => {
+    if (!isPlatform) return;
+    api.get('/gateway/wallet/accounts').then((r) => setAccounts(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+  }, [isPlatform]);
+  useEffect(() => {
+    if (actAs) api.defaults.headers.common['x-act-as-account'] = actAs; else delete api.defaults.headers.common['x-act-as-account'];
+    return () => { delete api.defaults.headers.common['x-act-as-account']; };
+  }, [actAs]);
+  return <PbxCentralInner key={actAs || 'minha'} isPlatform={isPlatform} actAs={actAs} setActAs={setActAs} accounts={accounts} />;
+}
+
+function PbxCentralInner({ isPlatform, actAs, setActAs, accounts }) {
+  const [tab, setTab] = useState(isPlatform ? 'rotas' : 'servicos');
   const [data, setData] = useState(null);
   const [msg, setMsg] = useState('');
   const [route, setRoute] = useState(null);
@@ -228,12 +247,23 @@ export default function PbxCentral() {
     <div className="pbx-page">
       <header>
         <h1>🏢 Telefonia PBX</h1>
-        <p>Central telefônica própria: URA, filas de atendimento, horário comercial, gravação das chamadas e ligações da IA — tudo rodando no seu Asterisk, sem Twilio.</p>
+        <p>{isPlatform ? 'Central telefônica da plataforma: URA, filas, horário comercial, gravação e IA — configure para si ou em nome de um cliente.' : 'Veja suas chamadas, gravações e as tarifas dos serviços de telefonia oferecidos pela plataforma.'}</p>
       </header>
+      {isPlatform && (
+        <div className="card">
+          <label>Configurar a central de: </label>
+          <select value={actAs} onChange={(e) => setActAs(e.target.value)}>
+            <option value="">Minha própria conta (plataforma)</option>
+            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          {actAs && <p className="hint-text">⚠️ Tudo o que você criar ou apagar nas abas abaixo vale para o cliente selecionado.</p>}
+        </div>
+      )}
       {msg && <p className="pbx-flash">{msg}</p>}
-      <div className="pbx-tabs">{TABS.filter(([k]) => isPlatform || !['vozes', 'numeros', 'servidor'].includes(k)).map(([k, l]) => <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{l}</button>)}</div>
+      <div className="pbx-tabs">{TABS.filter(([k]) => isPlatform || !ADMIN_ONLY_TABS.includes(k)).map(([k, l]) => <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>{l}</button>)}</div>
       {player && <div className="pbx-player"><audio controls autoPlay src={player.url} /> <button className="btn-secondary-small" onClick={() => setPlayer(null)}>Fechar</button></div>}
 
+      {tab === 'servicos' && <PbxServicos />}
       {tab === 'rotas' && !isPlatform && (data.dids || []).some((d) => d.suspended || d.overdue) && (
         <div className="card"><p><strong>⚠️ Número {data.dids.some((d) => d.suspended) ? 'suspenso' : 'com mensalidade em atraso'}.</strong> Faça uma recarga de saldo: a mensalidade é cobrada automaticamente e o número volta sozinho.</p></div>
       )}

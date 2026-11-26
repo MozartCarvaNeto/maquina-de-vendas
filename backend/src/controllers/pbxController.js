@@ -723,3 +723,38 @@ exports.hangupLive = async (req, res, next) => {
     next(e);
   }
 };
+
+// ------------------------------------------------------------------ vitrine de serviços e tarifas (o que o assinante enxerga)
+// O assinante não configura nada: vê o que a plataforma oferece, quanto custa e quanto o plano já inclui.
+exports.catalog = async (req, res, next) => {
+  try {
+    const userId = req.userId;
+    const [w, rules, dd, gw, account] = await Promise.all([
+      require('../services/walletService').getWallet(userId).catch(() => null),
+      require('../services/platformBillingSettings').get(),
+      require('../services/pbx/didService').autoSettings().catch(() => ({})),
+      require('../services/smsgw/gateway').getGatewaySettings(userId).catch(() => ({})),
+      prisma.account.findUnique({ where: { id: userId }, include: { subscriptionPlan: true } })
+    ]);
+    const plan = account?.subscriptionPlan || null;
+    const dids = (await require('../services/pbx/didService').forAccount(userId)).map((d) => ({ number: d.number, label: d.label, suspended: Boolean(d.suspendedAt) }));
+    const prepaid = Boolean(w?.enabled);
+    res.json({
+      prepaid,
+      balanceBrl: w?.balanceBrl || 0,
+      services: [
+        { key: 'sms', name: 'SMS pelo gateway da plataforma', unit: 'por parte de SMS', priceBrl: gw.priceBrl || 0, includedPerMonth: plan?.maxMonthlySms ?? null },
+        { key: 'voice_out', name: 'Ligações feitas (central da plataforma)', unit: 'por minuto', priceBrl: w?.voiceOutPerMinBrl || 0, incrementSec: w?.voiceIncrementSec || 60, includedPerMonth: plan?.maxMonthlyVoiceMinutes ?? null },
+        { key: 'voice_in', name: 'Ligações recebidas (URA e filas)', unit: 'por minuto', priceBrl: w?.voiceInPerMinBrl || 0, incrementSec: w?.voiceIncrementSec || 60, includedPerMonth: plan?.maxMonthlyVoiceMinutes ?? null },
+        { key: 'did', name: 'Número de telefone (DID)', unit: 'por mês', priceBrl: dd.billing ? dd.feeBrl || 0 : 0, includedPerMonth: plan?.maxDids ?? null },
+        { key: 'whatsapp', name: 'WhatsApp em disparos', unit: 'por mensagem', priceBrl: rules.whatsappPriceBrl || 0, includedPerMonth: plan?.maxMonthlyMessages ?? null }
+      ],
+      plan: plan ? { name: plan.name, priceCents: plan.priceCents, cycleMonths: plan.cycleMonths } : null,
+      dids,
+      topup: { enabled: rules.topupEnabled, minBrl: rules.topupMinBrl, maxBrl: rules.topupMaxBrl },
+      managedByPlatform: true
+    });
+  } catch (e) {
+    next(e);
+  }
+};

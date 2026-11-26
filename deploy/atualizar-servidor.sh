@@ -8,6 +8,8 @@ set -e
 cd "$(dirname "$0")/.."
 
 echo "⬇️  1/5 Baixando a versão nova do GitHub..."
+# o npm install do servidor reescreve o package-lock; descarta isso para o git pull não travar
+git checkout -- backend/package-lock.json frontend/package-lock.json 2>/dev/null || true
 git pull
 
 echo "📦 2/5 Atualizando o backend..."

@@ -7,12 +7,16 @@ const auth = require('../middlewares/auth');
 const requireRole = require('../middlewares/requireRole');
 const requirePlatformAdmin = require('../middlewares/requirePlatformAdmin');
 const { requireFeature } = require('../services/featureService');
+const actAsAccount = require('../middlewares/actAsAccount');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 1 } });
 
 router.use(auth);
 router.use(requireFeature('gateway'));
+router.use(actAsAccount);
 
+// CONFIGURAÇÃO da central (URA, filas, rotas, áudios, aplicar no Asterisk): só o administrador da plataforma,
+// que pode agir em nome de um cliente com ?accountId=. O assinante apenas USA o serviço (ligar, ver chamadas, ouvir gravações).
 // Qualquer pessoa da equipe com a função liberada pode ouvir gravações e usar clique-para-ligar; o resto é do admin.
 router.post('/click-to-call', c.clickToCall);
 
@@ -20,6 +24,7 @@ const admin = requireRole(['owner', 'admin']);
 router.get('/calls', admin, c.listCalls);
 router.get('/calls/:id/recording', admin, c.streamRecording);
 router.get('/overview', admin, c.overview);
+router.get('/catalog', c.catalog);
 // Números (DID): estoque e atribuição aos clientes — só o administrador da plataforma.
 router.get('/admin/dids', requirePlatformAdmin, c.adminDids);
 router.post('/admin/dids', requirePlatformAdmin, c.adminAddDids);
@@ -37,20 +42,20 @@ router.post('/admin/apply-all', requirePlatformAdmin, c.adminApplyAll);
 router.get('/live', admin, c.live);
 router.post('/live/spy', admin, c.spy);
 router.post('/live/hangup', admin, c.hangupLive);
-router.put('/settings', admin, c.saveSettings);
-router.post('/audios', admin, upload.single('file'), c.uploadAudio);
-router.post('/audios/tts', admin, c.ttsAudio);
+router.put('/settings', requirePlatformAdmin, c.saveSettings);
+router.post('/audios', requirePlatformAdmin, upload.single('file'), c.uploadAudio);
+router.post('/audios/tts', requirePlatformAdmin, c.ttsAudio);
 router.get('/audios/:id/file', admin, c.audioFile);
-router.delete('/audios/:id', admin, c.deleteAudio);
-router.post('/ivrs', admin, c.saveIvr);
-router.put('/ivrs/:id', admin, c.saveIvr);
-router.delete('/ivrs/:id', admin, c.deleteIvr);
-router.post('/queues', admin, c.saveQueue);
-router.put('/queues/:id', admin, c.saveQueue);
-router.delete('/queues/:id', admin, c.deleteQueue);
-router.post('/routes', admin, c.saveRoute);
-router.put('/routes/:id', admin, c.saveRoute);
-router.delete('/routes/:id', admin, c.deleteRoute);
+router.delete('/audios/:id', requirePlatformAdmin, c.deleteAudio);
+router.post('/ivrs', requirePlatformAdmin, c.saveIvr);
+router.put('/ivrs/:id', requirePlatformAdmin, c.saveIvr);
+router.delete('/ivrs/:id', requirePlatformAdmin, c.deleteIvr);
+router.post('/queues', requirePlatformAdmin, c.saveQueue);
+router.put('/queues/:id', requirePlatformAdmin, c.saveQueue);
+router.delete('/queues/:id', requirePlatformAdmin, c.deleteQueue);
+router.post('/routes', requirePlatformAdmin, c.saveRoute);
+router.put('/routes/:id', requirePlatformAdmin, c.saveRoute);
+router.delete('/routes/:id', requirePlatformAdmin, c.deleteRoute);
 // Chaves dos motores de voz (Google/Azure/Amazon/ElevenLabs/OpenAI) e testes: só o administrador da plataforma.
 router.get('/voice-engines', requirePlatformAdmin, c.voiceEngines);
 router.put('/voice-engines/:provider', requirePlatformAdmin, c.saveVoiceEngine);
@@ -58,6 +63,6 @@ router.delete('/voice-engines/:provider', requirePlatformAdmin, c.deleteVoiceEng
 router.post('/voices/test', requirePlatformAdmin, c.voiceTest);
 router.post('/voices/stt-test', requirePlatformAdmin, c.sttTest);
 router.get('/config', requirePlatformAdmin, c.config);
-router.post('/apply', admin, c.apply);
+router.post('/apply', requirePlatformAdmin, c.apply);
 
 module.exports = router;

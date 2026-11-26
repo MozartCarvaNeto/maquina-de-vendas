@@ -17,8 +17,10 @@ const MENU_ITEMS = [
   { path: '/listas', label: '🗂️ Listas', feature: ['contatos'], adminOnly: false },
   { path: '/disparos', label: '📣 Disparos', feature: ['disparos'], adminOnly: false },
   { path: '/telefone-sip', label: '📞 Telefone (ligações)', feature: ['gateway'], adminOnly: false },
-  { path: '/pbx', label: '🏢 Telefonia PBX (URA e filas)', feature: ['gateway'], adminOnly: true },
-  { path: '/gateway', label: '📡 Gateway de telecom', feature: ['gateway'], adminOnly: true },
+  { path: '/pbx', label: '🏢 Telefonia PBX (URA e filas)', feature: ['gateway'], adminOnly: true, platformAdminOnly: true },
+  { path: '/pbx', label: '📞 Minhas chamadas e tarifas', feature: ['gateway'], adminOnly: true, hideForPlatformAdmin: true },
+  { path: '/gateway', label: '📡 Gateway de telecom', feature: ['gateway'], adminOnly: true, platformAdminOnly: true },
+  { path: '/gateway', label: '✉️ SMS, saldo e API', feature: ['gateway'], adminOnly: true, hideForPlatformAdmin: true },
   { path: '/conexoes', label: '📱 Conexões', feature: ['conexoes'], adminOnly: false },
   { path: '/discador', label: '📞 Discador', feature: ['discador'], adminOnly: false },
   { path: '/ligacoes', label: '☎️ Ligações', feature: ['robo', 'discador', 'agente_ia'], adminOnly: false },
@@ -66,7 +68,7 @@ export default function Sidebar({ open = false }) {
           // Módulo fora do plano: continua no menu, com cadeado (mostra o que dá para contratar).
           const locked = item.feature && !userHasFeature(user, ...item.feature);
           return (
-          <li key={item.path}>
+          <li key={item.path + item.label}>
             <NavLink
               to={item.path}
               end={item.end}

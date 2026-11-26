@@ -30,15 +30,18 @@ const MEDIA_KEYS = {
 };
 const RECENT_LIMIT = 100;
 
+// Pacote do Baileys: padrão oficial; no servidor pode ser o fork com BAILEYS_PACKAGE=@aunucore/baileys no .env.
+const PACOTE = process.env.BAILEYS_PACKAGE || '@whiskeysockets/baileys';
+
 let versionCache = null;
 
 async function loadBaileys() {
   try {
-    return require('@whiskeysockets/baileys');
+    return require(PACOTE);
   } catch (err) {
-    if (err && err.code === 'ERR_REQUIRE_ESM') return import('@whiskeysockets/baileys');
+    if (err && err.code === 'ERR_REQUIRE_ESM') return import(PACOTE);
     if (err && err.code === 'MODULE_NOT_FOUND') {
-      throw new Error('A biblioteca @whiskeysockets/baileys não está instalada. Rode "npm install" na pasta backend.');
+      throw new Error(`A biblioteca ${PACOTE} não está instalada. Rode "npm install" na pasta backend.`);
     }
     throw err;
   }
@@ -120,6 +123,7 @@ class BaileysClient extends EventEmitter {
       },
       browser: Browsers && Browsers.ubuntu ? Browsers.ubuntu('Chrome') : ['Ubuntu', 'Chrome', '120.0.0'],
       printQRInTerminal: false,
+      banSentinel: false,                  // o guard anti-ban do fork @aunucore bloqueia TODAS as conexões por 1h após um 503 de rede; aqui é desligado
       markOnlineOnConnect: false,          // não "rouba" as notificações do celular
       syncFullHistory: false,              // não baixa o histórico antigo (economia de memória e de tempo)
       shouldSyncHistoryMessage: () => false,
