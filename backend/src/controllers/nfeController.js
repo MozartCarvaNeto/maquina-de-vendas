@@ -12,17 +12,19 @@ const isManager = (req) => ['owner', 'admin'].includes(req.memberRole);
 exports.status = async (req, res, next) => {
   try {
     const state = await nfe.getState(req.userId, { isPlatformAdmin: req.isPlatformAdmin });
-    const [plans, payments, account] = await Promise.all([
+    const [plans, payments, account, addons, myAddons] = await Promise.all([
       nfe.listPublicPlans(),
       prisma.nfePayment.findMany({ where: { accountId: req.userId }, orderBy: { createdAt: 'desc' }, take: 12 }),
-      prisma.account.findUnique({ where: { id: req.userId }, select: { taxId: true } })
+      prisma.account.findUnique({ where: { id: req.userId }, select: { taxId: true } }),
+      nfe.listPublicAddons(),
+      nfe.listMyAddons(req.userId)
     ]);
     const pending = state.subscription ? await nfe.getPendingPaymentLink(state.subscription) : null;
 
     let usage = null;
     if (env.nfe.secret && state.status !== 'sem_plano') {
       usage = await bridge.pyGetJson('/_uso', {
-        accountId: req.userId, userEmail: req.member.email, role: req.memberRole, limit: state.limit, readOnly: state.status === 'vencida'
+        accountId: req.userId, userEmail: req.member.email, role: req.memberRole, limit: state.limit, storageMb: state.storageMb, readOnly: state.status === 'vencida'
       });
     }
 
@@ -35,6 +37,15 @@ exports.status = async (req, res, next) => {
       plan: state.plan,
       endsAt: state.endsAt,
       limit: state.limit,
+      source: state.source || null,
+      includedPlanName: state.includedPlanName || null,
+      baseLimit: state.baseLimit ?? null,
+      extraNotes: state.extraNotes || 0,
+      storageMb: state.storageMb ?? null,
+      baseStorageMb: state.baseStorageMb ?? null,
+      extraStorageMb: state.extraStorageMb || 0,
+      addons,
+      myAddons,
       hasRecurring: Boolean(state.subscription?.billingSubscriptionId),
       plans,
       pendingPayment: pending,
@@ -55,6 +66,16 @@ exports.checkout = async (req, res, next) => {
     if (!planId) return res.status(400).json({ error: 'Escolha um plano.' });
     const result = await nfe.checkout({ accountId: req.userId, planId, cpfCnpj, actorEmail: req.member.email });
     res.json({ payUrl: result.payUrl, reused: result.reused });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.checkoutAddon = async (req, res, next) => {
+  try {
+    if (!isManager(req)) return res.status(403).json({ error: 'Só o proprietário ou administrador da conta pode comprar pacotes.' });
+    const result = await nfe.checkoutAddon({ accountId: req.userId, addonId: req.params.id, cpfCnpj: req.body?.cpfCnpj, actorEmail: req.member.email });
+    res.json({ payUrl: result.payUrl });
   } catch (error) {
     next(error);
   }

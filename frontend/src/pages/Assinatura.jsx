@@ -217,6 +217,7 @@ export default function Assinatura() {
                     {p.maxMonthlyVoiceMinutes != null && <li>☎️ {p.maxMonthlyVoiceMinutes.toLocaleString('pt-BR')} min de ligação/mês</li>}
                     {p.maxDids != null && <li>🔢 {p.maxDids} número(s) de telefone</li>}
                     {p.maxAiAgents != null && <li>🤖 {p.maxAiAgents} agente(s) de IA</li>}
+                    {p.nfeIncluded && <li>🧾 Emissor de NF-e incluso ({p.nfeMonthlyNotes != null ? `${p.nfeMonthlyNotes.toLocaleString('pt-BR')} notas/mês` : 'notas ilimitadas'})</li>}
                   </ul>
                   <button className="btn-primary" onClick={() => { setChosen(p); setError(''); }}>
                     {plan?.id === p.id ? (account.allowed ? 'Renovar este plano' : 'Pagar este plano') : 'Escolher'}

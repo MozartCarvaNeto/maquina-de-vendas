@@ -63,6 +63,7 @@ model Account {
   usageCounters         UsageCounter[]
   nfeSubscription       NfeSubscription?
   nfePayments           NfePayment[]
+  nfeAddonPurchases     NfeAddonPurchase[]
 
   members            Member[]
   settings           Setting[]
@@ -102,6 +103,9 @@ model Plan {
   maxMonthlyVoiceMinutes Int?     // minutos de voz (entrada + saída, ligações e IA) por mês
   maxDids                Int?     // números de telefone (DIDs) ao mesmo tempo
   maxAiAgents            Int?     // agentes de IA de voz
+  nfeIncluded            Boolean  @default(false) // este plano já inclui o emissor de NF-e (sem assinatura separada)
+  nfeMonthlyNotes        Int?     // notas de produção/mês incluídas (null = ilimitado; vale só com nfeIncluded)
+  nfeStorageMb           Int?     // espaço das notas em MB incluído (null = padrão da plataforma)
   features               Json?    // módulos liberados (lista de chaves). null = TODOS (plano completo)
   isActive               Boolean  @default(true)
   isPublic               Boolean  @default(true) // aparece para o cliente escolher
@@ -1308,6 +1312,7 @@ model NfePlan {
   priceCents       Int               // preço por ciclo, em centavos
   cycleMonths      Int               @default(1) // 1, 3, 6 ou 12
   maxMonthlyNotes  Int?              // notas de PRODUÇÃO por mês. null = ilimitado
+  storageMb        Int?              // espaço das notas em MB incluído no plano. null = padrão da plataforma
   isActive         Boolean           @default(true)
   isPublic         Boolean           @default(true)
   sortOrder        Int               @default(0)
@@ -1315,6 +1320,46 @@ model NfePlan {
   subscriptions    NfeSubscription[]
 
   @@map("nfe_plans")
+}
+
+// Pacotes avulsos de NF-e (catálogo do administrador): mais NOTAS no mês ou mais ESPAÇO para guardar as notas.
+//   kind 'notes'   -> amount = notas extras, valem no mês do pagamento
+//   kind 'storage' -> amount = MB extras, valem por validMonths meses a partir do pagamento
+model NfeAddon {
+  id          String   @id @default(uuid())
+  kind        String   // notes | storage
+  name        String
+  description String?
+  amount      Int
+  priceCents  Int
+  validMonths Int      @default(12)
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  purchases   NfeAddonPurchase[]
+
+  @@map("nfe_addons")
+}
+
+model NfeAddonPurchase {
+  id             String    @id @default(uuid())
+  accountId      String
+  account        Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  addonId        String?
+  addon          NfeAddon? @relation(fields: [addonId], references: [id], onDelete: SetNull)
+  kind           String
+  name           String
+  amount         Int
+  priceCents     Int
+  status         String    @default("pending") // pending | paid | cancelled
+  asaasPaymentId String?   @unique
+  invoiceUrl     String?
+  createdAt      DateTime  @default(now())
+  paidAt         DateTime?
+  expiresAt      DateTime? // preenchido ao pagar
+
+  @@index([accountId, status, expiresAt])
+  @@map("nfe_addon_purchases")
 }
 
 // Uma assinatura de NF-e por conta.

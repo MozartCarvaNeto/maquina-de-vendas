@@ -62,6 +62,7 @@ async function loadContext(accountId, memberId) {
           userEmail: member.email,
           role: member.role,
           limit: state.limit,
+          storageMb: state.storageMb,
           readOnly: state.status === 'vencida'
         };
       }

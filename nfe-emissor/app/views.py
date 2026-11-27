@@ -9,12 +9,12 @@ from decimal import Decimal, InvalidOperation
 
 import requests
 from flask import (Blueprint, Response, abort, current_app, flash, g, jsonify, redirect,
-                   render_template, request, session, url_for)
+                   render_template, request, send_file, session, url_for)
 
 from . import security, servico, tenant
 from .integracoes import PLATAFORMAS, ErroIntegracao, importador
 from .integracoes import mercadolivre as ml
-from . import importacao, logo
+from . import backup as backup_notas, importacao, logo
 from .db import get_db
 from .nfe import tabelas as T
 from .nfe import tls
@@ -76,7 +76,10 @@ def contexto_global():
         row = db.execute("SELECT ambiente FROM empresa WHERE id = 1").fetchone()
         ambiente = row["ambiente"] if row else None
         cota = tenant.uso(db)
-    return {"T": T, "NOTA_STATUS": T.NOTA_STATUS, "ambiente_atual": ambiente, "cota": cota,
+        espaco = tenant.uso_espaco()
+    else:
+        espaco = None
+    return {"T": T, "NOTA_STATUS": T.NOTA_STATUS, "ambiente_atual": ambiente, "cota": cota, "espaco": espaco,
             "somente_leitura": getattr(g, "somente_leitura", False), "asset_v": _VERSAO_ESTATICOS}
 
 
@@ -121,7 +124,7 @@ def healthz():
 @bp.get("/_uso")
 def uso_json():
     """Uso do mês (consultado pelo Turbo Prospect na tela do plano)."""
-    return jsonify(tenant.uso(get_db()))
+    return jsonify({**tenant.uso(get_db()), "espaco": tenant.uso_espaco(forcar=True)})
 
 
 @bp.route("/login", methods=["GET", "POST"])
@@ -922,7 +925,8 @@ def _acao(nota_id, funcao):
 @login_required
 def nota_emitir(nota_id):
     db = get_db()
-    erro_cota = tenant.erro_de_cota(db, servico.carregar_empresa(db)["ambiente"])
+    erro_cota = (tenant.erro_de_cota(db, servico.carregar_empresa(db)["ambiente"])
+                 or tenant.erro_de_espaco())
     if erro_cota:
         flash(erro_cota, "erro")
         return redirect(url_for("main.nota", nota_id=nota_id))
@@ -1037,6 +1041,40 @@ def notas_exportar():
                 z.writestr(f"{n['chave']}-cancelamento.xml", n["cancel_xml"])
     return Response(buf.getvalue(), mimetype="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="xmls-{mes}.zip"'})
+
+
+@bp.get("/backup")
+@login_required
+def backup():
+    db = get_db()
+    return render_template("backup.html", r=backup_notas.resumo(db), esp=tenant.uso_espaco(forcar=True))
+
+
+@bp.get("/backup/baixar")
+@login_required
+def backup_baixar():
+    """ZIP com os XMLs (todos, ou de um mês) + planilha de conferência. Nunca é bloqueado por plano vencido/espaço cheio."""
+    ambiente = request.args.get("ambiente", "1")
+    if ambiente not in ("1", "2", "todos"):
+        abort(400, "Ambiente inválido.")
+    try:
+        arq, qtd = backup_notas.gerar_zip(get_db(), request.args.get("mes"), None if ambiente == "todos" else ambiente)
+    except ValueError as exc:
+        abort(400, str(exc))
+    if qtd == 0:
+        flash("Nenhuma nota autorizada nesse período/ambiente.", "aviso")
+        return redirect(url_for("main.backup"))
+    mes = request.args.get("mes") or "completo"
+    return send_file(arq, mimetype="application/zip", as_attachment=True,
+                     download_name=f"backup-notas-{mes}.zip")
+
+
+@bp.post("/backup/reparar")
+@login_required
+def backup_reparar():
+    n = backup_notas.reparar_arquivos(get_db(), tenant.cfg())
+    flash(f"{n} arquivo(s) XML recriado(s) no disco a partir do banco." if n else "Todos os arquivos XML estão no disco.", "ok")
+    return redirect(url_for("main.backup"))
 
 
 # ----------------------------------------------------------------------------------------

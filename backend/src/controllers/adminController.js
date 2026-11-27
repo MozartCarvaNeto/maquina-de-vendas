@@ -472,7 +472,7 @@ exports.resetOwnerPassword = async (req, res, next) => {
 // PLANOS e COBRANÇA
 // ===========================================================================
 
-const LIMIT_FIELDS = ['maxWhatsappConnections', 'maxMembers', 'maxMonthlyMessages', 'maxMonthlySms', 'maxMonthlyVoiceMinutes', 'maxDids', 'maxAiAgents'];
+const LIMIT_FIELDS = ['maxWhatsappConnections', 'maxMembers', 'maxMonthlyMessages', 'maxMonthlySms', 'maxMonthlyVoiceMinutes', 'maxDids', 'maxAiAgents', 'nfeMonthlyNotes', 'nfeStorageMb'];
 const VALID_CYCLES = [1, 3, 6, 12];
 
 function parsePlanBody(body, { partial }) {
@@ -513,6 +513,7 @@ function parsePlanBody(body, { partial }) {
     data.features = parsed.features === null ? Prisma.DbNull : parsed.features;
   }
 
+  if (body.nfeIncluded !== undefined) data.nfeIncluded = Boolean(body.nfeIncluded);
   if (body.isActive !== undefined) data.isActive = Boolean(body.isActive);
   if (body.isPublic !== undefined) data.isPublic = Boolean(body.isPublic);
   if (body.sortOrder !== undefined) data.sortOrder = parseInt(body.sortOrder, 10) || 0;

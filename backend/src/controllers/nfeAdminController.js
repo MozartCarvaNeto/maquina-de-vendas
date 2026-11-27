@@ -31,6 +31,14 @@ function parsePlan(body, { partial }) {
       data.maxMonthlyNotes = n;
     }
   }
+  if (body.storageMb !== undefined) {
+    if (body.storageMb === null || body.storageMb === '') data.storageMb = null;
+    else {
+      const n = Math.floor(Number(body.storageMb));
+      if (!Number.isFinite(n) || n < 50) return err('O espaço do plano precisa ser de pelo menos 50 MB (ou vazio para usar o padrão da plataforma).');
+      data.storageMb = n;
+    }
+  }
   if (body.isActive !== undefined) data.isActive = Boolean(body.isActive);
   if (body.isPublic !== undefined) data.isPublic = Boolean(body.isPublic);
   if (body.sortOrder !== undefined) data.sortOrder = Math.floor(Number(body.sortOrder) || 0);
@@ -112,5 +120,80 @@ exports.grant = async (req, res, next) => {
 exports.revoke = async (req, res, next) => {
   try {
     res.json(await nfe.adminRevoke({ accountId: req.params.accountId, actorEmail: req.member.email }));
+  } catch (e) { next(e); }
+};
+
+
+// ---------------------------------------------------------------- pacotes avulsos (notas extras e espaço)
+function parseAddon(body, { partial }) {
+  const data = {};
+  const err = (m) => ({ error: m });
+  if (!partial || body.kind !== undefined) {
+    if (!['notes', 'storage'].includes(body.kind)) return err('Escolha o tipo do pacote: notas extras ou espaço.');
+    data.kind = body.kind;
+  }
+  if (!partial || body.name !== undefined) {
+    const name = String(body.name || '').trim();
+    if (!name) return err('Informe o nome do pacote.');
+    data.name = name.slice(0, 80);
+  }
+  if (body.description !== undefined) data.description = String(body.description || '').trim().slice(0, 300) || null;
+  if (!partial || body.amount !== undefined) {
+    const n = Math.floor(Number(body.amount));
+    if (!Number.isFinite(n) || n < 1) return err('Informe a quantidade (notas ou MB) maior que zero.');
+    data.amount = n;
+  }
+  if (!partial || body.priceCents !== undefined) {
+    const cents = Math.round(Number(body.priceCents));
+    if (!Number.isFinite(cents) || cents < 100) return err('Preço inválido (mínimo R$ 1,00).');
+    data.priceCents = cents;
+  }
+  if (body.validMonths !== undefined) {
+    const n = Math.floor(Number(body.validMonths));
+    if (!Number.isFinite(n) || n < 1 || n > 60) return err('A validade precisa estar entre 1 e 60 meses.');
+    data.validMonths = n;
+  }
+  if (body.isActive !== undefined) data.isActive = Boolean(body.isActive);
+  if (body.sortOrder !== undefined) data.sortOrder = Math.floor(Number(body.sortOrder) || 0);
+  return { data };
+}
+
+exports.listAddons = async (req, res, next) => {
+  try {
+    const rows = await prisma.nfeAddon.findMany({ orderBy: [{ kind: 'asc' }, { sortOrder: 'asc' }, { priceCents: 'asc' }], include: { _count: { select: { purchases: true } } } });
+    res.json({ addons: rows });
+  } catch (e) { next(e); }
+};
+
+exports.createAddon = async (req, res, next) => {
+  try {
+    const { data, error } = parseAddon(req.body || {}, { partial: false });
+    if (error) return res.status(400).json({ error });
+    res.status(201).json({ addon: await prisma.nfeAddon.create({ data }) });
+  } catch (e) { next(e); }
+};
+
+exports.updateAddon = async (req, res, next) => {
+  try {
+    const existing = await prisma.nfeAddon.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ error: 'Pacote não encontrado.' });
+    const { data, error } = parseAddon(req.body || {}, { partial: true });
+    if (error) return res.status(400).json({ error });
+    if (!Object.keys(data).length) return res.status(400).json({ error: 'Nada para atualizar.' });
+    res.json({ addon: await prisma.nfeAddon.update({ where: { id: existing.id }, data }) });
+  } catch (e) { next(e); }
+};
+
+/** Pacote já vendido só é desativado (some da vitrine; quem comprou continua com o que pagou). */
+exports.deleteAddon = async (req, res, next) => {
+  try {
+    const addon = await prisma.nfeAddon.findUnique({ where: { id: req.params.id }, include: { _count: { select: { purchases: true } } } });
+    if (!addon) return res.status(404).json({ error: 'Pacote não encontrado.' });
+    if (addon._count.purchases > 0) {
+      await prisma.nfeAddon.update({ where: { id: addon.id }, data: { isActive: false } });
+      return res.json({ deactivated: true });
+    }
+    await prisma.nfeAddon.delete({ where: { id: addon.id } });
+    res.json({ deleted: true });
   } catch (e) { next(e); }
 };

@@ -8,6 +8,7 @@ router.use(auth);
 router.get('/status', c.status);
 router.post('/checkout', c.checkout);
 router.post('/cancel', c.cancel);
+router.post('/addons/:id/checkout', c.checkoutAddon);
 router.post('/session', c.session);
 
 module.exports = router;

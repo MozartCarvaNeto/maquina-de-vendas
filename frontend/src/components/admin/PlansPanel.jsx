@@ -65,6 +65,9 @@ function PlanForm({ plan, catalog, onClose, onSaved }) {
     maxMonthlyVoiceMinutes: plan?.maxMonthlyVoiceMinutes ?? '',
     maxDids: plan?.maxDids ?? '',
     maxAiAgents: plan?.maxAiAgents ?? '',
+    nfeIncluded: Boolean(plan?.nfeIncluded),
+    nfeMonthlyNotes: plan?.nfeMonthlyNotes ?? '',
+    nfeStorageMb: plan?.nfeStorageMb ?? '',
     isPublic: plan ? plan.isPublic : true,
     isActive: plan ? plan.isActive : true,
     sortOrder: plan?.sortOrder ?? 0
@@ -124,6 +127,9 @@ function PlanForm({ plan, catalog, onClose, onSaved }) {
         maxMonthlyVoiceMinutes: form.maxMonthlyVoiceMinutes,
         maxDids: form.maxDids,
         maxAiAgents: form.maxAiAgents,
+        nfeIncluded: form.nfeIncluded,
+        nfeMonthlyNotes: form.nfeMonthlyNotes,
+        nfeStorageMb: form.nfeStorageMb,
         isPublic: form.isPublic,
         isActive: form.isActive,
         sortOrder: Number(form.sortOrder) || 0
@@ -228,6 +234,21 @@ function PlanForm({ plan, catalog, onClose, onSaved }) {
               <label className="adm-label">Agentes de IA de voz</label>
               <input type="number" min="0" placeholder="vazio = ilimitado" value={form.maxAiAgents} onChange={set('maxAiAgents')} />
             </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label><input type="checkbox" checked={form.nfeIncluded} onChange={(e) => setForm({ ...form, nfeIncluded: e.target.checked })} /> 🧾 Inclui o emissor de NF-e (sem precisar de plano de NF-e à parte)</label>
+            </div>
+            {form.nfeIncluded && (
+              <>
+                <div>
+                  <label className="adm-label">NF-e: notas de produção por mês</label>
+                  <input type="number" min="0" placeholder="vazio = ilimitado" value={form.nfeMonthlyNotes} onChange={set('nfeMonthlyNotes')} />
+                </div>
+                <div>
+                  <label className="adm-label">NF-e: espaço em MB</label>
+                  <input type="number" min="50" placeholder="vazio = espaço padrão" value={form.nfeStorageMb} onChange={set('nfeStorageMb')} />
+                </div>
+              </>
+            )}
             <div>
               <label className="adm-label">Ordem na vitrine</label>
               <input type="number" value={form.sortOrder} onChange={set('sortOrder')} />
@@ -323,7 +344,7 @@ export default function PlansPanel() {
                 <td data-label="Módulos"><FeatureChips features={p.features} catalog={catalog} /></td>
                 <td data-label="WhatsApps">{p.maxWhatsappConnections ?? 'até 10'}</td>
                 <td data-label="Usuários">{p.maxMembers ?? '∞'}</td>
-                <td data-label="Msgs/mês">{p.maxMonthlyMessages !== null ? p.maxMonthlyMessages.toLocaleString('pt-BR') : '∞'}<div className="adm-muted">SMS {p.maxMonthlySms ?? '∞'} · min {p.maxMonthlyVoiceMinutes ?? '∞'} · nºs {p.maxDids ?? '∞'} · IA {p.maxAiAgents ?? '∞'}</div></td>
+                <td data-label="Msgs/mês">{p.maxMonthlyMessages !== null ? p.maxMonthlyMessages.toLocaleString('pt-BR') : '∞'}<div className="adm-muted">SMS {p.maxMonthlySms ?? '∞'} · min {p.maxMonthlyVoiceMinutes ?? '∞'} · nºs {p.maxDids ?? '∞'} · IA {p.maxAiAgents ?? '∞'}{p.nfeIncluded ? ` · NF-e ${p.nfeMonthlyNotes ?? '∞'}/mês` : ''}</div></td>
                 <td data-label="Clientes">{p._count?.accounts ?? 0}</td>
                 <td data-label="Situação">
                   <span className={`adm-badge ${p.isActive ? 'adm-ativa' : 'adm-bloqueada'}`}>{p.isActive ? 'Ativo' : 'Inativo'}</span>

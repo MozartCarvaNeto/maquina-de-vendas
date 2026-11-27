@@ -18,9 +18,11 @@
     <a href="{{ url_for('main.produtos') }}">Produtos</a>
     <a href="{{ url_for('main.clientes') }}">Clientes</a>
     <a href="{{ url_for('main.integracoes') }}">Integrações</a>
+    <a href="{{ url_for('main.backup') }}">Backup</a>
     <a href="{{ url_for('main.empresa_form') }}">Configurações</a>
   </nav>
   {% if cota %}<span class="cota" title="Notas de produção autorizadas neste mês">NF-e do mês: {{ cota.usadas }}{% if cota.limite is not none %} / {{ cota.limite }}{% endif %}</span>{% endif %}
+  {% if espaco %}<span class="cota" title="Espaço usado pelas suas notas, produtos e clientes">Espaço: {{ '%.1f'|format(espaco.usado_mb) }} MB{% if espaco.limite_mb is not none %} / {{ espaco.limite_mb }} MB{% endif %}</span>{% endif %}
 </header>
 {% if somente_leitura %}
 <div class="faixa homolog">Seu plano de NF-e está vencido: você pode consultar e baixar notas, mas não emitir nem alterar. Renove em "Minha assinatura" no Turbo Prospect.</div>

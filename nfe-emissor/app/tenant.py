@@ -32,8 +32,8 @@ def segredo() -> str:
     return os.environ.get("NFE_INTERNAL_SECRET", "")
 
 
-def assinatura(conta: str, usuario: str, papel: str, limite: str, leitura: str, ts: str) -> str:
-    corpo = "|".join([conta, usuario, papel, limite, leitura, ts])
+def assinatura(conta: str, usuario: str, papel: str, limite: str, leitura: str, ts: str, espaco: str = "") -> str:
+    corpo = "|".join([conta, usuario, papel, limite, leitura, ts, espaco])
     return hmac.new(segredo().encode(), corpo.encode(), hashlib.sha256).hexdigest()
 
 
@@ -44,6 +44,7 @@ def autenticar():
     if not segredo():
         if os.environ.get("NFE_MODO_LOCAL") == "1":      # só para testar no seu computador
             g.conta, g.usuario, g.papel, g.limite_mensal, g.somente_leitura = "local-dev", "local", "owner", None, False
+            g.limite_mb = None
             preparar(g.conta)
             return None
         abort(503, "Emissor sem NFE_INTERNAL_SECRET configurado.")
@@ -54,8 +55,9 @@ def autenticar():
     limite = h.get("X-Turbo-Limit", "")
     leitura = h.get("X-Turbo-ReadOnly", "0")
     ts = h.get("X-Turbo-Ts", "")
+    espaco = h.get("X-Turbo-Storage-Mb", "")
     sig = h.get("X-Turbo-Sig", "")
-    esperado = assinatura(conta, usuario, papel, limite, leitura, ts)
+    esperado = assinatura(conta, usuario, papel, limite, leitura, ts, espaco)
     try:
         recente = abs(time.time() - int(ts)) <= JANELA_SEGUNDOS
     except ValueError:
@@ -64,6 +66,7 @@ def autenticar():
         abort(403, "Acesso ao emissor negado. Entre pelo Turbo Prospect.")
     g.conta, g.usuario, g.papel = conta, usuario, papel
     g.limite_mensal = int(limite) if limite.isdigit() else None   # None = sem limite
+    g.limite_mb = int(espaco) if espaco.isdigit() else None       # espaço total (plano + pacotes); None = sem limite
     g.somente_leitura = leitura == "1"
     if g.somente_leitura and request.method not in ("GET", "HEAD"):
         abort(403, "Seu plano de NF-e está vencido: só é possível consultar e baixar notas. Renove em Minha assinatura.")
@@ -133,4 +136,44 @@ def erro_de_cota(db, ambiente: str) -> str | None:
     if usadas >= g.limite_mensal:
         return (f"Limite de {g.limite_mensal} nota(s) por mês do seu plano de NF-e atingido ({usadas} emitidas em "
                 f"{periodo_atual()}). Ele zera no começo do próximo mês, ou contrate um plano maior em Minha assinatura.")
+    return None
+
+
+# ---------- espaço em disco da conta (XMLs, banco, certificado, logo) ----------
+_ESPACO_CACHE: dict[str, tuple[float, int]] = {}
+
+
+def bytes_usados(conta: str | None = None, forcar: bool = False) -> int:
+    """Tamanho da pasta da conta. Guardado por 60 s para não varrer o disco a cada tela."""
+    conta = conta or g.conta
+    agora = time.time()
+    hit = _ESPACO_CACHE.get(conta)
+    if hit and not forcar and agora - hit[0] < 60:
+        return hit[1]
+    total = 0
+    for raiz, _dirs, arquivos in os.walk(pasta_conta(conta)):
+        for nome in arquivos:
+            try:
+                total += os.path.getsize(os.path.join(raiz, nome))
+            except OSError:
+                pass
+    _ESPACO_CACHE[conta] = (agora, total)
+    return total
+
+
+def uso_espaco(forcar: bool = False) -> dict:
+    usado = bytes_usados(forcar=forcar)
+    limite = getattr(g, "limite_mb", None)
+    usado_mb = usado / 1048576
+    return {"usado_mb": round(usado_mb, 2), "limite_mb": limite,
+            "percentual": None if not limite else min(100, round(usado_mb * 100 / limite, 1)),
+            "restante_mb": None if limite is None else max(0, round(limite - usado_mb, 2))}
+
+
+def erro_de_espaco() -> str | None:
+    """Mensagem se o espaço contratado acabou. Só bloqueia EMITIR notas novas: baixar e fazer backup continua livre."""
+    e = uso_espaco(forcar=True)
+    if e["limite_mb"] is not None and e["usado_mb"] >= e["limite_mb"]:
+        return (f"O espaço de armazenamento das suas notas acabou ({e['usado_mb']:.1f} MB de {e['limite_mb']} MB). "
+                "Faça o backup em Backup e contrate mais espaço em Notas Fiscais > Pacotes. As notas já emitidas continuam seguras.")
     return None

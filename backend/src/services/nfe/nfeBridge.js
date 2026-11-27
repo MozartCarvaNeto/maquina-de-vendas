@@ -13,11 +13,12 @@ function hmac(key, text) {
 }
 
 /** Cabeçalhos assinados (o emissor confere com o mesmo NFE_INTERNAL_SECRET; ver nfe-emissor/app/tenant.py). */
-function signHeaders({ accountId, userEmail, role, limit, readOnly }) {
+function signHeaders({ accountId, userEmail, role, limit, readOnly, storageMb }) {
   const ts = String(Math.floor(Date.now() / 1000));
   const lim = limit === null || limit === undefined ? '' : String(limit);
   const ro = readOnly ? '1' : '0';
-  const body = [accountId, userEmail || '', role || '', lim, ro, ts].join('|');
+  const mb = storageMb === null || storageMb === undefined ? '' : String(Math.floor(storageMb));
+  const body = [accountId, userEmail || '', role || '', lim, ro, ts, mb].join('|');
   return {
     'X-Turbo-Account': accountId,
     'X-Turbo-User': userEmail || '',
@@ -25,6 +26,7 @@ function signHeaders({ accountId, userEmail, role, limit, readOnly }) {
     'X-Turbo-Limit': lim,
     'X-Turbo-ReadOnly': ro,
     'X-Turbo-Ts': ts,
+    'X-Turbo-Storage-Mb': mb,
     'X-Turbo-Sig': hmac(env.nfe.secret, body)
   };
 }

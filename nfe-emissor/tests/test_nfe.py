@@ -425,15 +425,15 @@ class TestAplicacaoWeb(unittest.TestCase):
 
     CONTA = "conta-aaaaaaaa-1111"
 
-    def cabecalhos(self, conta=None, limite="", leitura="0", ts=None, sig=None):
+    def cabecalhos(self, conta=None, limite="", leitura="0", ts=None, sig=None, espaco=""):
         """Cabeçalhos que o Turbo Prospect envia (assinados com NFE_INTERNAL_SECRET)."""
         from app import tenant
         conta = conta or self.CONTA
         ts = str(ts if ts is not None else int(__import__("time").time()))
-        sig = sig or tenant.assinatura(conta, "dono@exemplo.com", "owner", limite, leitura, ts)
+        sig = sig or tenant.assinatura(conta, "dono@exemplo.com", "owner", limite, leitura, ts, espaco)
         return {"HTTP_X_TURBO_ACCOUNT": conta, "HTTP_X_TURBO_USER": "dono@exemplo.com", "HTTP_X_TURBO_ROLE": "owner",
                 "HTTP_X_TURBO_LIMIT": limite, "HTTP_X_TURBO_READONLY": leitura, "HTTP_X_TURBO_TS": ts,
-                "HTTP_X_TURBO_SIG": sig}
+                "HTTP_X_TURBO_SIG": sig, "HTTP_X_TURBO_STORAGE_MB": espaco}
 
     def cliente(self, **kw):
         c = self.app.test_client()

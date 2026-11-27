@@ -59,7 +59,9 @@ module.exports = {
   nfe: {
     secret: process.env.NFE_INTERNAL_SECRET || '',
     url: (process.env.NFE_PY_URL || 'http://127.0.0.1:5001').replace(/\/$/, ''),
-    prefix: '/nfe-app'
+    prefix: '/nfe-app',
+    // Espaço (MB) que cada conta tem para guardar notas/produtos/clientes quando o plano não define outro valor.
+    storageBaseMb: Math.max(50, parseInt(process.env.NFE_STORAGE_BASE_MB, 10) || 1000)
   },
 
   // ---- Cobrança automática (Asaas) ----

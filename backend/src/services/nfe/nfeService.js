@@ -25,35 +25,96 @@ function serializePlan(p) {
     priceCents: p.priceCents,
     cycleMonths: p.cycleMonths,
     maxMonthlyNotes: p.maxMonthlyNotes,
+    storageMb: p.storageMb ?? null,
     isActive: p.isActive,
     isPublic: p.isPublic,
     sortOrder: p.sortOrder
   };
 }
 
+/** Fim do mês atual (horário de Brasília): quando acabam os pacotes de notas comprados neste mês. */
+function endOfMonthBR(from = new Date()) {
+  const [y, m] = from.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }).split('-').map(Number);
+  const ny = m === 12 ? y + 1 : y;
+  const nm = m === 12 ? 1 : m + 1;
+  return new Date(`${ny}-${String(nm).padStart(2, '0')}-01T00:00:00-03:00`);
+}
+
+/** Pacotes avulsos pagos e ainda dentro da validade. */
+async function activeAddons(accountId) {
+  const rows = await prisma.nfeAddonPurchase.findMany({ where: { accountId, status: 'paid', expiresAt: { gt: new Date() } }, orderBy: { paidAt: 'desc' } });
+  return {
+    rows,
+    extraNotes: rows.filter((r) => r.kind === 'notes').reduce((t, r) => t + r.amount, 0),
+    extraStorageMb: rows.filter((r) => r.kind === 'storage').reduce((t, r) => t + r.amount, 0)
+  };
+}
+
+/** Maior de dois limites, onde null = ilimitado. */
+const bestLimit = (a, b) => (a === null || b === null ? null : Math.max(a, b));
+
 /**
  * Situação do emissor para uma conta.
  *  status: 'ativa' | 'vencida' (modo consulta) | 'sem_plano'
- *  limit:  notas de produção por mês (null = ilimitado)
+ *  source: 'assinatura' (plano de NF-e próprio) | 'plano' (NF-e incluída no plano do app) | 'admin'
+ *  limit:  notas de produção por mês, já somando pacotes (null = ilimitado)
+ *  storageMb: espaço total para guardar notas, já somando pacotes (null = sem limite)
  */
 async function getState(accountId, { isPlatformAdmin = false } = {}) {
   if (isPlatformAdmin) {
-    return { status: 'ativa', admin: true, plan: null, endsAt: null, limit: null, subscription: null };
+    return { status: 'ativa', source: 'admin', admin: true, plan: null, endsAt: null, limit: null, storageMb: null, subscription: null };
   }
-  const sub = await prisma.nfeSubscription.findUnique({ where: { accountId }, include: { plan: true } });
-  if (!sub || (!sub.planId && !sub.endsAt && !sub.startsAt)) {
-    return { status: 'sem_plano', plan: null, endsAt: null, limit: null, subscription: sub };
+  const [sub, account] = await Promise.all([
+    prisma.nfeSubscription.findUnique({ where: { accountId }, include: { plan: true } }),
+    prisma.account.findUnique({ where: { id: accountId }, include: { subscriptionPlan: true } })
+  ]);
+  const mainPlan = account?.subscriptionPlan || null;
+  const includedInMainPlan = Boolean(mainPlan?.nfeIncluded);
+
+  let subActive = false;
+  if (sub && (sub.planId || sub.endsAt || sub.startsAt)) {
+    const now = Date.now();
+    const graceMs = env.graceDays * 24 * 3600 * 1000;
+    const active = !sub.cancelledAt || (sub.endsAt && sub.endsAt.getTime() > now);
+    const notExpired = !sub.endsAt || sub.endsAt.getTime() + graceMs > now;
+    subActive = Boolean(active && notExpired);
   }
-  const now = Date.now();
-  const graceMs = env.graceDays * 24 * 3600 * 1000;
-  const active = !sub.cancelledAt || (sub.endsAt && sub.endsAt.getTime() > now);
-  const notExpired = !sub.endsAt || sub.endsAt.getTime() + graceMs > now;
-  const status = active && notExpired ? 'ativa' : 'vencida';
+  const hasSubRecord = Boolean(sub && (sub.planId || sub.endsAt || sub.startsAt));
+
+  let status;
+  let source = null;
+  let baseLimit = null;
+  let baseStorage = null;
+  if (subActive || includedInMainPlan) {
+    status = 'ativa';
+    const candidates = [];
+    if (subActive) candidates.push({ limit: sub.plan?.maxMonthlyNotes ?? null, storage: sub.plan?.storageMb ?? env.nfe.storageBaseMb });
+    if (includedInMainPlan) candidates.push({ limit: mainPlan.nfeMonthlyNotes ?? null, storage: mainPlan.nfeStorageMb ?? env.nfe.storageBaseMb });
+    baseLimit = candidates.map((c) => c.limit).reduce(bestLimit);
+    baseStorage = Math.max(...candidates.map((c) => c.storage));
+    source = subActive ? 'assinatura' : 'plano';
+  } else if (hasSubRecord) {
+    status = 'vencida';
+    baseLimit = sub.plan?.maxMonthlyNotes ?? null;
+    baseStorage = sub.plan?.storageMb ?? env.nfe.storageBaseMb;
+    source = 'assinatura';
+  } else {
+    return { status: 'sem_plano', plan: null, endsAt: null, limit: null, storageMb: null, subscription: sub };
+  }
+
+  const extras = await activeAddons(accountId);
   return {
     status,
-    plan: sub.plan ? serializePlan(sub.plan) : null,
-    endsAt: sub.endsAt,
-    limit: sub.plan?.maxMonthlyNotes ?? null,
+    source,
+    plan: sub?.plan && source === 'assinatura' ? serializePlan(sub.plan) : null,
+    includedPlanName: includedInMainPlan ? mainPlan.name : null,
+    endsAt: source === 'assinatura' ? sub?.endsAt ?? null : null,
+    baseLimit,
+    extraNotes: extras.extraNotes,
+    limit: baseLimit === null ? null : baseLimit + extras.extraNotes,
+    baseStorageMb: baseStorage,
+    extraStorageMb: extras.extraStorageMb,
+    storageMb: baseStorage + extras.extraStorageMb,
     subscription: sub
   };
 }
@@ -161,7 +222,8 @@ async function cancelRecurring({ accountId, actorEmail }) {
 }
 
 function isNfePayment(payment) {
-  return String(payment?.externalReference || '').startsWith(REF_PREFIX);
+  const ref = String(payment?.externalReference || '');
+  return ref.startsWith(REF_PREFIX) || ref.startsWith('nfeaddon:');
 }
 
 async function findSubForPayment(payment) {
@@ -185,6 +247,10 @@ async function ownsPayment(payment) {
 }
 
 async function handleWebhookEvent(event, payment) {
+  if (isAddonPayment(payment)) {
+    if (event === 'PAYMENT_CONFIRMED' || event === 'PAYMENT_RECEIVED') return applyAddonPaid(payment);
+    return { handled: event, addon: true };
+  }
   const sub = await findSubForPayment(payment);
   if (!sub) return { ignored: 'assinatura de NF-e não encontrada' };
 
@@ -220,6 +286,108 @@ async function handleWebhookEvent(event, payment) {
   if (event === 'PAYMENT_OVERDUE') await addLog(sub.accountId, 'nfe', `Cobrança de NF-e em atraso (venceu em ${payment.dueDate || '?'})`, 'Asaas');
   if (['PAYMENT_REFUNDED', 'PAYMENT_CHARGEBACK_REQUESTED'].includes(event)) await addLog(sub.accountId, 'estorno', `NF-e: ${event} — pagamento ${payment.id}. Verifique a assinatura.`, 'Asaas');
   return { handled: event };
+}
+
+// ---------------------------------------------------------------- pacotes avulsos (notas e espaço)
+const ADDON_REF = 'nfeaddon:';
+
+function serializeAddon(a) {
+  return { id: a.id, kind: a.kind, name: a.name, description: a.description, amount: a.amount, priceCents: a.priceCents, validMonths: a.validMonths, isActive: a.isActive, sortOrder: a.sortOrder };
+}
+
+async function listPublicAddons() {
+  const rows = await prisma.nfeAddon.findMany({ where: { isActive: true }, orderBy: [{ kind: 'asc' }, { sortOrder: 'asc' }, { priceCents: 'asc' }] });
+  return rows.map(serializeAddon);
+}
+
+async function listMyAddons(accountId) {
+  const rows = await prisma.nfeAddonPurchase.findMany({ where: { accountId }, orderBy: { createdAt: 'desc' }, take: 30 });
+  const now = Date.now();
+  return rows.map((r) => ({
+    id: r.id, kind: r.kind, name: r.name, amount: r.amount, priceCents: r.priceCents, status: r.status, paidAt: r.paidAt, expiresAt: r.expiresAt,
+    active: r.status === 'paid' && Boolean(r.expiresAt) && r.expiresAt.getTime() > now,
+    payUrl: r.status === 'pending' ? r.invoiceUrl : null
+  }));
+}
+
+/** Cria a cobrança avulsa (Asaas) de um pacote. O pacote só passa a valer quando o pagamento é confirmado. */
+async function checkoutAddon({ accountId, addonId, cpfCnpj, actorEmail }) {
+  if (!asaas.isEnabled()) {
+    const err = new Error('A cobrança automática ainda não está ativada neste sistema. Fale com o suporte.');
+    err.status = 503;
+    throw err;
+  }
+  const addon = await prisma.nfeAddon.findUnique({ where: { id: addonId } });
+  if (!addon || !addon.isActive) {
+    const err = new Error('Pacote não encontrado ou indisponível.');
+    err.status = 404;
+    throw err;
+  }
+  const state = await getState(accountId);
+  if (state.status === 'sem_plano') {
+    const err = new Error('Contrate um plano de NF-e (ou um plano do app com NF-e incluída) antes de comprar pacotes.');
+    err.status = 403;
+    throw err;
+  }
+  const account = await prisma.account.findUnique({ where: { id: accountId }, include: { members: { select: { email: true, role: true }, orderBy: { createdAt: 'asc' } } } });
+  if (!account) {
+    const err = new Error('Conta não encontrada.');
+    err.status = 404;
+    throw err;
+  }
+  let customerId = account.billingCustomerId;
+  if (!customerId) {
+    const digits = onlyDigits(cpfCnpj || account.taxId);
+    if (![11, 14].includes(digits.length)) {
+      const err = new Error('Informe um CPF (11 dígitos) ou CNPJ (14 dígitos) válido.');
+      err.status = 400;
+      throw err;
+    }
+    const owner = account.members.find((m) => m.role === 'owner') || account.members[0];
+    const customer = await asaas.createCustomer({ name: account.name, email: owner?.email, cpfCnpj: digits, externalReference: account.id });
+    customerId = customer.id;
+    await prisma.account.update({ where: { id: account.id }, data: { billingProvider: account.billingProvider || 'asaas', billingCustomerId: customerId } });
+  }
+  const purchase = await prisma.nfeAddonPurchase.create({
+    data: { accountId, addonId: addon.id, kind: addon.kind, name: addon.name, amount: addon.amount, priceCents: addon.priceCents }
+  });
+  try {
+    const pay = await asaas.createPayment({
+      customer: customerId,
+      billingType: 'UNDEFINED',
+      value: addon.priceCents / 100,
+      dueDate: todayBR(),
+      description: `${env.appName} — NF-e: ${addon.name}`,
+      externalReference: `${ADDON_REF}${purchase.id}`
+    });
+    await prisma.nfeAddonPurchase.update({ where: { id: purchase.id }, data: { asaasPaymentId: pay.id, invoiceUrl: pay.invoiceUrl || null } });
+    await addLog(accountId, 'nfe', `Pacote de NF-e pedido: ${addon.name} (${brl(addon.priceCents)})`, actorEmail);
+    return { id: purchase.id, payUrl: pay.invoiceUrl || null };
+  } catch (e) {
+    await prisma.nfeAddonPurchase.update({ where: { id: purchase.id }, data: { status: 'cancelled' } }).catch(() => null);
+    throw e;
+  }
+}
+
+const isAddonPayment = (payment) => String(payment?.externalReference || '').startsWith(ADDON_REF);
+
+/** Pagamento do pacote confirmado: libera uma única vez (mesmo que o Asaas avise duas vezes). */
+async function applyAddonPaid(payment) {
+  const id = String(payment.externalReference).slice(ADDON_REF.length);
+  const purchase = await prisma.nfeAddonPurchase.findUnique({ where: { id }, include: { addon: true } });
+  if (!purchase) return { status: 'ignored', reason: 'pacote não encontrado' };
+  if (purchase.status === 'paid') return { status: 'duplicate' };
+  const paidCents = Math.round(Number(payment.value || 0) * 100);
+  if (paidCents < purchase.priceCents) return { status: 'ignored', reason: 'valor pago menor que o pedido' };
+  const now = new Date();
+  const expiresAt = purchase.kind === 'notes' ? endOfMonthBR(now) : addMonths(now, Math.max(1, purchase.addon?.validMonths || 12));
+  const claimed = await prisma.nfeAddonPurchase.updateMany({
+    where: { id, status: { not: 'paid' } },
+    data: { status: 'paid', paidAt: now, expiresAt, asaasPaymentId: payment.id }
+  });
+  if (!claimed.count) return { status: 'duplicate' };
+  await addLog(purchase.accountId, 'nfe', `Pacote de NF-e liberado: ${purchase.name} — vale até ${expiresAt.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`, 'Asaas');
+  return { status: 'applied', expiresAt };
 }
 
 // ---------------------------------------------------------------- administrador
@@ -269,6 +437,12 @@ async function adminRevoke({ accountId, actorEmail }) {
 
 module.exports = {
   serializePlan,
+  serializeAddon,
+  listPublicAddons,
+  listMyAddons,
+  checkoutAddon,
+  applyAddonPaid,
+  endOfMonthBR,
   getState,
   listPublicPlans,
   checkout,

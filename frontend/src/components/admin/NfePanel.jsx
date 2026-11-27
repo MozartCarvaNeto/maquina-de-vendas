@@ -16,19 +16,23 @@ function reaisToCents(text) {
   return Math.round(parseFloat(normalized) * 100);
 }
 
-const EMPTY = { id: null, name: '', description: '', price: '', cycleMonths: 1, maxMonthlyNotes: '', isActive: true, isPublic: true, sortOrder: 0 };
+const EMPTY_ADDON = { id: null, kind: 'storage', name: '', description: '', amount: '', price: '', validMonths: 12, isActive: true, sortOrder: 0 };
+const EMPTY = { id: null, name: '', description: '', price: '', cycleMonths: 1, maxMonthlyNotes: '', storageMb: '', isActive: true, isPublic: true, sortOrder: 0 };
 
 export default function NfePanel() {
   const [plans, setPlans] = useState([]);
   const [subs, setSubs] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [form, setForm] = useState(null);
+  const [addons, setAddons] = useState([]);
+  const [aform, setAform] = useState(null);
   const [msg, setMsg] = useState(null);
   const [grant, setGrant] = useState({ accountId: '', planId: '', months: '1', endsAt: '', forever: false });
 
   const load = useCallback(async () => {
     try {
-      const [p, s] = await Promise.all([api.get('/admin/nfe/plans'), api.get('/admin/nfe/subscriptions')]);
+      const [p, s, ad] = await Promise.all([api.get('/admin/nfe/plans'), api.get('/admin/nfe/subscriptions'), api.get('/admin/nfe/addons')]);
+      setAddons(ad.data.addons || []);
       setPlans(p.data.plans);
       setSubs(s.data.items);
     } catch (e) {
@@ -44,7 +48,7 @@ export default function NfePanel() {
   function edit(plan) {
     setForm(plan ? {
       id: plan.id, name: plan.name, description: plan.description || '', price: (plan.priceCents / 100).toFixed(2).replace('.', ','),
-      cycleMonths: plan.cycleMonths, maxMonthlyNotes: plan.maxMonthlyNotes ?? '', isActive: plan.isActive, isPublic: plan.isPublic, sortOrder: plan.sortOrder
+      cycleMonths: plan.cycleMonths, maxMonthlyNotes: plan.maxMonthlyNotes ?? '', storageMb: plan.storageMb ?? '', isActive: plan.isActive, isPublic: plan.isPublic, sortOrder: plan.sortOrder
     } : { ...EMPTY });
     setMsg(null);
   }
@@ -56,6 +60,7 @@ export default function NfePanel() {
     const body = {
       name: form.name, description: form.description, priceCents, cycleMonths: Number(form.cycleMonths),
       maxMonthlyNotes: form.maxMonthlyNotes === '' ? null : Number(form.maxMonthlyNotes),
+      storageMb: form.storageMb === '' ? null : Number(form.storageMb),
       isActive: form.isActive, isPublic: form.isPublic, sortOrder: Number(form.sortOrder) || 0
     };
     try {
@@ -74,6 +79,38 @@ export default function NfePanel() {
     try {
       const { data } = await api.delete(`/admin/nfe/plans/${plan.id}`);
       setMsg({ text: data.deactivated ? 'Plano desativado (tem assinantes).' : 'Plano apagado.' });
+      load();
+    } catch (err) {
+      setMsg({ error: true, text: err.response?.data?.error || 'Erro ao apagar.' });
+    }
+  }
+
+  function editAddon(a) {
+    setAform(a ? { id: a.id, kind: a.kind, name: a.name, description: a.description || '', amount: a.amount, price: (a.priceCents / 100).toFixed(2).replace('.', ','), validMonths: a.validMonths, isActive: a.isActive, sortOrder: a.sortOrder } : { ...EMPTY_ADDON });
+    setMsg(null);
+  }
+
+  async function saveAddon(e) {
+    e.preventDefault();
+    const priceCents = reaisToCents(aform.price);
+    if (Number.isNaN(priceCents)) return setMsg({ error: true, text: 'Informe o preço do pacote (ex.: 19,90).' });
+    const body = { kind: aform.kind, name: aform.name, description: aform.description, amount: Number(aform.amount), priceCents, validMonths: Number(aform.validMonths) || 12, isActive: aform.isActive, sortOrder: Number(aform.sortOrder) || 0 };
+    try {
+      if (aform.id) await api.patch(`/admin/nfe/addons/${aform.id}`, body);
+      else await api.post('/admin/nfe/addons', body);
+      setAform(null);
+      setMsg({ text: 'Pacote salvo.' });
+      load();
+    } catch (err) {
+      setMsg({ error: true, text: err.response?.data?.error || 'Erro ao salvar o pacote.' });
+    }
+  }
+
+  async function removeAddon(a) {
+    if (!window.confirm(`Apagar o pacote "${a.name}"? Se já foi vendido ele só some da vitrine (quem comprou mantém).`)) return;
+    try {
+      const { data } = await api.delete(`/admin/nfe/addons/${a.id}`);
+      setMsg({ text: data.deactivated ? 'Pacote retirado da vitrine (já tem compras).' : 'Pacote apagado.' });
       load();
     } catch (err) {
       setMsg({ error: true, text: err.response?.data?.error || 'Erro ao apagar.' });
@@ -127,6 +164,7 @@ export default function NfePanel() {
                   {Object.entries(CYCLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select></div>
               <div><label htmlFor="nf-max">Notas de produção por mês (vazio = ilimitado)</label><input id="nf-max" inputMode="numeric" value={form.maxMonthlyNotes} onChange={(e) => setForm({ ...form, maxMonthlyNotes: e.target.value.replace(/\D/g, '') })} placeholder="Ex.: 100" /></div>
+              <div><label htmlFor="nf-mb">Espaço para guardar notas, em MB (vazio = espaço padrão)</label><input id="nf-mb" inputMode="numeric" value={form.storageMb} onChange={(e) => setForm({ ...form, storageMb: e.target.value.replace(/\D/g, '') })} placeholder="Ex.: 2000" /></div>
               <div><label htmlFor="nf-desc">Descrição (aparece para o cliente)</label><input id="nf-desc" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
               <div><label htmlFor="nf-sort">Ordem na vitrine</label><input id="nf-sort" inputMode="numeric" value={form.sortOrder} onChange={(e) => setForm({ ...form, sortOrder: e.target.value })} /></div>
             </div>
@@ -143,18 +181,62 @@ export default function NfePanel() {
         <h3>Planos de NF-e ({plans.length})</h3>
         <div className="acc-table-wrap">
           <table className="acc-table">
-            <thead><tr><th>Plano</th><th>Preço</th><th>Ciclo</th><th>Notas/mês</th><th>Assinantes</th><th>Situação</th><th /></tr></thead>
+            <thead><tr><th>Plano</th><th>Preço</th><th>Ciclo</th><th>Notas/mês</th><th>Espaço</th><th>Assinantes</th><th>Situação</th><th /></tr></thead>
             <tbody>
               {plans.map((p) => (
                 <tr key={p.id}>
                   <td><strong>{p.name}</strong><br /><span className="acc-muted">{p.description}</span></td>
                   <td>{money(p.priceCents)}</td><td>{CYCLE_LABEL[p.cycleMonths]}</td>
-                  <td>{p.maxMonthlyNotes ?? 'Ilimitado'}</td><td>{p._count?.subscriptions ?? 0}</td>
+                  <td>{p.maxMonthlyNotes ?? 'Ilimitado'}</td><td>{p.storageMb ? `${p.storageMb} MB` : 'Padrão'}</td><td>{p._count?.subscriptions ?? 0}</td>
                   <td>{p.isActive ? (p.isPublic ? 'Ativo' : 'Ativo (oculto)') : 'Desativado'}</td>
                   <td><button className="btn-outline" onClick={() => edit(p)}>Editar</button> <button className="btn-outline" onClick={() => remove(p)}>Apagar</button></td>
                 </tr>
               ))}
-              {plans.length === 0 && <tr><td colSpan={7} className="acc-muted">Nenhum plano ainda. Crie o primeiro acima.</td></tr>}
+              {plans.length === 0 && <tr><td colSpan={8} className="acc-muted">Nenhum plano ainda. Crie o primeiro acima.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="acc-card">
+        <h3>📦 Pacotes avulsos de NF-e ({addons.length})</h3>
+        <p className="acc-muted">
+          Vendidos dentro do aplicativo, em Notas Fiscais &gt; Comprar notas ou espaço, para quem tem plano de NF-e ou plano completo com NF-e.
+          <strong> Notas extras</strong> valem só no mês do pagamento. <strong>Espaço (MB)</strong> vale pelos meses informados (padrão 12) e
+          soma ao espaço do plano. Sem espaço, o cliente fica sem emitir, mas sempre pode baixar o backup.
+        </p>
+        <div className="acc-row"><button className="btn-primary" onClick={() => editAddon(null)}>➕ Novo pacote</button></div>
+        {aform && (
+          <form onSubmit={saveAddon} className="acc-card" style={{ marginTop: 12 }}>
+            <div className="acc-grid">
+              <div><label htmlFor="ad-kind">Tipo</label>
+                <select id="ad-kind" value={aform.kind} onChange={(e) => setAform({ ...aform, kind: e.target.value })}><option value="storage">Espaço (MB)</option><option value="notes">Notas extras no mês</option></select></div>
+              <div><label htmlFor="ad-name">Nome</label><input id="ad-name" required value={aform.name} onChange={(e) => setAform({ ...aform, name: e.target.value })} placeholder="Ex.: +100 MB de espaço" /></div>
+              <div><label htmlFor="ad-amount">{aform.kind === 'notes' ? 'Quantidade de notas' : 'Megabytes'}</label><input id="ad-amount" required inputMode="numeric" value={aform.amount} onChange={(e) => setAform({ ...aform, amount: e.target.value.replace(/\D/g, '') })} /></div>
+              <div><label htmlFor="ad-price">Preço (R$)</label><input id="ad-price" required value={aform.price} onChange={(e) => setAform({ ...aform, price: e.target.value })} placeholder="19,90" /></div>
+              {aform.kind === 'storage' && <div><label htmlFor="ad-valid">Validade (meses)</label><input id="ad-valid" inputMode="numeric" value={aform.validMonths} onChange={(e) => setAform({ ...aform, validMonths: e.target.value.replace(/\D/g, '') })} /></div>}
+              <div><label htmlFor="ad-desc">Descrição</label><input id="ad-desc" value={aform.description} onChange={(e) => setAform({ ...aform, description: e.target.value })} /></div>
+            </div>
+            <div className="acc-row"><label><input type="checkbox" checked={aform.isActive} onChange={(e) => setAform({ ...aform, isActive: e.target.checked })} /> Ativo (aparece para venda)</label></div>
+            <div className="acc-row"><button className="btn-primary" type="submit">Salvar pacote</button> <button type="button" className="btn-outline" onClick={() => setAform(null)}>Cancelar</button></div>
+          </form>
+        )}
+        <div className="acc-table-wrap">
+          <table className="acc-table">
+            <thead><tr><th>Pacote</th><th>Tipo</th><th>Quantidade</th><th>Preço</th><th>Validade</th><th>Vendas</th><th>Situação</th><th /></tr></thead>
+            <tbody>
+              {addons.map((a) => (
+                <tr key={a.id}>
+                  <td><strong>{a.name}</strong><br /><span className="acc-muted">{a.description}</span></td>
+                  <td>{a.kind === 'notes' ? 'Notas' : 'Espaço'}</td>
+                  <td>{a.amount.toLocaleString('pt-BR')} {a.kind === 'notes' ? 'notas' : 'MB'}</td>
+                  <td>{money(a.priceCents)}</td>
+                  <td>{a.kind === 'notes' ? 'Mês do pagamento' : `${a.validMonths} mês(es)`}</td>
+                  <td>{a._count?.purchases ?? 0}</td><td>{a.isActive ? 'Ativo' : 'Desativado'}</td>
+                  <td><button className="btn-outline" onClick={() => editAddon(a)}>Editar</button> <button className="btn-outline" onClick={() => removeAddon(a)}>Apagar</button></td>
+                </tr>
+              ))}
+              {addons.length === 0 && <tr><td colSpan={8} className="acc-muted">Nenhum pacote ainda. Sugestão: +100 MB, +200 MB, +500 MB de espaço e +100/+500 notas.</td></tr>}
             </tbody>
           </table>
         </div>

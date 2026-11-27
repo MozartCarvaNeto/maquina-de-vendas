@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% from '_macros.html' import csrf with context %}
+{% block titulo %}Backup das notas - Emissor de NF-e{% endblock %}
+{% block conteudo %}
+<h1>Backup das notas fiscais</h1>
+<p>Por lei, os XMLs das notas emitidas devem ser guardados por <strong>5 anos</strong>. Baixe o backup com frequência (por exemplo, todo mês)
+e guarde o arquivo <strong>fora do servidor</strong>: no seu computador, num HD externo ou na nuvem.</p>
+
+<section class="cartao">
+  <h2>Baixar tudo</h2>
+  <p>ZIP com todos os XMLs autorizados e de cancelamento, a planilha <code>notas.csv</code> para conferência e os seus cadastros de produtos e clientes.</p>
+  <p>
+    <a class="botao" href="{{ url_for('main.backup_baixar', ambiente='1') }}">Baixar backup completo (produção)</a>
+    <a class="botao secundario" href="{{ url_for('main.backup_baixar', ambiente='todos') }}">Incluir notas de teste</a>
+  </p>
+  <p class="dica">{{ r.total }} nota(s) guardada(s) · Espaço usado: {{ '%.1f'|format(esp.usado_mb) }} MB{% if esp.limite_mb is not none %} de {{ esp.limite_mb }} MB ({{ esp.percentual }}%){% endif %}</p>
+</section>
+
+{% if r.sem_xml %}
+<div class="alerta erro">Atenção: {{ r.sem_xml }} nota(s) estão sem o XML de autorização. Abra a nota e use "Consultar" para recuperar o XML na SEFAZ.</div>
+{% endif %}
+
+<section class="cartao">
+  <h2>Por mês</h2>
+  {% if r.meses %}
+  <table>
+    <thead><tr><th>Mês</th><th>Autorizadas</th><th>Canceladas</th><th>Produção</th><th>Teste</th><th></th></tr></thead>
+    <tbody>
+    {% for m in r.meses %}
+      <tr>
+        <td>{{ m.mes }}</td><td>{{ m.autorizadas }}</td><td>{{ m.canceladas }}</td><td>{{ m.producao }}</td><td>{{ m.homologacao }}</td>
+        <td>{% if m.mes != 'sem-data' %}<a href="{{ url_for('main.backup_baixar', mes=m.mes, ambiente='1') }}">Baixar ZIP</a>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p>Ainda não há notas autorizadas.</p>{% endif %}
+</section>
+
+<section class="cartao">
+  <h2>Conferir arquivos no servidor</h2>
+  <p>Recria no disco do servidor qualquer arquivo XML que tenha sumido (a cópia principal fica no banco da sua conta).</p>
+  <form method="post" action="{{ url_for('main.backup_reparar') }}">{{ csrf() }}<button type="submit">Conferir e recriar arquivos</button></form>
+</section>
+{% endblock %}

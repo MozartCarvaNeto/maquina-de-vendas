@@ -23,6 +23,9 @@ function serializePlan(plan) {
     maxMonthlyVoiceMinutes: plan.maxMonthlyVoiceMinutes,
     maxDids: plan.maxDids,
     maxAiAgents: plan.maxAiAgents,
+    nfeIncluded: Boolean(plan.nfeIncluded),
+    nfeMonthlyNotes: plan.nfeMonthlyNotes ?? null,
+    nfeStorageMb: plan.nfeStorageMb ?? null,
     // null = todas as funcionalidades; senão, lista de módulos incluídos.
     features: planFeatureList(plan)
   };
