@@ -203,6 +203,27 @@ function PlanForm({ plan, catalog, onClose, onSaved }) {
                 Escolher módulos um a um
               </button>
             )}
+            <div className={`adm-feature ${form.nfeIncluded ? 'is-on' : ''}`} style={{ marginTop: 12 }}>
+              <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <input type="checkbox" checked={form.nfeIncluded} onChange={(e) => setForm({ ...form, nfeIncluded: e.target.checked })} />
+                <span>
+                  <strong>🧾 Emissor de Notas Fiscais (NF-e)</strong>
+                  <small style={{ display: 'block' }}>Marque para o cliente deste plano emitir NF-e sem contratar plano de NF-e à parte. Cada conta tem seus dados e certificado isolados; entra pelo mesmo login do sistema. Vale também para plano completo.</small>
+                </span>
+              </label>
+              {form.nfeIncluded && (
+                <div className="adm-form-grid" style={{ marginTop: 8 }}>
+                  <div>
+                    <label className="adm-label">Notas de produção por mês</label>
+                    <input type="number" min="0" placeholder="vazio = ilimitado" value={form.nfeMonthlyNotes} onChange={set('nfeMonthlyNotes')} />
+                  </div>
+                  <div>
+                    <label className="adm-label">Espaço para guardar as notas (MB)</label>
+                    <input type="number" min="50" placeholder="vazio = padrão (1000 MB)" value={form.nfeStorageMb} onChange={set('nfeStorageMb')} />
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
           <p className="adm-muted">Limites — deixe VAZIO para “sem limite”.</p>
           <div className="adm-form-grid">
@@ -234,21 +255,6 @@ function PlanForm({ plan, catalog, onClose, onSaved }) {
               <label className="adm-label">Agentes de IA de voz</label>
               <input type="number" min="0" placeholder="vazio = ilimitado" value={form.maxAiAgents} onChange={set('maxAiAgents')} />
             </div>
-            <div style={{ gridColumn: '1 / -1' }}>
-              <label><input type="checkbox" checked={form.nfeIncluded} onChange={(e) => setForm({ ...form, nfeIncluded: e.target.checked })} /> 🧾 Inclui o emissor de NF-e (sem precisar de plano de NF-e à parte)</label>
-            </div>
-            {form.nfeIncluded && (
-              <>
-                <div>
-                  <label className="adm-label">NF-e: notas de produção por mês</label>
-                  <input type="number" min="0" placeholder="vazio = ilimitado" value={form.nfeMonthlyNotes} onChange={set('nfeMonthlyNotes')} />
-                </div>
-                <div>
-                  <label className="adm-label">NF-e: espaço em MB</label>
-                  <input type="number" min="50" placeholder="vazio = espaço padrão" value={form.nfeStorageMb} onChange={set('nfeStorageMb')} />
-                </div>
-              </>
-            )}
             <div>
               <label className="adm-label">Ordem na vitrine</label>
               <input type="number" value={form.sortOrder} onChange={set('sortOrder')} />
